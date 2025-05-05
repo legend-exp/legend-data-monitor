@@ -141,7 +141,7 @@ class SlowControl:
             if "vmon" in self.parameter:
                 unit = "V"
             elif "imon" in self.parameter:
-                unit = "\u03BCA"
+                unit = "\u03bcA"
             else:
                 unit = None
 
