@@ -13,16 +13,36 @@ different output folders can be created. In general, the output folder is struct
 
 .. code-block::
 
-  <output_path>
-      └── <version>
-        └── generated
-          └── plt
-            └── <type>
-              └── <period>
-                └── <time_selection>
-                  ├── <experiment>-<period>-<time_selection>-<type>-<subsystem>.pdf
-                  ├── <experiment>-<period>-<time_selection>-<type>-<subsystem>.log
-                  └── <experiment>-<period>-<time_selection>-<type>.hdf
+    <output_path>/
+        └── <version>/
+            └── generated/
+                ├── plt/
+                │    └── hit/
+                │        └── <type>/
+                │            └── <period>/
+                │                ├── <time_selection>/
+                │                │   ├── <experiment>-<period>-<time_selection>-<type>-geds.hdf
+                │                │   └── mtg/
+                │                │       └── <parameter>/
+                │                │           ├── <experiment>-<period>-<time_selection>-<type>-<parameter>.{bak,dat,dir}
+                │                │           └── <pdf>/
+                │                │               ├── st1/
+                │                │               ├── st2/
+                │                │               ├── st3/
+                │                │               └── ...
+                │                └── mtg/
+                │                    ├── <experiment>-<period>-<type>-monitoring.{bak,dat,dir}
+                │                    └── <pdf>/
+                │                        ├── st1/
+                │                        ├── st2/
+                │                        ├── st3/
+                │                        └── ...
+                └── tmp/
+                    └── mtg/
+                        └── <period>/
+                            └── <time_selection>/
+                                ├── <experiment>-<period>-<time_selection>-<type>.pdf
+                                └── <experiment>-<period>-<time_selection>-<type>.log
 
 
 Output hdf files for ``geds`` have the following dictionary structure, where ``<param>`` is the name of one of the inspected parameters, ``<flag>`` is the event type, e.g. *IsPulser* or *IsBsln*:

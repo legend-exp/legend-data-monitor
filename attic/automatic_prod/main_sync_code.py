@@ -1,11 +1,11 @@
 import argparse
+import json
 import logging
 import os
 import re
+import shlex
 import subprocess
 from pathlib import Path
-
-import yaml
 
 # -------------------------------------------------------------------------
 
@@ -32,23 +32,15 @@ def main():
     )
     parser.add_argument(
         "--cluster",
-        help="Name of the cluster where you are operating; pick among 'lngs' or 'nersc'.",
-        default="lngs",
+        help="Name of the cluster where you are working; pick among 'lngs' or 'nersc'.",
     )
     parser.add_argument(
         "--ref_version",
         help="Version of processed data to inspect (eg. tmp-auto or ref-v2.1.0).",
-        default="ref-v1.0.0",
-    )
-    parser.add_argument(
-        "--rsync_path",
-        help="Path where to store results of the automatic running (eg loaded keys, input config files, etc).",
-        default="output",
     )
     parser.add_argument(
         "--output_folder",
         help="Path where to store the automatic results (plots and summary files).",
-        default="tmp",
     )
     parser.add_argument(
         "--partition",
@@ -60,6 +52,16 @@ def main():
         help="Password to access the Slow Control database (NOT available on NERSC).",
     )
     parser.add_argument(
+        "--sc",
+        default=False,
+        help="Boolean for retrieving Slow Control data (default: False).",
+    )
+    parser.add_argument(
+        "--port",
+        default=8282,
+        help="Port necessary to retrieve the Slow Control database (default: 8282).",
+    )
+    parser.add_argument(
         "--pswd_email",
         default=None,
         help="Password to access the legend.data.monitoring@gmail.com account for sending alert messages.",
@@ -68,7 +70,7 @@ def main():
         "--chunk_size",
         default=20,
         type=int,
-        help="Maximum integer number of files to read at each loop in order to avoid the kernel to be killed.",
+        help="Maximum integer number of files to read at each loop in order to avoid the process to be killed.",
     )
     parser.add_argument(
         "--p",
@@ -81,47 +83,46 @@ def main():
         help="Run to inspect.",
     )
     parser.add_argument(
-        "--sc",
-        default=False,
-        help="Boolean for retrieving Slow Control data (default: False).",
-    )
-    parser.add_argument(
         "--escale",
         default=2039,
         help="Energy sccale at which evaluating the gain differences; default: 2039 keV (76Ge Qbb).",
     )
     parser.add_argument(
         "--pdf",
-        default="False",
+        default=False,
         help="True if you want to save pdf files too; default: False",
     )
 
     args = parser.parse_args()
     cluster = args.cluster
     ref_version = args.ref_version
-    rsync_path = args.rsync_path
     output_folder = args.output_folder
     partition = False if args.partition is False else True
     pswd = args.pswd
+    get_sc = False if args.sc is False else True
+    port = args.port
     pswd_email = args.pswd_email
     chunk_size = args.chunk_size
     input_period = args.p
     input_run = args.r
-    get_sc = False if args.sc is False else True
-    save_pdf = args.pdf
+    save_pdf = False if args.pdf is False else True
     escale_val = args.escale
 
-    if not os.path.exists(rsync_path):
-        os.makedirs(rsync_path)
-
-    # paths
     auto_dir = (
         "/global/cfs/cdirs/m2676/data/lngs/l200/public/prodenv/prod-blind/"
         if cluster == "nersc"
         else "/data2/public/prodenv/prod-blind/"
     )
     auto_dir_path = os.path.join(auto_dir, ref_version)
-    search_directory = os.path.join(auto_dir_path, "generated/tier/dsp/phy")
+    found = False
+    for tier in ["hit", "pht", "dsp", "psp", "evt", "pet"]:
+        search_directory = os.path.join(auto_dir_path, "generated/tier", tier, "phy")
+        if os.path.isdir(search_directory):
+            found = True
+            break
+    if found is False:
+        logger.debug(f"No valid folder {search_directory} found. Exiting.")
+        exit()
 
     def search_latest_folder(my_dir):
         directories = [
@@ -135,37 +136,18 @@ def main():
         search_latest_folder(search_directory) if input_period is None else input_period
     )
     # Run to monitor
-    search_directory = os.path.join(search_directory, period)
     run = search_latest_folder(search_directory) if input_run is None else input_run
-
-    found = False
-    for tier in ["hit", "pht", "dsp", "psp", "evt", "pet", "skm"]:
-        source_dir = os.path.join(
-            auto_dir_path, "generated/tier", tier, "phy", period, run
-        )
-        if os.path.isdir(source_dir):
-            found = True
-            break
-
-    if found is False:
-        logger.debug(f"No valid folder {source_dir} found. Exiting.")
-        exit()
+    source_dir = os.path.join(search_directory, period, run)
 
     # commands to run the container
-    cmd = (
-        "shifter --image=legendexp/legend-base:latest"
-        if cluster == "nersc"
-        else "apptainer run"
-    )
     if cluster == "nersc":
-        cmd = "shifter --image=legendexp/legend-base:latest"
+        cmd = "shifter --image=legendexp/legend-base:latest --env PATH=$HOME/.local/bin:$PATH"
     else:
-        cmd = "apptainer run --cleanenv /data2/public/prodenv/containers/legendexp_legend-base_latest.sif"
+        cmd = "apptainer run --env PATH=$HOME/.local/bin:$PATH --cleanenv /data2/public/prodenv/containers/legendexp_legend-base_latest.sif"
 
     # ===========================================================================================
     # BEGINNING OF THE ANALYSIS
     # ===========================================================================================
-    # Configs definition
 
     # define slow control dict
     scdb = {
@@ -192,8 +174,6 @@ def main():
             ]
         },
     }
-    with open(os.path.join(rsync_path, "auto_slow_control.yaml"), "w") as f:
-        yaml.dump(scdb, f, sort_keys=False)
 
     # define geds dict
     my_config = {
@@ -260,6 +240,16 @@ def main():
                     "plot_structure": "per string",
                     "resampled": "only",
                     "plot_style": "vs time",
+                    "variation": True,
+                    "time_window": "10T",
+                },
+                "tp_0_est gain (dsp/tp_0_est) in pulser events": {
+                    "parameters": "tp_0_est",
+                    "event_type": "pulser",
+                    "plot_structure": "per string",
+                    "resampled": "only",
+                    "plot_style": "vs time",
+                    "AUX_ratio": True,
                     "variation": True,
                     "time_window": "10T",
                 },
@@ -348,15 +338,18 @@ def main():
             }
         },
     }
-    with open(os.path.join(rsync_path, "auto_config.yaml"), "w") as f:
-        yaml.dump(my_config, f, sort_keys=False)
 
     # ===========================================================================================
     # Get not-analyzed files
     # ===========================================================================================
 
     # File to store the timestamp of the last check
-    timestamp_file = os.path.join(rsync_path, f"last_checked_{period}_{run}.txt")
+
+    rsync_path = os.path.join(
+        output_folder, ref_version, "generated", "tmp", "mtg", period, run
+    )
+    os.makedirs(rsync_path, exist_ok=True)
+    timestamp_file = os.path.join(rsync_path, "last_checked_timestamp.txt")
 
     # Read the last checked timestamp
     last_checked = None
@@ -365,13 +358,17 @@ def main():
             last_checked = file.read().strip()
 
     # Get the current timestamp
+    if not os.path.isdir(source_dir):
+        logger.debug(f"Error: folder '{source_dir}' does not exist.")
+        exit()
     current_files = os.listdir(source_dir)
     new_files = []
 
     # Compare the timestamps of files and find new files
     for file in current_files:
         file_path = os.path.join(source_dir, file)
-        if last_checked is None or os.path.getmtime(file_path) > float(last_checked):
+        current_timestamp = os.path.getmtime(file_path)
+        if last_checked is None or current_timestamp > float(last_checked):
             new_files.append(file)
 
     # If new files are found, check if they are ok or not
@@ -386,26 +383,6 @@ def main():
                 correct_files.append(new_file)
         new_files = correct_files
     new_files = sorted(new_files)
-
-    # remove keys stored in ignore-keys.yaml (eg bad/heavy keys)
-    with open(
-        "../../src/legend_data_monitor/settings/ignore-keys.yaml"
-    ) as f:  # TODO: more general
-        ignore_keys = yaml.load(f, Loader=yaml.CLoader)
-
-    def remove_key(timestamp, ignore_keys, period):
-        for idx in range(0, len(ignore_keys[period]["start_keys"])):
-            start = ignore_keys[period]["start_keys"][idx]
-            end = ignore_keys[period]["stop_keys"][idx]
-            if start <= timestamp < end:
-                return True
-        return False
-
-    new_files = [
-        fname
-        for fname in new_files
-        if not remove_key(fname.split("-")[4], ignore_keys, period)
-    ]
 
     # If new files are found, run the shell command
     if new_files:
@@ -423,13 +400,15 @@ def main():
 
         # run the plot production
         logger.debug("Running the generation of plots...")
-        config_file = os.path.join(rsync_path, "auto_config.yaml")
         keys_file = os.path.join(rsync_path, "new_keys.filekeylist")
 
         # read all lines from the original file
         with open(keys_file) as f:
             lines = f.readlines()
         num_lines = len(lines)
+
+        safe_json_string = shlex.quote(json.dumps(my_config))
+
         if num_lines > chunk_size:
             # split lines into chunks and write to multiple files
             for idx, i in enumerate(range(0, num_lines, chunk_size), start=1):
@@ -441,42 +420,46 @@ def main():
                 with open(output_file, "w") as out_f:
                     out_f.writelines(chunk)
 
-                # TODO: do I have to change from overwrite to append???
                 total_parts = (num_lines + chunk_size - 1) // chunk_size
                 logger.debug(
                     f"[{idx}/{total_parts}] Created file: {output_file} with {len(chunk)} lines."
                 )
-                bash_command = f"{cmd} ~/.local/bin/legend-data-monitor user_rsync_prod --config {config_file} --keys {output_file}"
-                logger.debug(f"...running command \033[95m{bash_command}\033[0m")
+                bash_command = (
+                    f"{cmd} legend-data-monitor user_rsync_prod "
+                    f"--config {safe_json_string} --keys {output_file}"
+                )
+                logger.debug("...running command for generating hdf monitoring files")
                 subprocess.run(bash_command, shell=True)
         else:
-            logger.debug(f"File has {num_lines} lines. No need to split.")
-            bash_command = f"{cmd} ~/.local/bin/legend-data-monitor user_rsync_prod --config {config_file} --keys {keys_file}"
-            logger.debug(f"...running command \033[95m{bash_command}\033[0m")
+            logger.debug(f"... file has {num_lines} lines. No need to split.")
+            bash_command = (
+                f"{cmd} legend-data-monitor user_rsync_prod "
+                f"--config {safe_json_string} --keys {keys_file}"
+            )
+            logger.debug("...running command for generating hdf monitoring files")
             subprocess.run(bash_command, shell=True)
         logger.debug("...done!")
 
         # compute resampling + info yaml
         logger.debug("Resampling outputs...")
         files_folder = os.path.join(output_folder, ref_version)
-        bash_command = (
-            f'{cmd} python -c "from monitoring import build_new_files; '
-            f"build_new_files('{files_folder}', '{period}', '{run}')\""
-        )
-        logger.debug(f"...running command \033[95m{bash_command}\033[0m")
+        bash_command = f"{cmd} python monitoring.py summary_files --path {files_folder} --period {period} --run {run}"
+        logger.debug(f"...running command {bash_command}")
         subprocess.run(bash_command, shell=True)
         logger.debug("...done!")
 
         # ===========================================================================================
-        # Analyze Slow Control data (for the full run - overwrite of previous info)
+        # Analyze Slow Control data
         # ===========================================================================================
         if cluster == "lngs" and get_sc is True:
             try:
                 logger.debug("Retrieving Slow Control data...")
-                scdb_config_file = os.path.join(rsync_path, "auto_slow_control.yaml")
-
-                bash_command = f"{cmd} ~/.local/bin/legend-data-monitor user_scdb --config {scdb_config_file} --port 8282 --pswd {pswd}"
-                logger.debug(f"...running command \033[92m{bash_command}\033[0m")
+                safe_json_string = shlex.quote(json.dumps(scdb))
+                bash_command = (
+                    f"{cmd} legend-data-monitor user_scdb "
+                    f"--config {safe_json_string} --port {port} --pswd {pswd}"
+                )
+                logger.debug(f"...running command {bash_command}")
                 subprocess.run(bash_command, shell=True)
                 logger.debug("...SC done!")
             except subprocess.CalledProcessError as e:
@@ -487,36 +470,48 @@ def main():
                 )
 
         # ===========================================================================================
-        # Generate Gain Monitoring Summary Plots
+        # Generate Monitoring Summary Plots
         # ===========================================================================================
-        mtg_folder = os.path.join(output_folder, ref_version, "generated/mtg/phy")
+        mtg_folder = os.path.join(output_folder, ref_version, "generated/plt/hit/phy")
         os.makedirs(mtg_folder, exist_ok=True)
         logger.info(f"Folder {mtg_folder} ensured")
 
         # define dataset depending on the (latest) monitored period/run
-        avail_runs = sorted(
-            os.listdir(os.path.join(mtg_folder.replace("mtg", "plt"), period))
-        )
+
+        avail_runs = sorted(os.listdir(os.path.join(mtg_folder, period)))
+        avail_runs = [
+            ar for ar in avail_runs if "mtg" not in ar and ar != ".ipynb_checkpoints"
+        ]
         dataset = {period: avail_runs}
         if dataset[period] != []:
             logger.debug("Generating monitoring plots...")
             # get first timestamp of first run of the given period
             start_key = (
-                sorted(os.listdir(os.path.join(search_directory, avail_runs[0])))[0]
+                sorted(
+                    os.listdir(os.path.join(search_directory, period, avail_runs[0]))
+                )[0]
             ).split("-")[4]
 
-            # get pulser monitoring plot for a full period
-            phy_mtg_data = mtg_folder.replace("mtg", "plt")
-
-            # Note: quad_res is set to False by default in these plots
-            mtg_bash_command = f"{cmd} python monitoring.py --public_data {auto_dir_path} --hdf_files {phy_mtg_data} --output {mtg_folder} --start {start_key} --p {period} --runs {avail_runs} --cluster {cluster} --pswd_email {pswd_email} --escale {escale_val}"
+            mtg_bash_command = f"{cmd} python monitoring.py plot --public_data {auto_dir_path} --hdf_files {mtg_folder} --output {mtg_folder} --start {start_key} --p {period} --avail_runs {avail_runs} --pswd_email {pswd_email} --escale {escale_val} --current_run {run} --last_checked {last_checked}"
             if partition is True:
-                mtg_bash_command += "--partition True"
+                mtg_bash_command += " --partition True"
             if save_pdf is True:
-                mtg_bash_command += "--pdf True"
+                mtg_bash_command += " --pdf True"
 
+            logger.debug(f"...running command {mtg_bash_command}")
             subprocess.run(mtg_bash_command, shell=True)
             logger.info("...monitoring plots generated!")
+
+        # ===========================================================================================
+        # Calibration checks
+        # ===========================================================================================
+        cal_bash_command = f"{cmd} python monitoring.py calib_psd --public_data {auto_dir_path} --output {mtg_folder} --p {period} --current_run {run}"
+        if save_pdf is True:
+            cal_bash_command += " --pdf True"
+        logger.debug(f"...running command {cal_bash_command}")
+        subprocess.run(cal_bash_command, shell=True)
+        logger.info("...calibration data inspected!")
+
     else:
         logger.debug("No new files were detected.")
 

@@ -11,11 +11,21 @@ In particular, this tool helps:
 
 Getting started
 ---------------
-*legend-data-monitor* can be installed with `pip <https://pip.pypa.io/en/stable/getting-started>`_:
+*legend-data-monitor* is published on the `Python Package Index <https://pypi.org/project/legend-data-monitor/>`_ and can be installed on local systems with `pip <https://pip.pypa.io/en/stable/getting-started>`_:
 
-.. code-block::
 
-   $ pip install legend-data-monitor@git+https://github.com/legend-exp/legend-data-monitor@main
+.. tab:: Stable release
+
+    .. code-block:: console
+
+        $ pip install legend-data-monitor
+
+.. tab:: Unstable (``main`` branch)
+
+    .. code-block:: console
+
+        $ pip install legend-data-monitor@git+https://github.com/legend-exp/legend-data-monitor@main
+
 
 .. attention::
 
@@ -25,7 +35,16 @@ Table of Contents
 -----------------
 
 .. toctree::
-   :maxdepth: 2
+   :maxdepth: 1
 
    manuals/index
    Package API reference <api/modules>
+
+
+.. toctree::
+   :maxdepth: 1
+   :caption: Development
+
+   Source Code <https://github.com/legend-exp/legend-data-monitor>
+   License <https://github.com/legend-exp/legend-data-monitor/blob/main/LICENSE>
+   Changelog <https://github.com/legend-exp/legend-data-monitor/releases>

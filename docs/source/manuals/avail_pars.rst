@@ -4,22 +4,48 @@ Available parameters
 
 
 .. list-table::
-  :widths: 30 25 25 25
+  :widths: 30 25 25 25 25 25 25
   :header-rows: 1
 
-  * - Available parameters
-    - HPGe
-    - SiPM
-    - ch000
+  * - Parameters
+    - HPGe (``geds``)
+    - SiPM (``spms``)
+    - PULS01 (``puls``)
+    - PULS01ANA (``puls01ana``)
+    - BSLN01 (``FCbsln``)
+    - MUON01 (``muon``)
   * - dsp variables
     - all
     - x
+    - all
+    - all
+    - all
     - all
   * - hit variables
     - all
     - all
     - x
+    - x
+    - x
+    - x
+
+
+
+.. list-table::
+  :widths: 30 25 25 25 25 25 25
+  :header-rows: 1
+
+  * - Special parameters
+    - HPGe (``geds``)
+    - SiPM (``spms``)
+    - PULS01 (``puls``)
+    - PULS01ANA (``puls01ana``)
+    - BSLN01 (``FCbsln``)
+    - MUON01 (``muon``)
   * - ``event_rate``
+    - ✓
+    - ✓
+    - ✓
     - ✓
     - ✓
     - ✓
@@ -27,13 +53,22 @@ Available parameters
     - ✓
     - x
     - x
+    - x
+    - x
+    - x
   * - ``FWHM``
     - ✓
+    - x
+    - x
+    - x
     - x
     - x
   * - ``wf_max_rel``
     - ✓
     - x
+    - ✓
+    - ✓
+    - ✓
     - ✓
 
 .. warning::

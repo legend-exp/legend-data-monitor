@@ -1,6 +1,14 @@
 Potpourri
 =========
 
+Flowchart of the analysis
+-------------------------
+
+.. image:: images/flow.png
+   :alt: Flowchart of modules under legend-data-monitor/src (left) and attic/automatic_prod (right). On the right, the logic behind automatic production of tables and plots is briefly outlined. For more details, check the README.md under attic/automatic_prod
+   :width: 600px
+
+
 How to build runinfo.yaml
 -------------------------
 

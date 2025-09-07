@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 
 import yaml
@@ -63,7 +64,7 @@ def add_user_scdb(subparsers):
     )
     parser_auto_prod.add_argument(
         "--config",
-        help="""Path to config file (e.g. \"some_path/config_L200_r001_phy.yaml\").""",
+        help="""Path to config file (e.g. \"some_path/config_L200_r001_phy.yaml\") or dictionary.""",
     )
     parser_auto_prod.add_argument(
         "--port",
@@ -138,7 +139,7 @@ def add_user_rsync_parser(subparsers):
     )
     parser_auto_prod.add_argument(
         "--config",
-        help="""Path to config file (e.g. \"some_path/config_L200_r001_phy.yaml\").""",
+        help="""Path to the configuration info or dictionary with config info.""",
     )
     parser_auto_prod.add_argument(
         "--keys",
@@ -183,22 +184,13 @@ def auto_prod_cli(args):
     plot_config = args.plot_config
 
     # get the production config file
-    prod_config_file = (
-        f"{prod_path}config.yaml"
-        if prod_path.endswith("/")
-        else f"{prod_path}/config.yaml"
-    )
+    prod_config_file = os.path.join(prod_path, "config.yaml")
     with open(prod_config_file) as f:
         prod_config = yaml.load(f, Loader=yaml.CLoader)
 
     # get the filelist file path
     folder_filelists = prod_config["setups"]["l200"]["paths"]["tmp_filelists"][3:]
-    file_keys = (
-        f"{prod_path}{folder_filelists}"
-        if prod_path.endswith("/")
-        else f"{prod_path}/{folder_filelists}"
-    )
-    file_keys += args.filekeylist if file_keys.endswith("/") else f"/{args.filekeylist}"
+    file_keys = os.path.join(prod_path, folder_filelists, args.filekeylist)
 
     legend_data_monitor.core.auto_control_plots(
         plot_config, file_keys, prod_path, prod_config

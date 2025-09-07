@@ -8,4 +8,5 @@ User Manual
    get_plots
    get_sc_plots
    inspect_plots
+   settings_folder
    potpourri

@@ -38,7 +38,9 @@ def make_subsystem_plots(
     plt_path: str,
     saving=None,
 ):
-    pdf = PdfPages(plt_path + "-" + subsystem.type + ".pdf")
+
+    plt_file = utils.get_output_plot_path(plt_path, "pdf")
+    pdf = PdfPages(plt_file)
     is_pdf_saved = False
 
     for plot_title in plots:
@@ -799,8 +801,8 @@ def plot_array(data_analysis: DataFrame, plot_info: dict, pdf: PdfPages):
     # set the grid behind the points
     axes.set_axisbelow(True)
     # beautification
-    axes.ylabel = None
-    axes.xlabel = None
+    axes.set_ylabel("")
+    axes.set_xlabel("")
     # add x labels
     axes.set_xticks(channels)
     axes.set_xticklabels(labels, fontsize=5)

@@ -1,7 +1,6 @@
 import glob
 import os
 import re
-import shelve
 import sys
 
 import numpy as np
@@ -268,7 +267,7 @@ class AnalysisData:
             if files:
                 filepath = files[0]
                 with open(filepath) as file:
-                    evt_config = yaml.safe_load(file)
+                    evt_config = yaml.load(file, Loader=yaml.CLoader)
                 break
 
         if evt_config is None:
@@ -291,7 +290,7 @@ class AnalysisData:
                 )
                 filepath = glob.glob(filepath_pattern)[0]
                 with open(filepath) as file:
-                    evt_config = yaml.safe_load(file)
+                    evt_config = yaml.load(file, Loader=yaml.CLoader)
                 expression = evt_config["operations"]["geds___quality___is_bb_like"][
                     "expression"
                 ]
@@ -760,39 +759,6 @@ def get_saved_df_hdf(
     return channel_mean
 
 
-def get_saved_df(
-    self, subsys: str, param: str, old_dict: dict, evt_type: str
-) -> pd.DataFrame:
-    """Get the already saved dataframe from the already saved output shelve file, for a given parameter ```param```. In particular, it evaluates again the mean over the new 10% of data in the new larger time window."""
-    # get old dataframe (we are interested only in the column with mean values)
-    old_df = old_dict["monitoring"][evt_type][param]["df_" + subsys]
-
-    # we need to re-calculate the mean value over the new bigger time window!
-    # we retrieve absolute values of already saved df, we use
-    old_absolute_values = old_df.copy().filter(items=["channel", "datetime", param])
-    new_absolute_values = self.data.copy().filter(items=["channel", "datetime", param])
-
-    concatenated_df = pd.concat(
-        [old_absolute_values, new_absolute_values], ignore_index=True
-    )
-    # get the dataframe for timestamps below 10% of data present in the selected time window
-    concatenated_df_time_cut = cut_dataframe(concatenated_df)
-    # remove 'datetime' column (it was necessary just to evaluate again the first 10% of data that are necessary to evaluate the mean on the new dataset)
-    concatenated_df_time_cut = concatenated_df_time_cut.drop(columns=["datetime"])
-
-    # create a column with the mean of the cut dataframe (cut in the time window of interest)
-    channel_mean = (
-        concatenated_df_time_cut.groupby("channel")[param].mean().reset_index()
-    )
-
-    # drop potential duplicate rows
-    channel_mean = channel_mean.drop_duplicates(subset=["channel"])
-    # set channel to index because that's how it comes out in previous cases from df.mean()
-    channel_mean = channel_mean.set_index("channel")
-
-    return channel_mean
-
-
 def get_aux_df(
     df: pd.DataFrame, parameter: list, plot_settings: dict, aux_ch: str
 ) -> pd.DataFrame:
@@ -937,13 +903,9 @@ def load_subsystem_data(
     plt_path: str,
     saving=None,
 ):
-    out_dict = {}
-    results_to_save = False
-
     for plot_title in plots:
         if "plot_structure" in plots[plot_title].keys():
             continue
-        results_to_save = True
 
         banner = "\33[95m" + "~" * 50 + "\33[0m"
         utils.logger.info(banner)
@@ -1031,8 +993,6 @@ def load_subsystem_data(
             # needed for grey lines for K lines, in case we are looking at energy itself (not event rate for example)
             plot_info["event_type"] = plot_settings["event_type"]
 
-        # --- save shelf
-        par_dict_content = save_data.save_df_and_info(data_analysis.data, plot_info)
         # --- save hdf
         save_data.save_hdf(
             saving,
@@ -1044,15 +1004,3 @@ def load_subsystem_data(
             pd.DataFrame(),
             plot_info,
         )
-
-        # building a dictionary with dataframe/plot_info to be later stored in a shelve object
-        if saving is not None:
-            out_dict = save_data.build_out_dict(
-                plot_settings, par_dict_content, out_dict
-            )
-
-    # save in shelve object, overwriting the already existing file with new content (either completely new or new bunches)
-    if saving is not None and results_to_save:
-        out_file = shelve.open(plt_path + f"-{subsystem.type}")
-        out_file["monitoring"] = out_dict
-        out_file.close()

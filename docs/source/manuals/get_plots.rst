@@ -48,27 +48,27 @@ Example config
 ~~~~~~~~~~~~~~
 .. code-block:: yaml
 
-output: "<output_path>"  # output folder
-dataset:
-  experiment: "L200"
-  period: "p09"
-  version: "tmp-auto"
-  path: "/data2/public/prodenv/prod-blind/"
-  type: "phy"  # data type (either cal, phy, or ["cal", "phy"])
-  start: "2023-02-07 02:00:00"  # time cut (here based on start+end)
-  end: "2023-02-07 03:30:00"
-saving: "overwrite"
-subsystems:
-  geds:  # type of subsystem to plot (geds, spms, pulser)
-    "Baselines in pulser events":
-      parameters: "baseline"
-      event_type: "pulser"
-      plot_structure: "per channel"
-      plot_style: "vs time"
-      variation: true
-      resampled: "also"
-      time_window: "1H"
-      status: true
+    output: "<output_path>"  # output folder
+    dataset:
+      experiment: "L200"
+      period: "p09"
+      version: "tmp-auto"
+      path: "/data2/public/prodenv/prod-blind/"
+      type: "phy"  # data type (either cal, phy, or ["cal", "phy"])
+      start: "2023-02-07 02:00:00"  # time cut (here based on start+end)
+      end: "2023-02-07 03:30:00"
+    saving: "overwrite"
+    subsystems:
+      geds:  # type of subsystem to plot (geds, spms, pulser)
+        "Baselines in pulser events":
+          parameters: "baseline"
+          event_type: "pulser"
+          plot_structure: "per channel"
+          plot_style: "vs time"
+          variation: true
+          resampled: "also"
+          time_window: "1H"
+          status: true
 
 
 The argument ``output`` is the path where plots and inspected data will be saved.

@@ -1,10 +1,67 @@
 [build-system]
 requires = [
-    "setuptools>=43.0.0",
-    "setuptools_scm[toml]>=3.4"
+    "setuptools>=61.2",
+    "setuptools_scm[toml]>=7",
+]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "legend-data-monitor"
+description = "Python package for LEGEND data monitoring"
+readme = "README.md"
+authors = [
+    {name = "Sofia Calgaro", email = "sofia.calgaro@physik.uzh.ch"},
+    {name = "Michele Morella", email = "michele.morella@gssi.it"}
+]
+maintainers = [
+    {name = "The LEGEND Collaboration"}
+]
+license = {text = "MIT"}
+keywords = ["LEGEND", "monitoring", "physics", "data-analysis"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "Operating System :: MacOS",
+    "Operating System :: POSIX",
+    "Operating System :: Unix",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering",
+    "Topic :: Scientific/Engineering :: Information Analysis",
+    "Topic :: Scientific/Engineering :: Mathematics",
+    "Topic :: Scientific/Engineering :: Physics",
+    "Topic :: Software Development"
+]
+requires-python = ">=3.9"
+
+dependencies = [
+    "pygama",
+    "pylegendmeta >=0.9",
+    "seaborn"
+]
+dynamic = ["version"]
+
+
+[project.optional-dependencies]
+all = ["legend-data-monitor[docs,test]"]
+docs = ["furo", "myst-parser", "sphinx", "sphinx-copybutton"]
+test = ["pre-commit", "pytest>=6.0", "pytest-cov", "freezegun==1.5.5"]
+
+[tool.setuptools]
+packages = {find = {where = ["src"]}}
+package-dir = {"" = "src"}
+zip-safe = false
+
+[tool.setuptools.package-data]
+legend_data_monitor = [
+    "settings/*.json",
+    "settings/*.yaml",
+    "settings/*.yml"
 ]
 
-build-backend = "setuptools.build_meta"
+[project.scripts]
+legend-data-monitor = "legend_data_monitor.run:main"
 
 [tool.setuptools_scm]
 write_to = "src/legend_data_monitor/_version.py"
@@ -15,8 +72,14 @@ addopts = ["-ra", "--showlocals", "--strict-markers", "--strict-config"]
 xfail_strict = true
 filterwarnings = ["error", "ignore::DeprecationWarning"]
 log_cli_level = "info"
-testpaths = "tests"
+testpaths = ["tests"]
 
 [tool.isort]
 profile = "black"
 multi_line_output = 3
+
+[tool.flake8]
+extend-ignore = "E203, E501, D10, N806"
+
+[tool.codespell]
+ignore-words-list = "crate, nd, unparseable, compiletime, puls, livetime, whis"

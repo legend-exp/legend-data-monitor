@@ -74,7 +74,7 @@ def build_out_dict(
     if saving == "overwrite":
         out_dict = build_dict(plot_settings, plot_info, par_dict_content, out_dict)
 
-    # we retrieve the already existing shelve object, and we append new things to it; the parameter here is fixed
+    # we retrieve the already existing file, and we append new things to it; the parameter here is fixed
     if saving == "append":
         # the file does not exist, so we create it
         if not os.path.exists(plt_path + "-" + plot_info["subsystem"] + ".dat"):
