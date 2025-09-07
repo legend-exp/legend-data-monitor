@@ -2,10 +2,13 @@ import glob
 import os
 import pickle
 import shelve
+from pathlib import Path
 
+import lh5
 import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
 import yaml
 from legendmeta import LegendMetadata
 
@@ -393,3 +396,292 @@ def check_psd(
 
     with open(usability_map_file, "w") as f:
         yaml.dump(psd_data, f, sort_keys=False)
+
+
+def gain_variation(period, run, chmap, timestamps, values, plot):
+
+    ged = chmap["name"]
+    string = chmap["location"]["string"]
+    position = chmap["location"]["position"]
+
+    bin_size = 600
+    bins = np.arange(0, timestamps.max() + bin_size, bin_size)
+
+    bin_idx = np.digitize(timestamps, bins) - 1  # shift to 0-based
+
+    df = pd.DataFrame({"time": timestamps, "value": values, "bin": bin_idx})
+
+    stats = df.groupby("bin")["value"].agg(["mean", "std", "count"]).reset_index()
+    stats["time"] = bins[stats["bin"]] + bin_size / 2
+
+    min_counts = 20
+    stats.loc[stats["count"] < min_counts, ["mean", "std"]] = np.nan
+
+    # Choose baseline: first mean if valid, otherwise last valid mean
+    if pd.notna(stats["mean"].iloc[0]):
+        baseline = stats["mean"].iloc[0]
+    else:
+        baseline = stats["mean"].dropna().iloc[-1]
+
+    norm_values = (values - baseline) / baseline * 2039
+
+    x_bins = bins
+    y_bins = np.linspace(-10, 10, 40)
+    means = (stats["mean"] - baseline) / baseline * 2039
+
+    if plot:
+
+        plt.figure(figsize=(10, 5))
+        plt.hist2d(timestamps, norm_values, bins=(x_bins, y_bins), cmap="Blues")
+        plt.colorbar(label="Counts")
+
+        plt.plot(stats["time"], means, "x-", color="red", label="10min mean")
+
+        plt.fill_between(
+            stats["time"],
+            -stats["std"] / baseline * 2039,
+            stats["std"] / baseline * 2039,
+            color="red",
+            alpha=0.2,
+            label="±1 std",
+        )
+
+        par_file = "/data2/public/prodenv/prod-blind/tmp-auto/generated/par/hit/cal/p16/r000/l200-p16-r000-cal-20250827T125510Z-par_hit.yaml"
+        par_file = yaml.safe_load(open(par_file))
+        fwhm = par_file[ged]["results"]["ecal"]["cuspEmax_ctc_cal"]["eres_linear"][
+            "Qbb_fwhm_in_kev"
+        ]
+
+        if fwhm < 5:
+            plt.ylim(-5, 5)
+
+        plt.axhline(0, ls="--", color="black")
+        plt.axhline(-fwhm / 2, ls="-", color="blue")
+        plt.axhline(fwhm / 2, ls="-", color="blue", label="±FWHM/2")
+        plt.text(0, fwhm / 2 + 0.5, f"+FWHM/2 = {fwhm/2:.2f} keV", color="k")
+
+        plt.legend(loc="lower left")
+        plt.xlabel("time [s]")
+        plt.ylabel("FEP gain variation [keV]")
+        plt.title(f"{period} {run} string {string} position {position} {ged}")
+        plt.tight_layout()
+
+        plt.savefig(
+            f"plots/{period}_{run}_str{string}_pos{position}_{ged}_gain_variation.pdf"
+        )
+
+    return means
+
+
+def plot_gain_variation_summary(period, run, pars, results):
+
+    plot_data = []
+    for ged, item in results.items():
+
+        fwhm = pars[ged]["results"]["ecal"]["cuspEmax_ctc_cal"]["eres_linear"][
+            "Qbb_fwhm_in_kev"
+        ]
+
+        plot_data.append(
+            {
+                "ged": f"{ged}",
+                "string": item["location"]["string"],
+                "pos": item["location"]["position"],
+                "mean": item.mean(),
+                "std": item.std(),
+                "min": item.min(),
+                "max": item.max(),
+                "fwhm": fwhm,
+            }
+        )
+
+    df_plot = pd.DataFrame(plot_data)
+
+    # Sort by string then position
+    df = df_plot.sort_values(["string", "pos"]).reset_index(drop=True)
+
+    # Assuming df is already built and sorted
+    fig, ax = plt.subplots(figsize=(12, 6))
+
+    x = np.arange(len(df))
+
+    # Plot bars for std around the mean
+    ax.bar(
+        x,
+        2 * df["std"],  # total height = 2σ
+        bottom=df["mean"] - df["std"],  # center bar on mean
+        width=0.6,
+        color="skyblue",
+        alpha=0.7,
+        label="±1σ",
+    )
+
+    ax.bar(
+        x,
+        df["fwhm"],
+        bottom=-df["fwhm"] / 2,
+        width=0.4,
+        color="orange",
+        alpha=0.2,
+        label="FWHM",
+    )
+
+    # Overlay mean as a point
+    ax.scatter(x, df["mean"], color="black", zorder=3, label="Mean")
+
+    # Overlay min/max as error bars
+    ax.errorbar(
+        x,
+        df["mean"],
+        yerr=[df["mean"] - df["min"], df["max"] - df["mean"]],
+        fmt="none",
+        ecolor="red",
+        capsize=4,
+        label="Min/Max",
+    )
+
+    # X-axis formatting
+    ax.set_xticks(x)
+    ax.set_xticklabels(df["ged"], rotation=90)
+    ax.axvline(-0.5, color="gray", ls="--", alpha=0.5)
+
+    unique_strings = df["string"].unique()
+    for s in unique_strings:
+        idx = df.index[df["string"] == s]
+        left, right = idx.min(), idx.max()
+        ax.axvline(right + 0.5, color="gray", ls="--", alpha=0.5)
+        ax.text(left, -3.5, f"String {s}", rotation=90)
+
+    ax.set_ylabel("FEP gain variation [keV]")
+    ax.set_title(f"{period} {run}")
+    ax.legend(loc="upper right")
+
+    ax.axhline(0, ls="--", color="black")
+
+    plt.ylim(-5, 5)
+
+    plt.tight_layout()
+    plt.savefig("plots/gain_variation_summary.pdf")
+
+
+def load_calib_results(period, run, prod_ref_dir):
+    directory = Path(prod_ref_dir) / "generated" / "par" / "hit" / "cal" / period / run
+    file = list(directory.glob("*par_hit.yaml"))[0]
+    return yaml.safe_load(open(file))
+
+
+def check_calibration(period, run, plot):
+    tmp_auto_dir = "/data2/public/prodenv/prod-blind/tmp-auto/"
+    hit_files = sorted(
+        glob.glob(f"{tmp_auto_dir}generated/tier/hit/cal/{period}/{run}/*")
+    )
+    timestamp = hit_files[0].split("/")[-1].split("-")[-2]
+
+    meta = LegendMetadata(path=f"{tmp_auto_dir}inputs/")
+    chmap = meta.channelmap(timestamp)
+
+    results = {}
+
+    for ged, item in chmap.items():
+        if item["system"] != "geds":
+            continue
+        if not item["analysis"]["processable"]:
+            continue
+
+        hit_files_data = lh5.read_as(
+            f"ch{chmap[ged].daq.rawid}/hit/",
+            hit_files,
+            library="ak",
+            field_mask=["cuspEmax_ctc_cal", "timestamp", "is_valid_cal"],
+        )
+
+        mask = (
+            hit_files_data.is_valid_cal
+            & (hit_files_data.cuspEmax_ctc_cal > 2600)
+            & (hit_files_data.cuspEmax_ctc_cal < 2630)
+        )
+        timestamps = hit_files_data[mask].timestamp.to_numpy()
+        timestamps -= timestamps[0]
+        values = hit_files_data[mask].cuspEmax_ctc_cal.to_numpy()
+
+        results[ged] = gain_variation(period, run, item, timestamps, values, plot)
+
+    pars = load_calib_results(period, run, tmp_auto_dir)
+
+    plot_gain_variation_summary(period, run, pars, results)
+
+    base_dict = {
+        "cal": {
+            "npeak": None,
+            "fwhm_ok": None,
+            "FEP_gain_stab": None,
+            "const_stab": None,
+            "PSD": None,
+            "first_run": True,
+        },
+        "phy": {"pulser_stab": None, "baseln_stab": None, "baseln_spike": None},
+    }
+
+    output = {ged: base_dict for ged in chmap if chmap[ged]["system"] == "geds"}
+
+    for ged, item in chmap.items():
+        if item["system"] != "geds":
+            continue
+        if not item["analysis"]["processable"]:
+            continue
+
+        if pars[ged]["results"]["ecal"]["cuspEmax_ctc_cal"]["pk_fits"][2614.511][
+            "validity"
+        ]:
+            output[ged]["cal"]["npeak"] = True
+        else:
+            output[ged]["cal"]["npeak"] = False
+
+        fwhm = pars[ged]["results"]["ecal"]["cuspEmax_ctc_cal"]["eres_linear"][
+            "Qbb_fwhm_in_kev"
+        ]
+        if np.isnan(fwhm):
+            output[ged]["cal"]["fwhm_ok"] = False
+            output[ged]["cal"]["FEP_gain_stab"] = False
+        else:
+            output[ged]["cal"]["fwhm_ok"] = True
+
+        if output[ged]["cal"]["fwhm_ok"]:
+            fep_means = results[ged]
+            max_dev = fep_means.max()
+            min_dev = fep_means.min()
+
+            if max_dev > fwhm / 2 or min_dev < -fwhm / 2:
+                output[ged]["cal"]["FEP_gain_stab"] = False
+            else:
+                output[ged]["cal"]["FEP_gain_stab"] = True
+        else:
+            output[ged]["cal"]["FEP_gain_stab"] = False
+
+        if run == "r000":
+            output[ged]["cal"]["first_run"] = True
+        else:
+            output[ged]["cal"]["first_run"] = False
+
+        if not output[ged]["cal"]["first_run"]:
+            if output[ged]["cal"]["fwhm_ok"]:
+                gain = pars[ged]["results"]["ecal"]["cuspEmax_ctc_cal"]["eres_linear"][
+                    "parameters"
+                ]["a"]
+                prev_run = f"r{int(run[1:])-1:03d}"
+                prev_pars = load_calib_results(period, prev_run, tmp_auto_dir)
+                prev_gain = prev_pars[ged]["results"]["ecal"]["cuspEmax_ctc_cal"][
+                    "eres_linear"
+                ]["parameters"]["a"]
+
+                gain_change_keV = abs(gain - prev_gain) / prev_gain * 2039
+
+                if abs(gain_change_keV) > fwhm / 2:
+                    output[ged]["cal"]["baseln_stab"] = False
+                else:
+                    output[ged]["cal"]["baseln_stab"] = True
+
+            else:
+                output[ged]["const_stab"] = False
+
+    yaml.dump(output, open(f"l200-{period}-{run}-qcp_summary.yaml", "w"))
