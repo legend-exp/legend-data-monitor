@@ -80,6 +80,10 @@ def main():
         "calib_psd",
         help="Plot and raise warning for PSD stability in calibration runs.",
     )
+    func3_parser = subparsers.add_parser(
+        "check_calib",
+        help="Check calibration stability in calibration runs and create monitoring summary file.",
+    )
     func3_parser.add_argument(
         "--public_data",
         help="Path to tmp-auto public data files (eg /data2/public/prodenv/prod-blind/tmp-auto).",
@@ -132,6 +136,17 @@ def main():
             partition,
             quadratic,
             zoom,
+        )
+
+    elif args.command == "check_calib":
+        auto_dir_path = args.public_data
+        output_folder = args.output
+        period = args.p
+        save_pdf = args.pdf
+        current_run = args.current_run
+
+        legend_data_monitor.calibration.check_calibration(
+            auto_dir_path, output_folder, period, current_run, save_pdf
         )
 
     elif args.command == "calib_psd":
