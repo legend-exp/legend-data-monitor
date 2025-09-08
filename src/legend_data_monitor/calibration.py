@@ -2,7 +2,6 @@ import glob
 import os
 import pickle
 import shelve
-from pathlib import Path
 
 import lh5
 import matplotlib
@@ -398,7 +397,9 @@ def check_psd(
         yaml.dump(psd_data, f, sort_keys=False)
 
 
-def gain_variation(period, run, chmap, timestamps, values, plot):
+def FEP_gain_variation(
+    period, run, pars, chmap, timestamps, values, output_dir, save_pdf
+):
 
     ged = chmap["name"]
     string = chmap["location"]["string"]
@@ -429,51 +430,66 @@ def gain_variation(period, run, chmap, timestamps, values, plot):
     y_bins = np.linspace(-10, 10, 40)
     means = (stats["mean"] - baseline) / baseline * 2039
 
-    if plot:
+    plt.figure(figsize=(10, 5))
+    plt.hist2d(timestamps, norm_values, bins=(x_bins, y_bins), cmap="Blues")
+    plt.colorbar(label="Counts")
 
-        plt.figure(figsize=(10, 5))
-        plt.hist2d(timestamps, norm_values, bins=(x_bins, y_bins), cmap="Blues")
-        plt.colorbar(label="Counts")
+    plt.plot(stats["time"], means, "x-", color="red", label="10min mean")
 
-        plt.plot(stats["time"], means, "x-", color="red", label="10min mean")
+    plt.fill_between(
+        stats["time"],
+        -stats["std"] / baseline * 2039,
+        stats["std"] / baseline * 2039,
+        color="red",
+        alpha=0.2,
+        label="±1 std",
+    )
 
-        plt.fill_between(
-            stats["time"],
-            -stats["std"] / baseline * 2039,
-            stats["std"] / baseline * 2039,
-            color="red",
-            alpha=0.2,
-            label="±1 std",
+    fwhm = pars["results"]["ecal"]["cuspEmax_ctc_cal"]["eres_linear"]["Qbb_fwhm_in_kev"]
+
+    if fwhm < 5:
+        plt.ylim(-5, 5)
+
+    plt.axhline(0, ls="--", color="black")
+    plt.axhline(-fwhm / 2, ls="-", color="blue")
+    plt.axhline(fwhm / 2, ls="-", color="blue", label="±FWHM/2")
+    plt.text(0, fwhm / 2 + 0.5, f"+FWHM/2 = {fwhm/2:.2f} keV", color="k")
+
+    plt.legend(loc="lower left")
+    plt.xlabel("time [s]")
+    plt.ylabel("FEP gain variation [keV]")
+    plt.title(f"{period} {run} string {string} position {position} {ged}")
+    plt.tight_layout()
+
+    if save_pdf:
+        pdf_folder = os.path.join(output_dir, "pdf", f"st{string}")
+        os.makedirs(pdf_folder, exist_ok=True)
+        plt.savefig(
+            os.path.join(
+                pdf_folder,
+                f"{period}_{run}_str{string}_pos{position}_{ged}_FEP_gain_variation.pdf",
+            ),
+            bbox_inches="tight",
         )
 
-        par_file = "/data2/public/prodenv/prod-blind/tmp-auto/generated/par/hit/cal/p16/r000/l200-p16-r000-cal-20250827T125510Z-par_hit.yaml"
-        par_file = yaml.safe_load(open(par_file))
-        fwhm = par_file[ged]["results"]["ecal"]["cuspEmax_ctc_cal"]["eres_linear"][
-            "Qbb_fwhm_in_kev"
-        ]
-
-        if fwhm < 5:
-            plt.ylim(-5, 5)
-
-        plt.axhline(0, ls="--", color="black")
-        plt.axhline(-fwhm / 2, ls="-", color="blue")
-        plt.axhline(fwhm / 2, ls="-", color="blue", label="±FWHM/2")
-        plt.text(0, fwhm / 2 + 0.5, f"+FWHM/2 = {fwhm/2:.2f} keV", color="k")
-
-        plt.legend(loc="lower left")
-        plt.xlabel("time [s]")
-        plt.ylabel("FEP gain variation [keV]")
-        plt.title(f"{period} {run} string {string} position {position} {ged}")
-        plt.tight_layout()
-
-        plt.savefig(
-            f"plots/{period}_{run}_str{string}_pos{position}_{ged}_gain_variation.pdf"
+    # store the serialized plot in a shelve object under key
+    serialized_plot = pickle.dumps(plt.gcf())
+    with shelve.open(
+        os.path.join(
+            output_dir,
+            f"l200-{period}-phy-monitoring",
+        ),
+        "c",
+        protocol=pickle.HIGHEST_PROTOCOL,
+    ) as shelf:
+        shelf[f"{period}_{run}_str{string}_pos{position}_{ged}_FEP_gain_variation"] = (
+            serialized_plot
         )
 
     return means
 
 
-def plot_gain_variation_summary(period, run, pars, results):
+def FEP_gain_variation_summary(period, run, pars, results, output_dir, save_pdf):
 
     plot_data = []
     for ged, item in results.items():
@@ -559,28 +575,51 @@ def plot_gain_variation_summary(period, run, pars, results):
     ax.axhline(0, ls="--", color="black")
 
     plt.ylim(-5, 5)
-
     plt.tight_layout()
-    plt.savefig("plots/gain_variation_summary.pdf")
+
+    if save_pdf:
+        pdf_folder = os.path.join(output_dir, "pdf")
+        os.makedirs(pdf_folder, exist_ok=True)
+        plt.savefig(
+            os.path.join(
+                pdf_folder,
+                f"{period}_{run}_FEP_gain_variation_summary.pdf",
+            ),
+            bbox_inches="tight",
+        )
+
+    # store the serialized plot in a shelve object under key
+    serialized_plot = pickle.dumps(plt.gcf())
+    with shelve.open(
+        os.path.join(
+            output_dir,
+            f"l200-{period}-phy-monitoring",
+        ),
+        "c",
+        protocol=pickle.HIGHEST_PROTOCOL,
+    ) as shelf:
+        shelf[f"{period}_{run}_FEP_gain_variation_summary"] = serialized_plot
 
 
 def load_calib_results(period, run, prod_ref_dir):
-    directory = Path(prod_ref_dir) / "generated" / "par" / "hit" / "cal" / period / run
+    directory = os.path.join(prod_ref_dir, "generated/tier/hit/cal", period, run)
     file = list(directory.glob("*par_hit.yaml"))[0]
     return yaml.safe_load(open(file))
 
 
-def check_calibration(period, run, plot):
-    tmp_auto_dir = "/data2/public/prodenv/prod-blind/tmp-auto/"
+def check_calibration(tmp_auto_dir, output_folder, period, run, save_pdf=False):
     hit_files = sorted(
-        glob.glob(f"{tmp_auto_dir}generated/tier/hit/cal/{period}/{run}/*")
+        glob.glob(
+            os.path.join(tmp_auto_dir, "generated/tier/hit/cal", period, run, "*")
+        )
     )
     timestamp = hit_files[0].split("/")[-1].split("-")[-2]
 
-    meta = LegendMetadata(path=f"{tmp_auto_dir}inputs/")
+    meta = LegendMetadata(path=f"{tmp_auto_dir}/inputs/")
     chmap = meta.channelmap(timestamp)
+    pars = load_calib_results(period, run, tmp_auto_dir)
 
-    results = {}
+    fep_mean_results = {}
 
     for ged, item in chmap.items():
         if item["system"] != "geds":
@@ -602,13 +641,20 @@ def check_calibration(period, run, plot):
         )
         timestamps = hit_files_data[mask].timestamp.to_numpy()
         timestamps -= timestamps[0]
-        values = hit_files_data[mask].cuspEmax_ctc_cal.to_numpy()
+        energies = hit_files_data[mask].cuspEmax_ctc_cal.to_numpy()
 
-        results[ged] = gain_variation(period, run, item, timestamps, values, plot)
+        fep_mean_results[ged] = FEP_gain_variation(
+            period,
+            run,
+            pars=pars,
+            chmap=chmap[ged],
+            timestamps=timestamps,
+            values=energies,
+            output_dir=output_folder,
+            save_pdf=save_pdf,
+        )
 
-    pars = load_calib_results(period, run, tmp_auto_dir)
-
-    plot_gain_variation_summary(period, run, pars, results)
+    FEP_gain_variation_summary(period, run, pars, fep_mean_results)
 
     base_dict = {
         "cal": {
@@ -647,11 +693,12 @@ def check_calibration(period, run, plot):
             output[ged]["cal"]["fwhm_ok"] = True
 
         if output[ged]["cal"]["fwhm_ok"]:
-            fep_means = results[ged]
+            fep_means = fep_mean_results[ged]
             max_dev = fep_means.max()
             min_dev = fep_means.min()
 
-            if max_dev > fwhm / 2 or min_dev < -fwhm / 2:
+            # if max_dev > fwhm / 2 or min_dev < -fwhm / 2: potential issue here
+            if max_dev > 2 or min_dev < -2:  # ±2 keV
                 output[ged]["cal"]["FEP_gain_stab"] = False
             else:
                 output[ged]["cal"]["FEP_gain_stab"] = True
@@ -676,7 +723,8 @@ def check_calibration(period, run, plot):
 
                 gain_change_keV = abs(gain - prev_gain) / prev_gain * 2039
 
-                if abs(gain_change_keV) > fwhm / 2:
+                # if abs(gain_change_keV) > fwhm / 2: same as above
+                if abs(gain_change_keV) > 2:  # 2 keV
                     output[ged]["cal"]["baseln_stab"] = False
                 else:
                     output[ged]["cal"]["baseln_stab"] = True
@@ -684,4 +732,7 @@ def check_calibration(period, run, plot):
             else:
                 output[ged]["const_stab"] = False
 
-    yaml.dump(output, open(f"l200-{period}-{run}-qcp_summary.yaml", "w"))
+    yaml.dump(
+        output,
+        open(os.path.join(output_folder, f"l200-{period}-{run}-qcp_summary.yaml"), "w"),
+    )
