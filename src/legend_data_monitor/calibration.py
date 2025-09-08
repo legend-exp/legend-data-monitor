@@ -477,7 +477,7 @@ def FEP_gain_variation(
     with shelve.open(
         os.path.join(
             output_dir,
-            f"l200-{period}-phy-monitoring",
+            f"l200-{period}-cal-monitoring",
         ),
         "c",
         protocol=pickle.HIGHEST_PROTOCOL,
@@ -593,7 +593,7 @@ def FEP_gain_variation_summary(period, run, pars, results, output_dir, save_pdf)
     with shelve.open(
         os.path.join(
             output_dir,
-            f"l200-{period}-phy-monitoring",
+            f"l200-{period}-cal-monitoring",
         ),
         "c",
         protocol=pickle.HIGHEST_PROTOCOL,
