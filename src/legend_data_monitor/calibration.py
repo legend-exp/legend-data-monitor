@@ -3,13 +3,14 @@ import os
 import pickle
 import shelve
 
-import lh5
 import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import yaml
 from legendmeta import LegendMetadata
+from lgdo import lh5
+from tqdm import tqdm
 
 from . import utils
 
@@ -462,7 +463,7 @@ def FEP_gain_variation(
     plt.tight_layout()
 
     if save_pdf:
-        pdf_folder = os.path.join(output_dir, "pdf", f"st{string}")
+        pdf_folder = os.path.join(output_dir, f"{period}/{run}/mtg/pdf", f"st{string}")
         os.makedirs(pdf_folder, exist_ok=True)
         plt.savefig(
             os.path.join(
@@ -477,7 +478,7 @@ def FEP_gain_variation(
     with shelve.open(
         os.path.join(
             output_dir,
-            f"l200-{period}-cal-monitoring",
+            f"{period}/{run}/mtg/l200-{period}-{run}-cal-monitoring",
         ),
         "c",
         protocol=pickle.HIGHEST_PROTOCOL,
@@ -486,10 +487,12 @@ def FEP_gain_variation(
             serialized_plot
         )
 
+    plt.close()
+
     return means
 
 
-def FEP_gain_variation_summary(period, run, pars, results, output_dir, save_pdf):
+def FEP_gain_variation_summary(period, run, pars, chmap, results, output_dir, save_pdf):
 
     plot_data = []
     for ged, item in results.items():
@@ -497,12 +500,12 @@ def FEP_gain_variation_summary(period, run, pars, results, output_dir, save_pdf)
         fwhm = pars[ged]["results"]["ecal"]["cuspEmax_ctc_cal"]["eres_linear"][
             "Qbb_fwhm_in_kev"
         ]
-
+        meta_info = chmap[ged]
         plot_data.append(
             {
                 "ged": f"{ged}",
-                "string": item["location"]["string"],
-                "pos": item["location"]["position"],
+                "string": meta_info["location"]["string"],
+                "pos": meta_info["location"]["position"],
                 "mean": item.mean(),
                 "std": item.std(),
                 "min": item.min(),
@@ -578,8 +581,7 @@ def FEP_gain_variation_summary(period, run, pars, results, output_dir, save_pdf)
     plt.tight_layout()
 
     if save_pdf:
-        pdf_folder = os.path.join(output_dir, "pdf")
-        os.makedirs(pdf_folder, exist_ok=True)
+        pdf_folder = os.path.join(output_dir, f"{period}/{run}/mtg/pdf")
         plt.savefig(
             os.path.join(
                 pdf_folder,
@@ -593,21 +595,24 @@ def FEP_gain_variation_summary(period, run, pars, results, output_dir, save_pdf)
     with shelve.open(
         os.path.join(
             output_dir,
-            f"l200-{period}-cal-monitoring",
+            f"{period}/{run}/mtg/l200-{period}-{run}-cal-monitoring",
         ),
         "c",
         protocol=pickle.HIGHEST_PROTOCOL,
     ) as shelf:
         shelf[f"{period}_{run}_FEP_gain_variation_summary"] = serialized_plot
 
+    plt.close()
+
 
 def load_calib_results(period, run, prod_ref_dir):
-    directory = os.path.join(prod_ref_dir, "generated/tier/hit/cal", period, run)
-    file = list(directory.glob("*par_hit.yaml"))[0]
+    directory = os.path.join(prod_ref_dir, "generated/par/hit/cal", period, run)
+    file = glob.glob(os.path.join(directory, "*par_hit.yaml"))[0]
     return yaml.safe_load(open(file))
 
 
 def check_calibration(tmp_auto_dir, output_folder, period, run, save_pdf=False):
+
     hit_files = sorted(
         glob.glob(
             os.path.join(tmp_auto_dir, "generated/tier/hit/cal", period, run, "*")
@@ -621,7 +626,7 @@ def check_calibration(tmp_auto_dir, output_folder, period, run, save_pdf=False):
 
     fep_mean_results = {}
 
-    for ged, item in chmap.items():
+    for ged, item in tqdm(chmap.items()):
         if item["system"] != "geds":
             continue
         if not item["analysis"]["processable"]:
@@ -646,29 +651,32 @@ def check_calibration(tmp_auto_dir, output_folder, period, run, save_pdf=False):
         fep_mean_results[ged] = FEP_gain_variation(
             period,
             run,
-            pars=pars,
+            pars=pars[ged],
             chmap=chmap[ged],
             timestamps=timestamps,
             values=energies,
             output_dir=output_folder,
             save_pdf=save_pdf,
         )
+    FEP_gain_variation_summary(
+        period, run, pars, chmap, fep_mean_results, output_folder, save_pdf
+    )
 
-    FEP_gain_variation_summary(period, run, pars, fep_mean_results)
-
-    base_dict = {
-        "cal": {
-            "npeak": None,
-            "fwhm_ok": None,
-            "FEP_gain_stab": None,
-            "const_stab": None,
-            "PSD": None,
-            "first_run": True,
-        },
-        "phy": {"pulser_stab": None, "baseln_stab": None, "baseln_spike": None},
+    output = {
+        ged: {
+            "cal": {
+                "npeak": None,
+                "fwhm_ok": None,
+                "FEP_gain_stab": None,
+                "const_stab": None,
+                "PSD": None,
+                "first_run": True,
+            },
+            "phy": {"pulser_stab": None, "baseln_stab": None, "baseln_spike": None},
+        }
+        for ged in chmap
+        if chmap[ged]["system"] == "geds"
     }
-
-    output = {ged: base_dict for ged in chmap if chmap[ged]["system"] == "geds"}
 
     for ged, item in chmap.items():
         if item["system"] != "geds":
@@ -734,5 +742,10 @@ def check_calibration(tmp_auto_dir, output_folder, period, run, save_pdf=False):
 
     yaml.dump(
         output,
-        open(os.path.join(output_folder, f"l200-{period}-{run}-qcp_summary.yaml"), "w"),
+        open(
+            os.path.join(
+                output_folder, f"{period}/{run}/l200-{period}-{run}-qcp_summary.yaml"
+            ),
+            "w",
+        ),
     )

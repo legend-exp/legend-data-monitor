@@ -340,6 +340,24 @@ def main():
     }
 
     # ===========================================================================================
+    # Check calibration stability and create summary files
+    # ===========================================================================================
+
+    phy_folder = os.path.join(output_folder, ref_version, "generated/plt/hit/phy")
+    os.makedirs(phy_folder, exist_ok=True)
+
+    if os.path.isfile(
+        os.path.join(phy_folder, f"{period}/{run}/l200-{period}-{run}-qcp_summary.yaml")
+    ):
+        pass
+    else:
+        os.makedirs(os.path.join(phy_folder, f"{period}/{run}/mtg/pdf"), exist_ok=True)
+        cal_bash_command = f"python monitoring.py check_calib --public_data {auto_dir_path} --output {phy_folder} --p {period} --current_run {run} --pdf {save_pdf}"
+        print("running calibration check")
+        logger.debug(f"...running command {cal_bash_command}")
+        subprocess.run(cal_bash_command, shell=True)
+
+    # ===========================================================================================
     # Get not-analyzed files
     # ===========================================================================================
 
@@ -503,7 +521,7 @@ def main():
             logger.info("...monitoring plots generated!")
 
         # ===========================================================================================
-        # Calibration checks
+        # Calibration PSD checks
         # ===========================================================================================
         cal_bash_command = f"{cmd} python monitoring.py calib_psd --public_data {auto_dir_path} --output {mtg_folder} --p {period} --current_run {run}"
         if save_pdf is True:
