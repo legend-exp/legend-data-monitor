@@ -353,7 +353,6 @@ def main():
     else:
         os.makedirs(os.path.join(phy_folder, f"{period}/{run}/mtg/pdf"), exist_ok=True)
         cal_bash_command = f"python monitoring.py check_calib --public_data {auto_dir_path} --output {phy_folder} --p {period} --current_run {run} --pdf {save_pdf}"
-        print("running calibration check")
         logger.debug(f"...running command {cal_bash_command}")
         subprocess.run(cal_bash_command, shell=True)
 

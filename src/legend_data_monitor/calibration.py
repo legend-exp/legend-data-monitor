@@ -398,7 +398,7 @@ def check_psd(
         yaml.dump(psd_data, f, sort_keys=False)
 
 
-def FEP_gain_variation(
+def fep_gain_variation(
     period, run, pars, chmap, timestamps, values, output_dir, save_pdf
 ):
 
@@ -492,7 +492,7 @@ def FEP_gain_variation(
     return means
 
 
-def FEP_gain_variation_summary(period, run, pars, chmap, results, output_dir, save_pdf):
+def fep_gain_variation_summary(period, run, pars, chmap, results, output_dir, save_pdf):
 
     plot_data = []
     for ged, item in results.items():
@@ -648,7 +648,7 @@ def check_calibration(tmp_auto_dir, output_folder, period, run, save_pdf=False):
         timestamps -= timestamps[0]
         energies = hit_files_data[mask].cuspEmax_ctc_cal.to_numpy()
 
-        fep_mean_results[ged] = FEP_gain_variation(
+        fep_mean_results[ged] = fep_gain_variation(
             period,
             run,
             pars=pars[ged],
@@ -658,7 +658,7 @@ def check_calibration(tmp_auto_dir, output_folder, period, run, save_pdf=False):
             output_dir=output_folder,
             save_pdf=save_pdf,
         )
-    FEP_gain_variation_summary(
+    fep_gain_variation_summary(
         period, run, pars, chmap, fep_mean_results, output_folder, save_pdf
     )
 
