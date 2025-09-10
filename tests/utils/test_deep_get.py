@@ -1,5 +1,3 @@
-import pytest
-
 from legend_data_monitor.utils import deep_get
 
 

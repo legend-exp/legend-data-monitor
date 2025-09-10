@@ -347,14 +347,17 @@ def main():
     os.makedirs(phy_folder, exist_ok=True)
 
     if os.path.isfile(
-        os.path.join(phy_folder, f"{period}/{run}/l200-{period}-{run}-qcp_summary.yaml")
+        os.path.join(phy_folder, period, run, f"l200-{period}-{run}-qcp_summary.yaml")
     ):
         pass
     else:
-        os.makedirs(os.path.join(phy_folder, f"{period}/{run}/mtg/pdf"), exist_ok=True)
-        cal_bash_command = f"python monitoring.py check_calib --public_data {auto_dir_path} --output {phy_folder} --p {period} --current_run {run} --pdf {save_pdf}"
+        os.makedirs(os.path.join(phy_folder, period, run, "mtg/pdf"), exist_ok=True)
+        cal_bash_command = f"python monitoring.py check_calib --public_data {auto_dir_path} --output {phy_folder} --p {period} --current_run {run}"
+        if save_pdf is True:
+            cal_bash_command += " --pdf True"
         logger.debug(f"...running command {cal_bash_command}")
         subprocess.run(cal_bash_command, shell=True)
+        logger.info("...calibration data inspected!")
 
     # ===========================================================================================
     # Get not-analyzed files
@@ -524,16 +527,6 @@ def main():
             logger.debug(f"...running command {qc_bash_command}")
             subprocess.run(qc_bash_command, shell=True)
             logger.info("...quality cuts inspected!")
-
-        # ===========================================================================================
-        # Calibration PSD checks
-        # ===========================================================================================
-        cal_bash_command = f"{cmd} python monitoring.py calib_psd --public_data {auto_dir_path} --output {mtg_folder} --p {period} --current_run {run}"
-        if save_pdf is True:
-            cal_bash_command += " --pdf True"
-        logger.debug(f"...running command {cal_bash_command}")
-        subprocess.run(cal_bash_command, shell=True)
-        logger.info("...calibration data inspected!")
 
     else:
         logger.debug("No new files were detected.")

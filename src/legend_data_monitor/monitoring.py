@@ -3,19 +3,15 @@ import os
 import pickle
 import shelve
 import sys
-
+import itertools
 import h5py
 import matplotlib
-
 matplotlib.use("Agg")
-import itertools
-
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import pytz
 import yaml
-from legendmeta import LegendMetadata
 from lgdo import lh5
 
 from . import utils
@@ -51,19 +47,7 @@ def qc_average(
     period: str,
     run: str,
     save_pdf: bool,
-    pars_to_inspect: list = [
-        "IsHighlyPositivePolarityCandidate",
-        "IsValidBlSlope",
-        "IsValidBlSlopeRms",
-        "IsValidTailRms",
-        "IsNotNoiseBurst",
-        "IsValidCuspemin",
-        "IsValidCuspemax",
-        "IsValidTrapTpmax",
-        "IsLowCuspemax",
-        "IsDischarge",
-        "IsSaturated",
-    ],
+    pars_to_inspect: list | None = None,
 ):
     """
     Evaluate the average rate of passing quality cuts for a given run and period across the whole array for different QC flags.
@@ -85,6 +69,21 @@ def qc_average(
     pars_to_inspect : list
         List of parameters (boolean flags) to inspect.
     """
+    if pars_to_inspect is None:
+        pars_to_inspect = [
+            "IsHighlyPositivePolarityCandidate",
+            "IsValidBlSlope",
+            "IsValidBlSlopeRms",
+            "IsValidTailRms",
+            "IsNotNoiseBurst",
+            "IsValidCuspemin",
+            "IsValidCuspemax",
+            "IsValidTrapTpmax",
+            "IsLowCuspemax",
+            "IsDischarge",
+            "IsSaturated",
+        ]
+
     my_file = os.path.join(
         output_folder, f"{period}/{run}/l200-{period}-{run}-phy-geds.hdf"
     )
@@ -193,19 +192,7 @@ def qc_time_series(
     period: str,
     run: str,
     save_pdf: bool,
-    pars_to_inspect: list = [
-        "IsHighlyPositivePolarityCandidate",
-        "IsValidBlSlope",
-        "IsValidBlSlopeRms",
-        "IsValidTailRms",
-        "IsNotNoiseBurst",
-        "IsValidCuspemin",
-        "IsValidCuspemax",
-        "IsValidTrapTpmax",
-        "IsLowCuspemax",
-        "IsDischarge",
-        "IsSaturated",
-    ],
+    pars_to_inspect: list | None = None,
 ):
     """
     Evaluate rate over time of passing quality cuts for a given run and period across the whole array for different QC flags.
@@ -227,6 +214,20 @@ def qc_time_series(
     pars_to_inspect : list
         List of parameters (boolean flags) to inspect.
     """
+    if pars_to_inspect is None:
+        pars_to_inspect = [
+            "IsHighlyPositivePolarityCandidate",
+            "IsValidBlSlope",
+            "IsValidBlSlopeRms",
+            "IsValidTailRms",
+            "IsNotNoiseBurst",
+            "IsValidCuspemin",
+            "IsValidCuspemax",
+            "IsValidTrapTpmax",
+            "IsLowCuspemax",
+            "IsDischarge",
+            "IsSaturated",
+        ]
     my_file = os.path.join(
         output_folder, f"{period}/{run}/l200-{period}-{run}-phy-geds.hdf"
     )
@@ -276,7 +277,6 @@ def qc_time_series(
 
                     data = geds_df_abs[rawid].copy()
                     true_count = data.sum()
-                    tot_count = data.count()
                     time_min, time_max = data.index.min(), data.index.max()
                     diff = (time_max - time_min).total_seconds()
 
@@ -287,7 +287,7 @@ def qc_time_series(
                     hourly_rate.plot(
                         ax=ax,
                         drawstyle="steps-mid",
-                        label=f"{channel_name} - {true_rate_mHz} mHz",
+                        label=f"{channel_name} - pos {pos} - {true_rate_mHz} mHz",
                         color=color,
                     )
 

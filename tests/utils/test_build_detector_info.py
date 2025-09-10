@@ -1,5 +1,3 @@
-from collections import defaultdict
-
 import pytest
 
 from legend_data_monitor.utils import build_detector_info

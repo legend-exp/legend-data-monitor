@@ -752,8 +752,16 @@ def get_run_name(config: dict, user_time_range: dict) -> str:
 
 def load_tier_config(path: str, version: str, tier_name: str):
     """
-    Loads tier configuration (YAML or JSON) for the given tier name.
-    Searches through possible directory structures and file patterns.
+    Load tier configuration (YAML or JSON) for the given tier name, and search through possible directory structures and file patterns.
+
+    Parameters
+    ----------
+    path : str
+        Path to the processing environment, e.g. '/data2/public/prodenv/prod-blind'.
+    version : str
+        Version of data under inspection, e.g. 'tmp-auto'.
+    tier_name : str
+        Name of the tier under inspection, e.g. 'hit'.
     """
     possible_dirs = [f"tier/{tier_name}", f"tier_{tier_name}"]
     file_patterns = [
@@ -1802,6 +1810,7 @@ def build_detector_info(metadata_path, start_key=None):
 
         # store detector info
         detectors[det] = {
+            "name": det,
             "daq_rawid": rawid,
             "channel_str": ch_str,
             "string": string,

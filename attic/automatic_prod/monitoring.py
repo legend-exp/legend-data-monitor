@@ -76,15 +76,10 @@ def main():
         "--last_checked",
         help="Timestamp of the last check.",
     )
-
+    
     func3_parser = subparsers.add_parser(
-        "calib_psd",
-        help="Plot and raise warning for PSD stability in calibration runs.",
-    )
-    func3_parser.add_argument(
-        "--public_data",
-        help="Path to tmp-auto public data files (eg /data2/public/prodenv/prod-blind/tmp-auto).",
-        default="/data2/public/prodenv/prod-blind/ref-v1.0.1",
+        "check_calib",
+        help="Check calibration stability in calibration runs and create monitoring summary file.",
     )
     func3_parser.add_argument("--output", help="Path to output folder.")
     func3_parser.add_argument("--period", help="Period to inspect.")
@@ -96,34 +91,21 @@ def main():
     )
 
     func4_parser = subparsers.add_parser(
-        "check_calib",
-        help="Check calibration stability in calibration runs and create monitoring summary file.",
-    )
-    func4_parser.add_argument("--output", help="Path to output folder.")
-    func4_parser.add_argument("--period", help="Period to inspect.")
-    func4_parser.add_argument("--current_run", type=str, help="Run under inspection.")
-    func4_parser.add_argument(
-        "--pdf",
-        default=False,
-        help="True if you want to save pdf files too; default: False.",
-    )
-
-    func5_parser = subparsers.add_parser(
         "qc_avg_series",
         help="Plot and raise warning for PSD stability in calibration runs.",
     )
-    func5_parser.add_argument(
+    func4_parser.add_argument(
         "--public_data",
         help="Path to tmp-auto public data files (eg /data2/public/prodenv/prod-blind/tmp-auto).",
         default="/data2/public/prodenv/prod-blind/ref-v1.0.1",
     )
-    func5_parser.add_argument("--output", help="Path to output folder.")
-    func5_parser.add_argument(
+    func4_parser.add_argument("--output", help="Path to output folder.")
+    func4_parser.add_argument(
         "--start_key", help="First timestamp of the inspected range."
     )
-    func5_parser.add_argument("--period", help="Period to inspect.")
-    func5_parser.add_argument("--current_run", type=str, help="Run under inspection.")
-    func5_parser.add_argument(
+    func4_parser.add_argument("--period", help="Period to inspect.")
+    func4_parser.add_argument("--current_run", type=str, help="Run under inspection.")
+    func4_parser.add_argument(
         "--pdf",
         default=False,
         help="True if you want to save pdf files too; default: False.",
@@ -171,22 +153,36 @@ def main():
         auto_dir_path = args.public_data
         output_folder = args.output
         period = args.period
-        save_pdf = False if args.pdf in [False, "False"] else True
-        current_run = args.current_run
-
-        legend_data_monitor.calibration.check_calibration(
-            auto_dir_path, output_folder, period, current_run, save_pdf
-        )
-
-    elif args.command == "calib_psd":
-        auto_dir_path = args.public_data
-        output_folder = args.output
-        period = args.period
         save_pdf = args.pdf
         current_run = args.current_run
+        
+        found = False
+        for tier in ["hit", "pht"]:
+            cal_path = os.path.join(auto_dir_path, "generated/par", tier, "cal", period)
+            if os.path.isdir(cal_path):
+                found = True
+                break
+        if found is False:
+            legend_data_monitor.utils.logger.debug(f"No valid folder {cal_path} found. Exiting.")
+            return
+        
+        # don't run any check if there are no runs
+        cal_runs = os.listdir(cal_path)
+        if len(cal_runs) == 0:
+            legend_data_monitor.utils.logger.debug("No available calibration runs to inspect. Exiting.")
+            return
+
+        start_key = pars_files_list[0].split("-")[-2]
+        det_info = legend_data_monitor.utils.build_detector_info(
+            os.path.join(auto_dir_path, "inputs"), start_key=start_key
+        )
+
+        legend_data_monitor.calibration.check_calibration(
+            auto_dir_path, output_folder, period, current_run, det_info, save_pdf
+        )
 
         legend_data_monitor.calibration.check_psd(
-            auto_dir_path, output_folder, period, current_run, save_pdf
+            auto_dir_path, cal_path, output_folder, period, current_run, det_info, save_pdf
         )
 
     elif args.command == "qc_avg_series":

@@ -331,18 +331,8 @@ def evaluate_psd_usability_and_plot(
 
 
 def check_psd(
-    auto_dir_path: str, output_dir: str, period: str, current_run: str, save_pdf: bool
+    auto_dir_path: str, cal_path:str, output_dir: str, period: str, current_run: str, det_info: dict, save_pdf: bool
 ):
-
-    found = False
-    for tier in ["hit", "pht"]:
-        cal_path = os.path.join(auto_dir_path, "generated/par", tier, "cal", period)
-        if os.path.isdir(cal_path):
-            found = True
-            break
-    if found is False:
-        utils.logger.debug(f"No valid folder {cal_path} found. Exiting.")
-        return
 
     # create the folder and parents if missing - for the moment, we store it under the 'phy' folder
     output_dir = os.path.join(output_dir, period)
@@ -360,20 +350,10 @@ def check_psd(
     else:
         psd_data = {}
 
-    # don't run any check if there are no runs
-    cal_runs = os.listdir(cal_path)
-    if len(cal_runs) == 0:
-        utils.logger.debug(f"No available calibration runs to inspect. Exiting.")
-        return
-
     pars_files_list = sorted(glob.glob(f"{cal_path}/*/*.yaml"))
     if not pars_files_list:
         pars_files_list = sorted(glob.glob(f"{cal_path}/*/*.json"))
 
-    start_key = pars_files_list[0].split("-")[-2]
-    det_info = utils.build_detector_info(
-        os.path.join(auto_dir_path, "inputs"), start_key=start_key
-    )
     detectors_name = list(det_info["detectors"].keys())
     detectors_list = [det_info["detectors"][d]["channel_str"] for d in detectors_name]
     locations_list = [
@@ -383,7 +363,7 @@ def check_psd(
 
     if len(cal_runs) == 1:
         utils.logger.debug(
-            f"Only one available calibration run. Save all entries as None and exit."
+            "Only one available calibration run. Save all entries as None and exit."
         )
         for det_name in detectors_name:
             update_psd_evaluation_in_memory(psd_data, det_name, "cal", "PSD", None)
@@ -420,12 +400,12 @@ def check_psd(
 
 
 def fep_gain_variation(
-    period, run, pars, chmap, timestamps, values, output_dir, save_pdf
+    period: str, run: str, pars, chmap: dict, timestamps, values, output_dir: str, save_pdf: bool,
 ):
 
-    ged = chmap["name"]
-    string = chmap["location"]["string"]
-    position = chmap["location"]["position"]
+    ged = chmap["name"] 
+    string = chmap["string"]
+    position = chmap["position"]
 
     bin_size = 600
     bins = np.arange(0, timestamps.max() + bin_size, bin_size)
@@ -513,7 +493,7 @@ def fep_gain_variation(
     return means
 
 
-def fep_gain_variation_summary(period, run, pars, chmap, results, output_dir, save_pdf):
+def fep_gain_variation_summary(period: str, run: str, pars, detectors: dict, results, output_dir: str, save_pdf: bool):
 
     plot_data = []
     for ged, item in results.items():
@@ -521,12 +501,12 @@ def fep_gain_variation_summary(period, run, pars, chmap, results, output_dir, sa
         fwhm = pars[ged]["results"]["ecal"]["cuspEmax_ctc_cal"]["eres_linear"][
             "Qbb_fwhm_in_kev"
         ]
-        meta_info = chmap[ged]
+        meta_info = detectors[ged]
         plot_data.append(
             {
-                "ged": f"{ged}",
-                "string": meta_info["location"]["string"],
-                "pos": meta_info["location"]["position"],
+                "ged": ged,
+                "string": meta_info["string"],
+                "pos": meta_info["position"],
                 "mean": item.mean(),
                 "std": item.std(),
                 "min": item.min(),
@@ -632,29 +612,25 @@ def load_calib_results(period, run, prod_ref_dir):
     return yaml.safe_load(open(file))
 
 
-def check_calibration(tmp_auto_dir, output_folder, period, run, save_pdf=False):
+def check_calibration(tmp_auto_dir, output_folder, period, run, det_info, save_pdf=False):
 
     hit_files = sorted(
         glob.glob(
             os.path.join(tmp_auto_dir, "generated/tier/hit/cal", period, run, "*")
         )
     )
-    timestamp = hit_files[0].split("/")[-1].split("-")[-2]
 
-    meta = LegendMetadata(path=f"{tmp_auto_dir}/inputs/")
-    chmap = meta.channelmap(timestamp)
     pars = load_calib_results(period, run, tmp_auto_dir)
 
+    detectors = det_info["detectors"]
     fep_mean_results = {}
 
-    for ged, item in tqdm(chmap.items()):
-        if item["system"] != "geds":
-            continue
-        if not item["analysis"]["processable"]:
+    for ged, item in detectors.items():
+        if not info["processable"]:
             continue
 
         hit_files_data = lh5.read_as(
-            f"ch{chmap[ged].daq.rawid}/hit/",
+            info["channel_str"] + "/hit/",
             hit_files,
             library="ak",
             field_mask=["cuspEmax_ctc_cal", "timestamp", "is_valid_cal"],
@@ -673,14 +649,14 @@ def check_calibration(tmp_auto_dir, output_folder, period, run, save_pdf=False):
             period,
             run,
             pars=pars[ged],
-            chmap=chmap[ged],
+            chmap=info,
             timestamps=timestamps,
             values=energies,
             output_dir=output_folder,
             save_pdf=save_pdf,
         )
     fep_gain_variation_summary(
-        period, run, pars, chmap, fep_mean_results, output_folder, save_pdf
+        period, run, pars, detectors, fep_mean_results, output_folder, save_pdf
     )
 
     output = {
@@ -695,11 +671,10 @@ def check_calibration(tmp_auto_dir, output_folder, period, run, save_pdf=False):
             },
             "phy": {"pulser_stab": None, "baseln_stab": None, "baseln_spike": None},
         }
-        for ged in chmap
-        if chmap[ged]["system"] == "geds"
+        for ged in detectors
     }
 
-    for ged, item in chmap.items():
+    for ged, item in detectors.items():
         if item["system"] != "geds":
             continue
         if not item["analysis"]["processable"]:
