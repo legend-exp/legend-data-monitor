@@ -189,7 +189,14 @@ def main():
         )
 
         legend_data_monitor.calibration.check_psd(
-            auto_dir_path, cal_path, pars_files_list, output_folder, period, current_run, det_info, save_pdf
+            auto_dir_path,
+            cal_path,
+            pars_files_list,
+            output_folder,
+            period,
+            current_run,
+            det_info,
+            save_pdf,
         )
 
     elif args.command == "qc_avg_series":

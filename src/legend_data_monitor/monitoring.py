@@ -1,11 +1,13 @@
+import itertools
 import json
 import os
 import pickle
 import shelve
 import sys
-import itertools
+
 import h5py
 import matplotlib
+
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
