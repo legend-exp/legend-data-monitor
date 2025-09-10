@@ -329,7 +329,14 @@ def evaluate_psd_usability_and_plot(
 
 
 def check_psd(
-    auto_dir_path: str, cal_path:str, pars_files_list: list, output_dir: str, period: str, current_run: str, det_info: dict, save_pdf: bool
+    auto_dir_path: str,
+    cal_path: str,
+    pars_files_list: list,
+    output_dir: str,
+    period: str,
+    current_run: str,
+    det_info: dict,
+    save_pdf: bool,
 ):
 
     # create the folder and parents if missing - for the moment, we store it under the 'phy' folder
