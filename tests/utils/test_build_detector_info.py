@@ -1,5 +1,7 @@
-import pytest
 from collections import defaultdict
+
+import pytest
+
 from legend_data_monitor.utils import build_detector_info
 
 # mock channelmap
@@ -26,19 +28,19 @@ mock_chmap = {
     },
 }
 
+
 class MockLegendMetadata:
     def __init__(self, path):
         pass
+
     def channelmap(self, start_key=None):
         return mock_chmap
+
 
 @pytest.fixture(autouse=True)
 def patch_legendmetadata(monkeypatch):
     # patch LegendMetadata inside legend_data_monitor.utils
-    monkeypatch.setattr(
-        "legend_data_monitor.utils.LegendMetadata",
-        MockLegendMetadata
-    )
+    monkeypatch.setattr("legend_data_monitor.utils.LegendMetadata", MockLegendMetadata)
 
 
 def test_build_detector_info():

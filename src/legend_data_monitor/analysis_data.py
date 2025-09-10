@@ -161,7 +161,11 @@ class AnalysisData:
                 else:
                     # otherwise just load it
                     params_to_get.append(param)
-            elif param in ["quality_cuts", "geds/quality/is_not_bb_like/is_delayed_discharge", "geds/quality/is_bb_like"]:
+            elif param in [
+                "quality_cuts",
+                "geds/quality/is_not_bb_like/is_delayed_discharge",
+                "geds/quality/is_bb_like",
+            ]:
                 utils.logger.info(
                     "... you are loading individual QC flags and/or classifiers"
                 )

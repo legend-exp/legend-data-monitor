@@ -6,20 +6,18 @@ import os
 import re
 import smtplib
 import sys
+from collections import defaultdict
 from datetime import datetime, timedelta
 from email.mime.multipart import MIMEMultipart
-from collections import defaultdict
 from email.mime.text import MIMEText
 
 import h5py
 import numpy as np
 import pandas as pd
 import yaml
-from legendmeta import JsonDB
+from legendmeta import JsonDB, LegendMetadata
 from lgdo import lh5
 from pandas import DataFrame
-
-from legendmeta import LegendMetadata
 
 # -------------------------------------------------------------------------
 
@@ -494,7 +492,12 @@ def check_plot_settings(conf: dict) -> bool:
             # check if all necessary fields for param settings were provided
             for field in options:
                 # when plot_structure is summary or you simply want to load QCs, plot_style is not needed...
-                if plot_settings["parameters"] in ("exposure", "quality_cuts", "geds/quality/is_not_bb_like/is_delayed_discharge", "geds/quality/is_bb_like"):
+                if plot_settings["parameters"] in (
+                    "exposure",
+                    "quality_cuts",
+                    "geds/quality/is_not_bb_like/is_delayed_discharge",
+                    "geds/quality/is_bb_like",
+                ):
                     continue
 
                 # ...otherwise, it is required
@@ -509,7 +512,7 @@ def check_plot_settings(conf: dict) -> bool:
                             ",".join(options[field])
                         )
                     )
-                
+
                     return False
 
                 # check if the provided option is valid
@@ -540,7 +543,12 @@ def check_plot_settings(conf: dict) -> bool:
                 return False
 
             # ToDo: neater way to skip the whole loop but still do special checks; break? ugly...
-            if plot_settings["parameters"] in ("exposure", "quality_cuts", "geds/quality/is_not_bb_like/is_delayed_discharge", "geds/quality/is_bb_like"):
+            if plot_settings["parameters"] in (
+                "exposure",
+                "quality_cuts",
+                "geds/quality/is_not_bb_like/is_delayed_discharge",
+                "geds/quality/is_bb_like",
+            ):
                 continue
 
             # other non-exposure checks
@@ -741,18 +749,24 @@ def get_run_name(config: dict, user_time_range: dict) -> str:
 
     return run_list[0]
 
+
 def load_tier_config(path: str, version: str, tier_name: str):
     """
     Loads tier configuration (YAML or JSON) for the given tier name.
     Searches through possible directory structures and file patterns.
     """
     possible_dirs = [f"tier/{tier_name}", f"tier_{tier_name}"]
-    file_patterns = [f"*-ICPC-{tier_name}_config.yaml", f"*-ICPC-{tier_name}_config.json"]
+    file_patterns = [
+        f"*-ICPC-{tier_name}_config.yaml",
+        f"*-ICPC-{tier_name}_config.json",
+    ]
 
     config_data = None
     for subdir in possible_dirs:
         for pattern in file_patterns:
-            filepath_pattern = os.path.join(path, version, "inputs/dataprod/config", subdir, pattern)
+            filepath_pattern = os.path.join(
+                path, version, "inputs/dataprod/config", subdir, pattern
+            )
             files = glob.glob(filepath_pattern)
             if files:
                 filepath = files[0]
@@ -781,19 +795,32 @@ def get_all_plot_parameters(subsystem: str, config: dict):
     path = config["dataset"]["path"]
     # load hit QC and classifier flags
     hit_config = load_tier_config(path, version, "hit")
-    is_entries = [entry for entry in hit_config["outputs"]
-                  if entry.startswith("is_") and not entry.endswith("_classifier")]
-    is_classifiers = [entry for entry in hit_config["outputs"]
-                      if entry.startswith("is_") and entry.endswith("_classifier")]
-    
+    is_entries = [
+        entry
+        for entry in hit_config["outputs"]
+        if entry.startswith("is_") and not entry.endswith("_classifier")
+    ]
+    is_classifiers = [
+        entry
+        for entry in hit_config["outputs"]
+        if entry.startswith("is_") and entry.endswith("_classifier")
+    ]
+
     # only QC present in evt tier; no classifiers
-    is_entries_evt = ['geds/quality/is_not_bb_like/is_delayed_discharge', 'geds/quality/is_bb_like']
+    is_entries_evt = [
+        "geds/quality/is_not_bb_like/is_delayed_discharge",
+        "geds/quality/is_bb_like",
+    ]
 
     all_parameters = []
     if subsystem in config["subsystems"]:
         for plot in config["subsystems"][subsystem]:
             parameters = config["subsystems"][subsystem][plot]["parameters"]
-            if parameters not in ("quality_cuts", 'geds/quality/is_not_bb_like/is_delayed_discharge', 'geds/quality/is_bb_like'):
+            if parameters not in (
+                "quality_cuts",
+                "geds/quality/is_not_bb_like/is_delayed_discharge",
+                "geds/quality/is_bb_like",
+            ):
                 if isinstance(parameters, str):
                     all_parameters.append(parameters)
                 else:
@@ -824,7 +851,10 @@ def get_all_plot_parameters(subsystem: str, config: dict):
                 all_parameters.extend(is_entries)
             if config["subsystems"][subsystem][plot].get("qc_classifiers") is True:
                 all_parameters.extend(is_classifiers)
-            if parameters in ('geds/quality/is_not_bb_like/is_delayed_discharge', 'geds/quality/is_bb_like'):
+            if parameters in (
+                "geds/quality/is_not_bb_like/is_delayed_discharge",
+                "geds/quality/is_bb_like",
+            ):
                 all_parameters.extend(is_entries_evt)
 
     return all_parameters
@@ -1779,7 +1809,7 @@ def build_detector_info(metadata_path, start_key=None):
             "processable": processable,
         }
 
-        # fill string 
+        # fill string
         if processable:
             str_chns[string].append(det)
 

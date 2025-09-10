@@ -167,7 +167,7 @@ class Subsystem:
             dlconfig_evt, dbconfig_evt = self.construct_dataloader_configs(
                 param_tiers, evt_params, "evt"
             )
-            dl_evt = DataLoader(dlconfig_evt, dbconfig_evt)  
+            dl_evt = DataLoader(dlconfig_evt, dbconfig_evt)
 
         # -------------------------------------------------------------------------
         # Set up query
@@ -216,7 +216,7 @@ class Subsystem:
             # from "geds/quality/is_X" to "is_X"
             elems = evt_params[0].split("/")
             evt_params = [elems[-1]]
-            
+
             dl_evt.set_files(query)
             dl_evt.set_output(fmt="pd.DataFrame", columns=evt_params)
 
@@ -243,7 +243,7 @@ class Subsystem:
             self.data = valid_data[0]
         else:
             self.data = pd.concat(valid_data, axis=1)
-        
+
         utils.logger.info(f"Total time to load data: {(datetime.now() - now)}")
 
         # -------------------------------------------------------------------------
@@ -373,7 +373,11 @@ class Subsystem:
                     params,
                 )
                 return
-            if param in ["quality_cuts", "geds/quality/is_not_bb_like/is_delayed_discharge", "geds/quality/is_bb_like"]:
+            if param in [
+                "quality_cuts",
+                "geds/quality/is_not_bb_like/is_delayed_discharge",
+                "geds/quality/is_bb_like",
+            ]:
                 utils.logger.warning(
                     "\033[93m'%s' does not require the ratio/diff wrt the AUX channel. Skip this step.\033[0m",
                     params,
@@ -802,13 +806,13 @@ class Subsystem:
         """
         tiers, _ = utils.get_tiers_pars_folders(os.path.join(self.path, self.version))
         data_dir = os.path.join(self.path, self.version, "generated", "tier")
-        
+
         if tier_key == "dsp":
             tier_folder = tiers[0]
-            tier_folder_part = tiers[1] 
+            tier_folder_part = tiers[1]
         if tier_key == "hit":
             tier_folder = tiers[2]
-            tier_folder_part = tiers[3] 
+            tier_folder_part = tiers[3]
         if tier_key == "evt":
             tier_folder = tiers[5]
             tier_folder_part = tiers[6]
@@ -890,11 +894,11 @@ class Subsystem:
                 + tier
                 + ".lh5"
             )
-            
+
             dict_dbconfig["table_format"][tier] = "ch{" + ch_format + "}/"
             if tier == "pht":
                 dict_dbconfig["table_format"][tier] += "hit"
-            elif tier in ["evt","pet"]:
+            elif tier in ["evt", "pet"]:
                 elems = list(tier_params["param"])[0].split("/")
                 core = elems[:-1]
                 flag = "/".join(core)

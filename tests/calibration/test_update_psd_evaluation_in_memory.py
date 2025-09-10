@@ -8,7 +8,7 @@ def test_update_psd_evaluation_in_memory_creates_keys():
     det_name = "DET1"
     value = True
 
-    update_psd_evaluation_in_memory(data, det_name, 'cal', 'PSD', value)
+    update_psd_evaluation_in_memory(data, det_name, "cal", "PSD", value)
 
     assert det_name in data
     assert "cal" in data[det_name]
@@ -20,7 +20,7 @@ def test_update_psd_evaluation_in_memory_overwrites():
     det_name = "DET1"
     value = np.nan
 
-    update_psd_evaluation_in_memory(data, det_name, 'cal', 'PSD', value)
+    update_psd_evaluation_in_memory(data, det_name, "cal", "PSD", value)
 
     assert np.isnan(data[det_name]["cal"]["PSD"])
 
@@ -30,7 +30,7 @@ def test_update_psd_evaluation_in_memory_partial_existing():
     det_name = "DET1"
     value = True
 
-    update_psd_evaluation_in_memory(data, det_name, 'cal', 'PSD', value)
+    update_psd_evaluation_in_memory(data, det_name, "cal", "PSD", value)
 
     assert "cal" in data[det_name]
     assert data[det_name]["cal"]["PSD"] is True

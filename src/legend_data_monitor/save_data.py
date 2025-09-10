@@ -471,7 +471,14 @@ def save_hdf(
 
         # fix the label (in general, it could contain info for aux data too - here, we want a simple version of the label)
         plot_info_param["label"] = (
-            None if param in ["quality_cuts", "geds/quality/is_not_bb_like/is_delayed_discharge", "geds/quality/is_bb_like"] else utils.PLOT_INFO[param_orig]["label"]
+            None
+            if param
+            in [
+                "quality_cuts",
+                "geds/quality/is_not_bb_like/is_delayed_discharge",
+                "geds/quality/is_bb_like",
+            ]
+            else utils.PLOT_INFO[param_orig]["label"]
         )
 
         try:
@@ -538,7 +545,11 @@ def save_hdf(
         # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
         # PLOTTING INFO
         # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-        if param not in ["quality_cuts", "geds/quality/is_not_bb_like/is_delayed_discharge", "geds/quality/is_bb_like"]:
+        if param not in [
+            "quality_cuts",
+            "geds/quality/is_not_bb_like/is_delayed_discharge",
+            "geds/quality/is_bb_like",
+        ]:
             # this is constant over time, so with 'append' we simply overwrite previous content
             df_info = DataFrame.from_dict(
                 plot_info_param, orient="index", columns=["Value"]
@@ -603,7 +614,11 @@ def save_hdf(
         # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
         # PURE VALUES
         # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-        if param in ["quality_cuts", "geds/quality/is_not_bb_like/is_delayed_discharge", "geds/quality/is_bb_like"]:
+        if param in [
+            "quality_cuts",
+            "geds/quality/is_not_bb_like/is_delayed_discharge",
+            "geds/quality/is_bb_like",
+        ]:
             # save each flag/classifier separately
             is_cols = [
                 col
