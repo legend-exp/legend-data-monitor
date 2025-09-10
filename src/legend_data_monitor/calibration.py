@@ -8,9 +8,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import yaml
-from legendmeta import LegendMetadata
 from lgdo import lh5
-from tqdm import tqdm
 
 from . import utils
 
@@ -331,7 +329,7 @@ def evaluate_psd_usability_and_plot(
 
 
 def check_psd(
-    auto_dir_path: str, cal_path:str, output_dir: str, period: str, current_run: str, det_info: dict, save_pdf: bool
+    auto_dir_path: str, cal_path:str, pars_files_list: list, output_dir: str, period: str, current_run: str, det_info: dict, save_pdf: bool
 ):
 
     # create the folder and parents if missing - for the moment, we store it under the 'phy' folder
@@ -350,10 +348,6 @@ def check_psd(
     else:
         psd_data = {}
 
-    pars_files_list = sorted(glob.glob(f"{cal_path}/*/*.yaml"))
-    if not pars_files_list:
-        pars_files_list = sorted(glob.glob(f"{cal_path}/*/*.json"))
-
     detectors_name = list(det_info["detectors"].keys())
     detectors_list = [det_info["detectors"][d]["channel_str"] for d in detectors_name]
     locations_list = [
@@ -361,6 +355,7 @@ def check_psd(
         for d in detectors_name
     ]
 
+    cal_runs = sorted(os.listdir(cal_path))
     if len(cal_runs) == 1:
         utils.logger.debug(
             "Only one available calibration run. Save all entries as None and exit."
@@ -374,7 +369,6 @@ def check_psd(
         return
 
     # retrieve all dets info
-    cal_runs = sorted(os.listdir(cal_path))
     cal_psd_info = load_fit_pars_from_yaml(
         pars_files_list, detectors_list, detectors_name, cal_runs
     )
@@ -626,11 +620,11 @@ def check_calibration(tmp_auto_dir, output_folder, period, run, det_info, save_p
     fep_mean_results = {}
 
     for ged, item in detectors.items():
-        if not info["processable"]:
+        if not item["processable"]:
             continue
 
         hit_files_data = lh5.read_as(
-            info["channel_str"] + "/hit/",
+            item["channel_str"] + "/hit/",
             hit_files,
             library="ak",
             field_mask=["cuspEmax_ctc_cal", "timestamp", "is_valid_cal"],
@@ -649,7 +643,7 @@ def check_calibration(tmp_auto_dir, output_folder, period, run, det_info, save_p
             period,
             run,
             pars=pars[ged],
-            chmap=info,
+            chmap=item,
             timestamps=timestamps,
             values=energies,
             output_dir=output_folder,

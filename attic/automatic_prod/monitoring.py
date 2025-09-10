@@ -172,6 +172,9 @@ def main():
             legend_data_monitor.utils.logger.debug("No available calibration runs to inspect. Exiting.")
             return
 
+        pars_files_list = sorted(glob.glob(f"{cal_path}/*/*.yaml"))
+        if not pars_files_list:
+            pars_files_list = sorted(glob.glob(f"{cal_path}/*/*.json"))
         start_key = pars_files_list[0].split("-")[-2]
         det_info = legend_data_monitor.utils.build_detector_info(
             os.path.join(auto_dir_path, "inputs"), start_key=start_key
@@ -182,7 +185,7 @@ def main():
         )
 
         legend_data_monitor.calibration.check_psd(
-            auto_dir_path, cal_path, output_folder, period, current_run, det_info, save_pdf
+            auto_dir_path, cal_path, pars_files_list, output_folder, period, current_run, det_info, save_pdf
         )
 
     elif args.command == "qc_avg_series":
