@@ -12,8 +12,8 @@ import numpy as np
 import pandas as pd
 import pytz
 import yaml
-from lgdo import lh5
 
+from lgdo import lh5
 from . import utils
 
 # -------------------------------------------------------------------------
