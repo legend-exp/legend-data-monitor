@@ -76,7 +76,7 @@ def main():
         "--last_checked",
         help="Timestamp of the last check.",
     )
-    
+
     func3_parser = subparsers.add_parser(
         "check_calib",
         help="Check calibration stability in calibration runs and create monitoring summary file.",
@@ -155,7 +155,7 @@ def main():
         period = args.period
         save_pdf = args.pdf
         current_run = args.current_run
-        
+
         found = False
         for tier in ["hit", "pht"]:
             cal_path = os.path.join(auto_dir_path, "generated/par", tier, "cal", period)
@@ -163,13 +163,17 @@ def main():
                 found = True
                 break
         if found is False:
-            legend_data_monitor.utils.logger.debug(f"No valid folder {cal_path} found. Exiting.")
+            legend_data_monitor.utils.logger.debug(
+                f"No valid folder {cal_path} found. Exiting."
+            )
             return
-        
+
         # don't run any check if there are no runs
         cal_runs = os.listdir(cal_path)
         if len(cal_runs) == 0:
-            legend_data_monitor.utils.logger.debug("No available calibration runs to inspect. Exiting.")
+            legend_data_monitor.utils.logger.debug(
+                "No available calibration runs to inspect. Exiting."
+            )
             return
 
         pars_files_list = sorted(glob.glob(f"{cal_path}/*/*.yaml"))

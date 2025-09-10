@@ -394,10 +394,17 @@ def check_psd(
 
 
 def fep_gain_variation(
-    period: str, run: str, pars, chmap: dict, timestamps, values, output_dir: str, save_pdf: bool,
+    period: str,
+    run: str,
+    pars,
+    chmap: dict,
+    timestamps,
+    values,
+    output_dir: str,
+    save_pdf: bool,
 ):
 
-    ged = chmap["name"] 
+    ged = chmap["name"]
     string = chmap["string"]
     position = chmap["position"]
 
@@ -487,7 +494,15 @@ def fep_gain_variation(
     return means
 
 
-def fep_gain_variation_summary(period: str, run: str, pars, detectors: dict, results, output_dir: str, save_pdf: bool):
+def fep_gain_variation_summary(
+    period: str,
+    run: str,
+    pars,
+    detectors: dict,
+    results,
+    output_dir: str,
+    save_pdf: bool,
+):
 
     plot_data = []
     for ged, item in results.items():
@@ -606,7 +621,9 @@ def load_calib_results(period, run, prod_ref_dir):
     return yaml.safe_load(open(file))
 
 
-def check_calibration(tmp_auto_dir, output_folder, period, run, det_info, save_pdf=False):
+def check_calibration(
+    tmp_auto_dir, output_folder, period, run, det_info, save_pdf=False
+):
 
     hit_files = sorted(
         glob.glob(
