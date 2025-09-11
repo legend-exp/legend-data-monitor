@@ -409,6 +409,7 @@ def fep_gain_variation(
     values,
     output_dir: str,
     save_pdf: bool,
+    shelf,
 ):
 
     ged = chmap["name"]
@@ -484,17 +485,9 @@ def fep_gain_variation(
 
     # store the serialized plot in a shelve object under key
     serialized_plot = pickle.dumps(plt.gcf())
-    with shelve.open(
-        os.path.join(
-            output_dir,
-            f"{period}/{run}/mtg/l200-{period}-{run}-cal-monitoring",
-        ),
-        "c",
-        protocol=pickle.HIGHEST_PROTOCOL,
-    ) as shelf:
-        shelf[f"{period}_{run}_str{string}_pos{position}_{ged}_FEP_gain_variation"] = (
-            serialized_plot
-        )
+    shelf[f"{period}_{run}_str{string}_pos{position}_{ged}_FEP_gain_variation"] = (
+        serialized_plot
+    )
 
     plt.close()
 
@@ -607,7 +600,7 @@ def fep_gain_variation_summary(
             bbox_inches="tight",
         )
 
-    # store the serialized plot in a shelve object under key
+    # serialize+plot in a shelve object
     serialized_plot = pickle.dumps(plt.gcf())
     with shelve.open(
         os.path.join(
@@ -643,6 +636,12 @@ def check_calibration(
     detectors = det_info["detectors"]
     fep_mean_results = {}
 
+    shelve_path = os.path.join(
+        output_folder, period, run,
+        f"mtg/l200-{period}-{run}-cal-monitoring",
+    ),
+    
+    with shelve.open(shelve_path, "c", protocol=pickle.HIGHEST_PROTOCOL) as shelf:
     for ged, item in detectors.items():
         if not item["processable"]:
             continue
@@ -672,7 +671,9 @@ def check_calibration(
             values=energies,
             output_dir=output_folder,
             save_pdf=save_pdf,
+            shelf=shelf,
         )
+
     fep_gain_variation_summary(
         period, run, pars, detectors, fep_mean_results, output_folder, save_pdf
     )
