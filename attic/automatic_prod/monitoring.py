@@ -1,6 +1,6 @@
 import argparse
-import os
 import glob
+import os
 
 import legend_data_monitor
 
