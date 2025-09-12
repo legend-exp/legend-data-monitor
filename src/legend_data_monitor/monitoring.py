@@ -382,7 +382,7 @@ def extract_fep_peak(pars_dict: dict, channel: str):
     pk_fits = get_energy_key(ecal_results).get("pk_fits", {})
 
     try:
-        fep_energy = [p for p in sorted(pk_fits) if 2613 < float(p) < 2616][0]
+        fep_energy = [p for p in pk_fits if 2613 < p < 2616][0]
         try:
             fep_peak_pos = pk_fits[fep_energy]["parameters_in_ADC"]["mu"]
             fep_peak_pos_err = pk_fits[fep_energy]["uncertainties_in_ADC"]["mu"]

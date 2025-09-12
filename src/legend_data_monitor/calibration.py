@@ -10,7 +10,7 @@ import pandas as pd
 import yaml
 from lgdo import lh5
 
-from . import utils
+from . import monitoring, utils
 
 # -------------------------------------------------------------------------
 
@@ -365,13 +365,12 @@ def check_psd(
         return
     
     # create the folder and parents if missing - for the moment, we store it under the 'phy' folder
-    output_dir = os.path.join(output_dir, period)
-    output_dir_run = os.path.join(output_dir, current_run, "mtg")
-    os.makedirs(output_dir_run, exist_ok=True)
+    output_dir = os.path.join(output_dir, period, current_run)
+    os.makedirs(os.path.join(output_dir, "mtg"), exist_ok=True)
 
     # Load existing data once (or start empty)
     usability_map_file = os.path.join(
-        output_dir_run, f"l200-{period}-{current_run}-qcp_summary.yaml"
+        output_dir, f"l200-{period}-{current_run}-qcp_summary.yaml"
     )
 
     detectors_name = list(det_info["detectors"].keys())
@@ -702,7 +701,26 @@ def check_calibration(
     det_info: dict,
     save_pdf=False,
 ):
-    
+    """
+    Check calibration stability for a given run and update monitoring summary YAML file.
+
+    Parameters
+    ----------
+    tmp_auto_dir : str
+        Path to tmp-auto public data files (eg /data2/public/prodenv/prod-blind/tmp-auto).
+    output_folder : str
+        Path to output folder where the output summary YAML and plots will be stored.
+    period : str
+        Period to inspect.
+    run : str
+        Run to inspect.
+    first_run : bool
+        Flag indicating whether this is the first run of the period.
+    det_info : dict
+        Dictionary containing detector metadata.
+    save_pdf : bool
+        True if you want to save pdf files too; default: False.
+    """
     detectors = det_info["detectors"]
     usability_map_file = os.path.join(
         output_folder, period, run, f"l200-{period}-{run}-qcp_summary.yaml"
@@ -720,7 +738,7 @@ def check_calibration(
     # avoid case where multiple cal runs were processed but we are still requiring to inspect the first run
     if run in file: first_run = True
 
-    if not first_run:
+    if not first_run and int(run[1:])-1>=0:
         prev_run = f"r{int(run[1:])-1:03d}"
         directory = os.path.join(
             tmp_auto_dir, "generated/par/hit/cal", period, prev_run
@@ -783,10 +801,27 @@ def check_calibration(
             )
 
             # build summary in memory
-            ecal = pars[ged]["results"]["ecal"]["cuspEmax_ctc_cal"]
-            valid_peak = ecal["pk_fits"][2614.511]["validity"]
-            update_psd_evaluation_in_memory(output, ged, "cal", "npeak", valid_peak)
+            ecal_results = pars[ged]["results"]["ecal"]
+            ecal = monitoring.get_energy_key(ecal_results) # check for cuspEmax_ctc_runcal or cuspEmax_ctc_cal
+            pk_fits = monitoring.get_energy_key(ecal_results).get("pk_fits", {})
 
+            # find FEP and low-E peaks (keys digits changed in the past, so let's be generic)
+            fep_peaks = [p for p in pk_fits if 2613 < p < 2616]
+            low_peaks = [p for p in pk_fits if 580 < p < 586]
+            
+            fep_valid = False
+            low_valid = False
+            if fep_peaks:
+                fep_energy = fep_peaks[0]
+                fep_valid = ecal["pk_fits"][fep_energy].get("validity", False)
+            if low_peaks:
+                low_energy = low_peaks[0]
+                low_valid = ecal["pk_fits"][low_energy].get("validity", False)
+            
+            # true only if both peaks are valid
+            overall_valid = fep_valid and low_valid
+            update_psd_evaluation_in_memory(output, ged, "cal", "npeak", overall_valid)
+            
             fwhm = ecal["eres_linear"]["Qbb_fwhm_in_kev"]
             fwhm_ok = not np.isnan(fwhm)
             update_psd_evaluation_in_memory(output, ged, "cal", "fwhm_ok", fwhm_ok)
@@ -794,7 +829,7 @@ def check_calibration(
             if fwhm_ok:
                 # FEP gain stability
                 if fep_mean_results[ged] is not None:
-                    stable = np.all(np.abs(fep_mean_results[ged]) <= 2)
+                    stable = bool(np.all(np.abs(fep_mean_results[ged]) <= 2))
                 else:
                     stable = False
                 update_psd_evaluation_in_memory(
@@ -802,9 +837,9 @@ def check_calibration(
                 )
 
                 # bsln stability (only if not first run)
-                if not first_run:
+                if not first_run and int(run[1:])-1>=0:
                     gain = ecal["eres_linear"]["parameters"]["a"]
-                    prev_gain = prev_pars[ged]["results"]["ecal"]["cuspEmax_ctc_cal"][
+                    prev_gain = monitoring.get_energy_key(prev_pars[ged]["results"]["ecal"])[
                         "eres_linear"
                     ]["parameters"]["a"]
                     gain_dev = abs(gain - prev_gain) / prev_gain * 2039
@@ -816,7 +851,7 @@ def check_calibration(
                 update_psd_evaluation_in_memory(
                     output, ged, "cal", "FEP_gain_stab", False
                 )
-                if not first_run:
+                if not first_run and int(run[1:])-1>=0:
                     update_psd_evaluation_in_memory(
                         output, ged, "cal", "const_stab", False
                     )
