@@ -640,7 +640,7 @@ def check_calibration(
         output_folder, period, run,
         f"mtg/l200-{period}-{run}-cal-monitoring",
     ),
-    
+
     with shelve.open(shelve_path, "c", protocol=pickle.HIGHEST_PROTOCOL) as shelf:
     for ged, item in detectors.items():
         if not item["processable"]:
