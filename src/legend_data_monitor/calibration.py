@@ -676,7 +676,9 @@ def fep_gain_variation_summary(
     serialized_plot = pickle.dumps(fig)
     with shelve.open(
         os.path.join(
-            output_dir, period, run,
+            output_dir,
+            period,
+            run,
             f"mtg/l200-{period}-{run}-cal-monitoring",
         ),
         "c",
@@ -707,7 +709,9 @@ def check_calibration(
 
     if not first_run:
         prev_run = f"r{int(run[1:])-1:03d}"
-        directory = os.path.join(tmp_auto_dir, "generated/par/hit/cal", period, prev_run)
+        directory = os.path.join(
+            tmp_auto_dir, "generated/par/hit/cal", period, prev_run
+        )
         file = glob.glob(os.path.join(directory, "*par_hit.yaml"))[0]
         prev_pars = utils.read_json_or_yaml(file)
 
