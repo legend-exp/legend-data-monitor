@@ -844,7 +844,7 @@ def check_calibration(
                     ]["parameters"]["a"]
                     gain_dev = abs(gain - prev_gain) / prev_gain * 2039
                     update_psd_evaluation_in_memory(
-                        output, ged, "cal", "baseln_stab", gain_dev <= 2
+                        output, ged, "cal", "const_stab", gain_dev <= 2
                     )
 
             else:
