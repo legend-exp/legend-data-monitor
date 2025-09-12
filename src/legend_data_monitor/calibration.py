@@ -360,6 +360,10 @@ def check_psd(
     save_pdf : bool
         True if you want to save pdf files too; default: False.
     """
+    if not any(current_run in file for file in pars_files_list):
+        utils.logger.debug(f"...no calibration files found for run {current_run}. Exiting.")
+        return
+    
     # create the folder and parents if missing - for the moment, we store it under the 'phy' folder
     output_dir = os.path.join(output_dir, period)
     output_dir_run = os.path.join(output_dir, current_run, "mtg")
@@ -698,14 +702,20 @@ def check_calibration(
     det_info: dict,
     save_pdf=False,
 ):
-    hit_files = sorted(
-        glob.glob(
-            os.path.join(tmp_auto_dir, "generated/tier/hit/cal", period, run, "*")
-        )
+    
+    detectors = det_info["detectors"]
+    usability_map_file = os.path.join(
+        output_folder, period, run, f"l200-{period}-{run}-qcp_summary.yaml"
     )
+    output = utils.load_yaml_or_default(usability_map_file, detectors)
+    fep_mean_results = {}
+    
     directory = os.path.join(tmp_auto_dir, "generated/par/hit/cal", period, run)
-    file = sorted(glob.glob(os.path.join(directory, "*par_hit.yaml")))[0]
-    pars = utils.read_json_or_yaml(file)
+    file = sorted(glob.glob(os.path.join(directory, "*par_hit.yaml")))
+    if not file:
+        utils.logger.debug(f"...no calibration files found for run {run}. Exiting.")
+        return 
+    pars = utils.read_json_or_yaml(file[0])
 
     # avoid case where multiple cal runs were processed but we are still requiring to inspect the first run
     if run in file: first_run = True
@@ -715,15 +725,12 @@ def check_calibration(
         directory = os.path.join(
             tmp_auto_dir, "generated/par/hit/cal", period, prev_run
         )
-        file = sorted(glob.glob(os.path.join(directory, "*par_hit.yaml")))[0]
-        prev_pars = utils.read_json_or_yaml(file)
-
-    detectors = det_info["detectors"]
-    usability_map_file = os.path.join(
-        output_folder, period, run, f"l200-{period}-{run}-qcp_summary.yaml"
-    )
-    output = utils.load_yaml_or_default(usability_map_file, detectors)
-    fep_mean_results = {}
+        file = sorted(glob.glob(os.path.join(directory, "*par_hit.yaml")))
+        if not file:
+            utils.logger.debug(f"No calibration files found for previous run {prev_run}. Skip.")
+            first_run = True
+        else:
+            prev_pars = utils.read_json_or_yaml(file[0])
 
     shelve_path = os.path.join(
         output_folder,
@@ -733,6 +740,12 @@ def check_calibration(
     )
     os.makedirs(os.path.dirname(shelve_path), exist_ok=True)
     utils.logger.debug("...inspecting FEP, calib peaks, stability in calibrations")
+    
+    hit_files = sorted(
+        glob.glob(
+            os.path.join(tmp_auto_dir, "generated/tier/hit/cal", period, run, "*")
+        )
+    )
 
     with shelve.open(shelve_path, "c", protocol=pickle.HIGHEST_PROTOCOL) as shelf:
         for ged, item in detectors.items():
