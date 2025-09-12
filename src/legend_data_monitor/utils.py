@@ -1712,7 +1712,32 @@ def build_runinfo(path: str, version: str, output: str):
 # -------------------------------------------------------------------------
 # Helper functions
 # -------------------------------------------------------------------------
+def load_yaml_or_default(path: str, detectors: dict) -> dict:
+    """Load YAML from `path` if it exists, else return a default dict."""
+    def default_output(detectors: dict) -> dict:
+        return {
+            ged: {
+                "cal": {
+                    "npeak": None,
+                    "fwhm_ok": None,
+                    "FEP_gain_stab": None,
+                    "const_stab": None,
+                    "PSD": None,
+                },
+                "phy": {
+                    "pulser_stab": None,
+                    "baseln_stab": None,
+                    "baseln_spike": None,
+                },
+            }
+            for ged in detectors
+        }
 
+    if os.path.exists(path):
+        with open(path) as f:
+            return yaml.safe_load(f) or default_output(detectors)
+        
+    return default_output(detectors)
 
 def read_json_or_yaml(file_path: str):
     """
