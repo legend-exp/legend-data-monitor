@@ -1714,6 +1714,7 @@ def build_runinfo(path: str, version: str, output: str):
 # -------------------------------------------------------------------------
 def load_yaml_or_default(path: str, detectors: dict) -> dict:
     """Load YAML from `path` if it exists, else return a default dict."""
+
     def default_output(detectors: dict) -> dict:
         return {
             ged: {
@@ -1736,8 +1737,9 @@ def load_yaml_or_default(path: str, detectors: dict) -> dict:
     if os.path.exists(path):
         with open(path) as f:
             return yaml.safe_load(f) or default_output(detectors)
-        
+
     return default_output(detectors)
+
 
 def read_json_or_yaml(file_path: str):
     """

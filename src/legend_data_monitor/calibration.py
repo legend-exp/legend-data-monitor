@@ -627,7 +627,12 @@ def load_calib_results(period, run, prod_ref_dir):
 
 
 def check_calibration(
-    tmp_auto_dir: str, output_folder: str, period: str, run: str, det_info: dict, save_pdf=False
+    tmp_auto_dir: str,
+    output_folder: str,
+    period: str,
+    run: str,
+    det_info: dict,
+    save_pdf=False,
 ):
 
     hit_files = sorted(
@@ -637,7 +642,7 @@ def check_calibration(
     )
     pars = load_calib_results(period, run, tmp_auto_dir)
 
-    first_run = True if run == "r000" else False # CHANGE ME
+    first_run = True if run == "r000" else False  # CHANGE ME
     if not first_run:
         prev_run = f"r{int(run[1:])-1:03d}"
         prev_pars = load_calib_results(period, prev_run, tmp_auto_dir)
@@ -650,7 +655,9 @@ def check_calibration(
     fep_mean_results = {}
 
     shelve_path = os.path.join(
-        output_folder, period, run,
+        output_folder,
+        period,
+        run,
         f"mtg/l200-{period}-{run}-cal-monitoring",
     )
     os.makedirs(os.path.dirname(shelve_path), exist_ok=True)
@@ -674,7 +681,7 @@ def check_calibration(
             )
             timestamps = hit_files_data[mask].timestamp.to_numpy()
             if timestamps.size == 0:
-                continue  
+                continue
             timestamps -= timestamps[0]
             energies = hit_files_data[mask].cuspEmax_ctc_cal.to_numpy()
 
@@ -710,14 +717,22 @@ def check_calibration(
                 # bsln stability (only if not first run)
                 if not first_run:
                     gain = ecal["eres_linear"]["parameters"]["a"]
-                    prev_gain = prev_pars[ged]["results"]["ecal"]["cuspEmax_ctc_cal"]["eres_linear"]["parameters"]["a"]
+                    prev_gain = prev_pars[ged]["results"]["ecal"]["cuspEmax_ctc_cal"][
+                        "eres_linear"
+                    ]["parameters"]["a"]
                     gain_dev = abs(gain - prev_gain) / prev_gain * 2039
-                    update_psd_evaluation_in_memory(output, ged, "cal", "baseln_stab", gain_dev <= 2)
+                    update_psd_evaluation_in_memory(
+                        output, ged, "cal", "baseln_stab", gain_dev <= 2
+                    )
 
             else:
-                update_psd_evaluation_in_memory(output, ged, "cal", "FEP_gain_stab", False)
+                update_psd_evaluation_in_memory(
+                    output, ged, "cal", "FEP_gain_stab", False
+                )
                 if not first_run:
-                    update_psd_evaluation_in_memory(output, ged, "cal", "const_stab", False)
+                    update_psd_evaluation_in_memory(
+                        output, ged, "cal", "const_stab", False
+                    )
 
     # plot
     fep_gain_variation_summary(
