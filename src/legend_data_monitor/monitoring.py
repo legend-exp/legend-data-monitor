@@ -38,6 +38,35 @@ IGNORE_KEYS = utils.IGNORE_KEYS
 CALIB_RUNS = utils.CALIB_RUNS
 
 # -------------------------------------------------------------------------
+def compute_dead_time(df, window_ms=10):
+    """
+    Compute dead time percentage based on discharge windows.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Timestamps and boolean detector columns with is_discharge entries.
+    window_ms : float
+        Dead time window after each discharge; default: 10 ms.
+    """
+    times = df.index.view("int64") / 1e9
+    dt_total = times[-1] - times[0]
+
+    discharge_times = times[df.any(axis=1).to_numpy()]
+    if len(discharge_times) == 0:
+        return 0.0
+
+    lost_time = 0.0
+    window = window_ms / 1000.0
+    next_available = -np.inf
+
+    for t in discharge_times:
+        if t >= next_available:
+            lost_time += window
+            next_available = t + window  # veto until then
+
+    lost_time = len(discharge_times) * (window_ms / 1000.0)
+    return lost_time / dt_total * 100
 
 
 def qc_average(
@@ -148,8 +177,12 @@ def qc_average(
 
                 string_indices[string] = indices
 
+
             ax.scatter(xs, ys, color="dodgerblue", marker="o")
             ax.set_title(f"period: {period} - run: {run} - passing {par}")
+            #if par == 'IsDischarge':
+            #    dt = compute_dead_time(geds_df_abs)
+            #    ax.set_title(f"period: {period} - run: {run} - passing {par} - tot dead time {dt:.3f}%")
             ax.set_ylabel(f"Average rate {par}=True (mHz)")
             ax.set_yscale("log")
             ax.set_xticks(range(len(x_labels)))

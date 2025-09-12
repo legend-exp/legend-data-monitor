@@ -844,14 +844,16 @@ def check_calibration(
 
                 # bsln stability (only if not first run)
                 if not first_run:
-                    gain = ecal["eres_linear"]["parameters"]["a"]
-                    prev_gain = monitoring.get_energy_key(prev_pars[ged]["results"]["ecal"])[
-                        "eres_linear"
-                    ]["parameters"]["a"]
-                    gain_dev = abs(gain - prev_gain) / prev_gain * 2039
-                    update_psd_evaluation_in_memory(
-                        output, ged, "cal", "const_stab", gain_dev <= 2
-                    )
+                    # channel might not be present in the previous run, leave it None if so
+                    if ged in prev_pars:
+                        gain = ecal["eres_linear"]["parameters"]["a"]
+                        prev_gain = monitoring.get_energy_key(prev_pars[ged]["results"]["ecal"])[
+                            "eres_linear"
+                        ]["parameters"]["a"]
+                        gain_dev = abs(gain - prev_gain) / prev_gain * 2039
+                        update_psd_evaluation_in_memory(
+                            output, ged, "cal", "const_stab", gain_dev <= 2
+                        )
 
             else:
                 update_psd_evaluation_in_memory(
