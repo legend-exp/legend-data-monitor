@@ -171,11 +171,14 @@ def main():
 
         # don't run any check if there are no runs
         cal_runs = os.listdir(cal_path)
+        first_run = False
         if len(cal_runs) == 0:
             legend_data_monitor.utils.logger.debug(
                 "No available calibration runs to inspect. Exiting."
             )
             return
+        if len(cal_runs) == 1:
+            first_run = True
 
         pars_files_list = sorted(glob.glob(f"{cal_path}/*/*.yaml"))
         if not pars_files_list:
@@ -186,7 +189,7 @@ def main():
         )
 
         legend_data_monitor.calibration.check_calibration(
-            auto_dir_path, output_folder, period, current_run, det_info, save_pdf
+            auto_dir_path, output_folder, period, current_run, first_run, det_info, save_pdf
         )
 
         legend_data_monitor.calibration.check_psd(

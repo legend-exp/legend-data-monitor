@@ -1735,7 +1735,7 @@ def load_yaml_or_default(path: str, detectors: dict) -> dict:
 
     if os.path.exists(path):
         with open(path) as f:
-            return yaml.safe_load(f) or default_output(detectors)
+            return yaml.load(f, Loader=yaml.CLoader) or default_output(detectors)
 
     return default_output(detectors)
 
