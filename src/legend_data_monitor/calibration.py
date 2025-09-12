@@ -356,7 +356,7 @@ def check_psd(
         for d in detectors_name
     ]
 
-    psd_data = load_yaml_or_default(usability_map_file, det_info["detectors"])
+    psd_data = utils.load_yaml_or_default(usability_map_file, det_info["detectors"])
 
     cal_runs = sorted(os.listdir(cal_path))
     if len(cal_runs) == 1:
@@ -425,42 +425,47 @@ def fep_gain_variation(
     min_counts = 20
     stats.loc[stats["count"] < min_counts, ["mean", "std"]] = np.nan
 
+    fig, ax = plt.subplots(figsize=(10,5))
+
     # Choose baseline: first mean if valid, otherwise last valid mean
-    if pd.notna(stats["mean"].iloc[0]):
-        baseline = stats["mean"].iloc[0]
-    else:
-        baseline = stats["mean"].dropna().iloc[-1]
+    valid_means = stats["mean"].dropna()
+    if not valid_means.empty:
+        if pd.notna(stats["mean"].iloc[0]):
+            baseline = stats["mean"].iloc[0]
+        else:
+            baseline = stats["mean"].dropna().iloc[-1]
 
-    norm_values = (values - baseline) / baseline * 2039
+        norm_values = (values - baseline) / baseline * 2039
 
-    x_bins = bins
-    y_bins = np.linspace(-10, 10, 40)
-    means = (stats["mean"] - baseline) / baseline * 2039
+        x_bins = bins
+        y_bins = np.linspace(-10, 10, 40)
+        means = (stats["mean"] - baseline) / baseline * 2039
 
-    plt.figure(figsize=(10, 5))
-    plt.hist2d(timestamps, norm_values, bins=(x_bins, y_bins), cmap="Blues")
-    plt.colorbar(label="Counts")
+        ax.hist2d(timestamps, norm_values, bins=(x_bins, y_bins), cmap="Blues")
+        fig.colorbar(ax.collections[0], label="Counts")
 
-    plt.plot(stats["time"], means, "x-", color="red", label="10min mean")
+        ax.plot(stats["time"], means, "x-", color="red", label="10min mean")
 
-    plt.fill_between(
-        stats["time"],
-        -stats["std"] / baseline * 2039,
-        stats["std"] / baseline * 2039,
-        color="red",
-        alpha=0.2,
-        label="±1 std",
-    )
+        ax.fill_between(
+            stats["time"],
+            -stats["std"] / baseline * 2039,
+            stats["std"] / baseline * 2039,
+            color="red",
+            alpha=0.2,
+            label="±1 std",
+        )
+
 
     fwhm = pars["results"]["ecal"]["cuspEmax_ctc_cal"]["eres_linear"]["Qbb_fwhm_in_kev"]
+    if not np.isnan(fwhm):
 
-    if fwhm < 5:
-        plt.ylim(-5, 5)
+        if fwhm < 5:
+            plt.ylim(-5, 5)
 
-    plt.axhline(0, ls="--", color="black")
-    plt.axhline(-fwhm / 2, ls="-", color="blue")
-    plt.axhline(fwhm / 2, ls="-", color="blue", label="±FWHM/2")
-    plt.text(0, fwhm / 2 + 0.5, f"+FWHM/2 = {fwhm/2:.2f} keV", color="k")
+        plt.axhline(0, ls="--", color="black")
+        plt.axhline(-fwhm / 2, ls="-", color="blue")
+        plt.axhline(fwhm / 2, ls="-", color="blue", label="±FWHM/2")
+        plt.text(0, fwhm / 2 + 0.5, f"+FWHM/2 = {fwhm/2:.2f} keV", color="k")
 
     plt.legend(loc="lower left")
     plt.xlabel("time [s]")
@@ -469,7 +474,7 @@ def fep_gain_variation(
     plt.tight_layout()
 
     if save_pdf:
-        pdf_folder = os.path.join(output_dir, f"{period}/{run}/mtg/pdf", f"st{string}")
+        pdf_folder = os.path.join(output_dir, period, run, "mtg/pdf", f"st{string}")
         os.makedirs(pdf_folder, exist_ok=True)
         plt.savefig(
             os.path.join(
@@ -484,8 +489,10 @@ def fep_gain_variation(
     shelf[f"{period}_{run}_str{string}_pos{position}_{ged}_FEP_gain_variation"] = (
         serialized_plot
     )
-
     plt.close()
+
+    if valid_means.empty:
+        return None
 
     return means
 
@@ -495,30 +502,32 @@ def fep_gain_variation_summary(
     run: str,
     pars,
     detectors: dict,
-    results,
+    results: dict,
     output_dir: str,
     save_pdf: bool,
 ):
 
     plot_data = []
     for ged, item in results.items():
-
-        fwhm = pars[ged]["results"]["ecal"]["cuspEmax_ctc_cal"]["eres_linear"][
-            "Qbb_fwhm_in_kev"
-        ]
         meta_info = detectors[ged]
-        plot_data.append(
-            {
-                "ged": ged,
-                "string": meta_info["string"],
-                "pos": meta_info["position"],
-                "mean": item.mean(),
-                "std": item.std(),
-                "min": item.min(),
-                "max": item.max(),
-                "fwhm": fwhm,
-            }
-        )
+        if item is None or len(item) == 0:
+            mean = std = min_val = max_val = np.nan
+        else:
+            mean = item.mean()
+            std = item.std()
+            min_val = item.min()
+            max_val = item.max()
+        fwhm = pars[ged]["results"]["ecal"]["cuspEmax_ctc_cal"]["eres_linear"]["Qbb_fwhm_in_kev"]
+        plot_data.append({
+            "ged": ged,
+            "string": meta_info["string"],
+            "pos": meta_info["position"],
+            "mean": mean,
+            "std": std,
+            "min": min_val,
+            "max": max_val,
+            "fwhm": fwhm,
+        })
 
     df_plot = pd.DataFrame(plot_data)
 
@@ -637,7 +646,7 @@ def check_calibration(
     usability_map_file = os.path.join(
         output_folder, period, run, f"l200-{period}-{run}-qcp_summary.yaml"
     )
-    output = load_yaml_or_default(usability_map_file, detectors)
+    output = utils.load_yaml_or_default(usability_map_file, detectors)
     fep_mean_results = {}
 
     shelve_path = os.path.join(
@@ -692,7 +701,10 @@ def check_calibration(
 
             if fwhm_ok:
                 # FEP gain stability
-                stable = np.all(np.abs(fep_mean_results[ged]) <= 2)
+                if fep_mean_results[ged] is not None:
+                    stable = np.all(np.abs(fep_mean_results[ged]) <= 2)
+                else:
+                    stable = False 
                 update_psd_evaluation_in_memory(output, ged, "cal", "FEP_gain_stab", stable)
 
                 # bsln stability (only if not first run)
