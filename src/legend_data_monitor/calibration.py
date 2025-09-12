@@ -338,7 +338,28 @@ def check_psd(
     det_info: dict,
     save_pdf: bool,
 ):
+    """
+    Evaluate the PSD usability for a set of detectors based on calibration results; save results in a YAML summary file; plot per-detector PSD stability data and store them as shelve file (and pdf if wanted).
 
+    Parameters
+    ----------
+    auto_dir_path : str
+        Path to tmp-auto public data files (eg /data2/public/prodenv/prod-blind/tmp-auto).
+    cal_path : str
+        Path to the directory containing calibration runs (eg /data2/public/prodenv/prod-blind/tmp-auto/generated/par/<tier>/cal/<period>).
+    pars_files_list : list
+        List of YAML/JSON files containing results for each calibration run.
+    output_dir : str
+        Path to output folder where the output summary YAML and plots will be stored.
+    period : str
+        Period to inspect.
+    current_run : str
+        Run to inspect.
+    det_info : dict
+        Dictionary containing detector metadata.
+    save_pdf : bool
+        True if you want to save pdf files too; default: False.
+    """
     # create the folder and parents if missing - for the moment, we store it under the 'phy' folder
     output_dir = os.path.join(output_dir, period)
     output_dir_run = os.path.join(output_dir, current_run, "mtg")
@@ -399,15 +420,38 @@ def check_psd(
 def fep_gain_variation(
     period: str,
     run: str,
-    pars,
+    pars: dict,
     chmap: dict,
-    timestamps,
-    values,
+    timestamps: np.ndarray,
+    values: np.ndarray,
     output_dir: str,
     save_pdf: bool,
-    shelf,
+    shelf: shelve.Shelf,
 ):
+    """
+    Compute and plot FEP gain variation for a single detector; optional pdf saving; store a serialized plot in a shelve object.
 
+    Parameters
+    ----------
+    period : str
+        Period to inspect.
+    run : str
+        Run to inspect.
+    pars : dict
+        Calibration results dictionary for a given detector.
+    chmap : dict
+        Dictionary with detector info, must include 'name', 'string', 'position'.
+    timestamps : np.ndarray
+        Array of timestamps for a given detector.
+    values : np.ndarray
+        Array of energies for a given detector.
+    output_dir : str
+        Path to output folder where plots will be stored.
+    save_pdf : bool
+        If True, save a PDF of the plot.
+    shelf : shelve.Shelf
+        Open shelve object where serialized plots will be stored.
+    """
     ged = chmap["name"]
     string = chmap["string"]
     position = chmap["position"]
@@ -500,13 +544,32 @@ def fep_gain_variation(
 def fep_gain_variation_summary(
     period: str,
     run: str,
-    pars,
+    pars: dict,
     detectors: dict,
     results: dict,
     output_dir: str,
     save_pdf: bool,
 ):
+    """
+    Box plot summary for FEP gain variations for multiple detectors.
 
+    Parameters
+    ----------
+    period : str
+        Period to inspect.
+    run : str
+        Run to inspect.
+    pars : dict
+        Calibration results for each detector.
+    detectors : dict
+        Detector info, with detector names as keys.
+    results : dict
+        FEP gain variation arrays per detector; None if invalid.
+    output_dir : str
+        Output folder for saving plots and shelve data.
+    save_pdf : bool
+        If True, save the summary plot as a PDF.
+    """
     plot_data = []
     for ged, item in results.items():
         meta_info = detectors[ged]
@@ -597,6 +660,7 @@ def fep_gain_variation_summary(
 
     if save_pdf:
         pdf_folder = os.path.join(output_dir, f"{period}/{run}/mtg/pdf")
+        os.makedirs(pdf_folder, exist_ok=True)
         plt.savefig(
             os.path.join(
                 pdf_folder,
@@ -606,11 +670,11 @@ def fep_gain_variation_summary(
         )
 
     # serialize+plot in a shelve object
-    serialized_plot = pickle.dumps(plt.gcf())
+    serialized_plot = pickle.dumps(fig)
     with shelve.open(
         os.path.join(
-            output_dir,
-            f"{period}/{run}/mtg/l200-{period}-{run}-cal-monitoring",
+            output_dir, period, run,
+            f"mtg/l200-{period}-{run}-cal-monitoring",
         ),
         "c",
         protocol=pickle.HIGHEST_PROTOCOL,
@@ -620,32 +684,29 @@ def fep_gain_variation_summary(
     plt.close()
 
 
-def load_calib_results(period, run, prod_ref_dir):
-    directory = os.path.join(prod_ref_dir, "generated/par/hit/cal", period, run)
-    file = glob.glob(os.path.join(directory, "*par_hit.yaml"))[0]
-    return yaml.safe_load(open(file))
-
-
 def check_calibration(
     tmp_auto_dir: str,
     output_folder: str,
     period: str,
     run: str,
+    first_run: bool,
     det_info: dict,
     save_pdf=False,
 ):
-
     hit_files = sorted(
         glob.glob(
             os.path.join(tmp_auto_dir, "generated/tier/hit/cal", period, run, "*")
         )
     )
-    pars = load_calib_results(period, run, tmp_auto_dir)
+    directory = os.path.join(tmp_auto_dir, "generated/par/hit/cal", period, run)
+    file = glob.glob(os.path.join(directory, "*par_hit.yaml"))[0]
+    pars = utils.read_json_or_yaml(file)
 
-    first_run = True if run == "r000" else False  # CHANGE ME
     if not first_run:
         prev_run = f"r{int(run[1:])-1:03d}"
-        prev_pars = load_calib_results(period, prev_run, tmp_auto_dir)
+        directory = os.path.join(tmp_auto_dir, "generated/par/hit/cal", period, prev_run)
+        file = glob.glob(os.path.join(directory, "*par_hit.yaml"))[0]
+        prev_pars = utils.read_json_or_yaml(file)
 
     detectors = det_info["detectors"]
     usability_map_file = os.path.join(

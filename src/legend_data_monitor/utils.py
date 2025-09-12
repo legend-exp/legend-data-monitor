@@ -1713,8 +1713,7 @@ def build_runinfo(path: str, version: str, output: str):
 # Helper functions
 # -------------------------------------------------------------------------
 def load_yaml_or_default(path: str, detectors: dict) -> dict:
-    """Load YAML from `path` if it exists, else return a default dict."""
-
+    """Load YAML if it exists, else return a default dict."""
     def default_output(detectors: dict) -> dict:
         return {
             ged: {
