@@ -1,7 +1,10 @@
 import os
 import tempfile
+
 import yaml
-from legend_data_monitor.utils import load_yaml_or_default  
+
+from legend_data_monitor.utils import load_yaml_or_default
+
 
 def test_load_yaml_or_default():
     detectors = {"ged1": {}, "ged2": {}}
@@ -25,7 +28,7 @@ def test_load_yaml_or_default():
     finally:
         os.remove(empty_path)
 
-    # file exists 
+    # file exists
     content = {"ged1": {"cal": {"npeak": 123}, "phy": {}}}
     with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as tmpfile:
         yaml.dump(content, tmpfile)

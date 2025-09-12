@@ -189,7 +189,13 @@ def main():
         )
 
         legend_data_monitor.calibration.check_calibration(
-            auto_dir_path, output_folder, period, current_run, first_run, det_info, save_pdf
+            auto_dir_path,
+            output_folder,
+            period,
+            current_run,
+            first_run,
+            det_info,
+            save_pdf,
         )
 
         legend_data_monitor.calibration.check_psd(
