@@ -352,7 +352,7 @@ def main():
         pass
     else:
         os.makedirs(os.path.join(phy_folder, period, run, "mtg/pdf"), exist_ok=True)
-        cal_bash_command = f"python monitoring.py check_calib --public_data {auto_dir_path} --output {phy_folder} --p {period} --current_run {run}"
+        cal_bash_command = f"{cmd} python monitoring.py check_calib --public_data {auto_dir_path} --output {phy_folder} --period {period} --current_run {run}"
         if save_pdf is True:
             cal_bash_command += " --pdf True"
         logger.debug(f"...running command {cal_bash_command}")

@@ -704,15 +704,18 @@ def check_calibration(
         )
     )
     directory = os.path.join(tmp_auto_dir, "generated/par/hit/cal", period, run)
-    file = glob.glob(os.path.join(directory, "*par_hit.yaml"))[0]
+    file = sorted(glob.glob(os.path.join(directory, "*par_hit.yaml")))[0]
     pars = utils.read_json_or_yaml(file)
+
+    # avoid case where multiple cal runs were processed but we are still requiring to inspect the first run
+    if run in file: first_run = True
 
     if not first_run:
         prev_run = f"r{int(run[1:])-1:03d}"
         directory = os.path.join(
             tmp_auto_dir, "generated/par/hit/cal", period, prev_run
         )
-        file = glob.glob(os.path.join(directory, "*par_hit.yaml"))[0]
+        file = sorted(glob.glob(os.path.join(directory, "*par_hit.yaml")))[0]
         prev_pars = utils.read_json_or_yaml(file)
 
     detectors = det_info["detectors"]
@@ -729,6 +732,7 @@ def check_calibration(
         f"mtg/l200-{period}-{run}-cal-monitoring",
     )
     os.makedirs(os.path.dirname(shelve_path), exist_ok=True)
+    utils.logger.debug("...inspecting FEP, calib peaks, stability in calibrations")
 
     with shelve.open(shelve_path, "c", protocol=pickle.HIGHEST_PROTOCOL) as shelf:
         for ged, item in detectors.items():

@@ -36,7 +36,7 @@ def main():
     func2_parser.add_argument(
         "--start_key", help="First timestamp of the inspected range."
     )
-    func2_parser.add_argument("--p", help="Period to inspect.")
+    func2_parser.add_argument("--period", help="Period to inspect.")
     func2_parser.add_argument(
         "--avail_runs",
         nargs="+",
@@ -82,6 +82,11 @@ def main():
         "check_calib",
         help="Check calibration stability in calibration runs and create monitoring summary file.",
     )
+    func3_parser.add_argument(
+        "--public_data",
+        help="Path to tmp-auto public data files (eg /data2/public/prodenv/prod-blind/tmp-auto).",
+        default="/data2/public/prodenv/prod-blind/ref-v1.0.1",
+    )
     func3_parser.add_argument("--output", help="Path to output folder.")
     func3_parser.add_argument("--period", help="Period to inspect.")
     func3_parser.add_argument("--current_run", type=str, help="Run under inspection.")
@@ -122,7 +127,7 @@ def main():
         phy_mtg_data = args.hdf_files
         output_folder = args.output
         start_key = args.start_key
-        period = args.p
+        period = args.period
         runs = args.avail_runs
         current_run = args.current_run
         pswd_email = args.pswd_email
@@ -163,22 +168,16 @@ def main():
             if os.path.isdir(cal_path):
                 found = True
                 break
-        if found is False:
-            legend_data_monitor.utils.logger.debug(
-                f"No valid folder {cal_path} found. Exiting."
-            )
+        if not found:
+            legend_data_monitor.utils.logger.debug(f"No valid folder {cal_path} found. Exiting.")
             return
 
         # don't run any check if there are no runs
         cal_runs = os.listdir(cal_path)
-        first_run = False
         if len(cal_runs) == 0:
-            legend_data_monitor.utils.logger.debug(
-                "No available calibration runs to inspect. Exiting."
-            )
+            legend_data_monitor.utils.logger.debug("No available calibration runs to inspect. Exiting.")
             return
-        if len(cal_runs) == 1:
-            first_run = True
+        first_run = len(cal_runs) == 1
 
         pars_files_list = sorted(glob.glob(f"{cal_path}/*/*.yaml"))
         if not pars_files_list:
