@@ -686,7 +686,6 @@ def check_calibration(
                 "FEP_gain_stab": None,
                 "const_stab": None,
                 "PSD": None,
-                "first_run": True,
             },
             "phy": {"pulser_stab": None, "baseln_stab": None, "baseln_spike": None},
         }
@@ -728,12 +727,9 @@ def check_calibration(
         else:
             output[ged]["cal"]["FEP_gain_stab"] = False
 
-        if run == "r000":
-            output[ged]["cal"]["first_run"] = True
-        else:
-            output[ged]["cal"]["first_run"] = False
+        first_run = True if run == "r000" else False
 
-        if not output[ged]["cal"]["first_run"]:
+        if not first_run:
             if output[ged]["cal"]["fwhm_ok"]:
                 gain = pars[ged]["results"]["ecal"]["cuspEmax_ctc_cal"]["eres_linear"][
                     "parameters"

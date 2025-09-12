@@ -121,7 +121,7 @@ def main():
         auto_dir_path = args.public_data
         phy_mtg_data = args.hdf_files
         output_folder = args.output
-        start_key = args.start
+        start_key = args.start_key
         period = args.p
         runs = args.avail_runs
         current_run = args.current_run
