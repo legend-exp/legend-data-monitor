@@ -727,28 +727,34 @@ def check_calibration(
     )
     output = utils.load_yaml_or_default(usability_map_file, detectors)
     fep_mean_results = {}
-    
+
     directory = os.path.join(tmp_auto_dir, "generated/par/hit/cal", period, run)
-    file = sorted(glob.glob(os.path.join(directory, "*par_hit.yaml")))
-    if not file:
+    files = sorted(glob.glob(os.path.join(directory, "*par_hit.yaml")))
+    if not files:
         utils.logger.debug(f"...no calibration files found for run {run}. Exiting.")
-        return 
-    pars = utils.read_json_or_yaml(file[0])
-
+        return
+    pars = utils.read_json_or_yaml(files[0])
+    
     # avoid case where multiple cal runs were processed but we are still requiring to inspect the first run
-    if run in file: first_run = True
-
-    if not first_run and int(run[1:])-1>=0:
-        prev_run = f"r{int(run[1:])-1:03d}"
-        directory = os.path.join(
-            tmp_auto_dir, "generated/par/hit/cal", period, prev_run
-        )
-        file = sorted(glob.glob(os.path.join(directory, "*par_hit.yaml")))
-        if not file:
-            utils.logger.debug(f"No calibration files found for previous run {prev_run}. Skip.")
+    if run in files:
+        first_run = True
+    
+    # find nearest previous run
+    prev_pars = None
+    if not first_run:
+        run_number = int(run[1:])
+        for offset in range(1, run_number + 1):  # check run-1, run-2, ...
+            prev_run = f"r{run_number - offset:03d}"
+            directory = os.path.join(tmp_auto_dir, "generated/par/hit/cal", period, prev_run)
+            files = sorted(glob.glob(os.path.join(directory, "*par_hit.yaml")))
+            if files:
+                utils.logger.debug(f"...using previous calibration from {prev_run}")
+                prev_pars = utils.read_json_or_yaml(files[0])
+                break
+    
+        if prev_pars is None:
+            utils.logger.debug(f"No previous calibration files found for {run}, treat as first run")
             first_run = True
-        else:
-            prev_pars = utils.read_json_or_yaml(file[0])
 
     shelve_path = os.path.join(
         output_folder,
@@ -837,7 +843,7 @@ def check_calibration(
                 )
 
                 # bsln stability (only if not first run)
-                if not first_run and int(run[1:])-1>=0:
+                if not first_run:
                     gain = ecal["eres_linear"]["parameters"]["a"]
                     prev_gain = monitoring.get_energy_key(prev_pars[ged]["results"]["ecal"])[
                         "eres_linear"
@@ -851,7 +857,7 @@ def check_calibration(
                 update_psd_evaluation_in_memory(
                     output, ged, "cal", "FEP_gain_stab", False
                 )
-                if not first_run and int(run[1:])-1>=0:
+                if not first_run:
                     update_psd_evaluation_in_memory(
                         output, ged, "cal", "const_stab", False
                     )
