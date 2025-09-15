@@ -1353,13 +1353,12 @@ def check_cal_phy_thresholds(
         ct = sum(1 for v in cal_dict.values() if v is False)
         if ct != 0:
             if not email_message:
-                email_message.append(f"ALERT: Data monitoring thresholds exceeded in {period}.\n")
+                email_message.append(f"ALERT: Data monitoring thresholds exceeded in {period}-{run}-{key}.\n")
             email_message.append(
-                f"- {ged} has {ct}/{len(cal_dict)} failed entries in {run} cal"
+                f"- {ged} has {ct}/{len(cal_dict)} failed entries"
             )
     
     if len(email_message) > 1 and pswd_email is not None:
-        print(email_message)
         with open("message.txt", "w") as f:
             for line in email_message:
                 f.write(line + "\n")
@@ -1369,20 +1368,86 @@ def check_cal_phy_thresholds(
         os.remove("message.txt")
 
 
+def update_evaluation_in_memory(
+    data: dict, det_name: str, data_type: str, key: str, value: bool | float
+):
+    """
+    Update the key entry in memory dict, where value can be bool or nan if not available; data_type is either 'cal' or 'phy'.
+    
+    Parameters
+    ----------
+    data : dict
+        Dictionary storing summary monitoring results, structured as data[det_name][data_type][key] = False/True/null.
+    det_name : str
+        Detector name.
+    data_type : str
+        Data type, either 'cal' or 'phy'.
+    key : str
+        Parameter's key name, eg 'fwhm_ok' or 'pulser_stab'.
+    value : bool or float
+        Value to assign: False/True/null.
+    """
+    data.setdefault(det_name, {}).setdefault(data_type, {})[key] = value
 
-def check_threshold(
+
+def find_over_threshold(
     data_series: pd.Series,
-    pswd_email: str | None,
     last_checked: float | None | str,
     t0: list,
-    pars_data: dict,
     threshold: list,
-    period: str,
-    current_run: str | int,
+) -> pd.Series:
+    """
+    Return timestamps where values exceed the given thresholds.
+
+    Parameters
+    ----------
+    data_series : pd.Series
+        Series of values indexed by datetime.
+    last_checked : float | None | str
+        Epoch time (seconds) of the last check; if None/"None", no cutoff is applied.
+    t0 : list of pd.Timestamp
+        Start times where the first entry defines the window start.
+    threshold : list 
+        Threshold bounds; either can be None.
+    """
+    if data_series is None or all(v is None for v in threshold):
+        return pd.Series([], dtype='bool')
+
+    # filter by last_checked
+    if last_checked not in ["None", None]:
+        cutoff = pd.to_datetime(float(last_checked), unit="s", utc=True)
+        data_series = data_series[data_series.index > cutoff]
+
+    if data_series.empty:
+        return pd.Series([], dtype='bool')
+
+    # define time window
+    start = pd.Timestamp(t0[0]).tz_localize('UTC') if t0[0].tzinfo is None else t0[0].tz_convert('UTC')
+    end = start + pd.Timedelta(days=7)
+    mask_time = (data_series.index >= start) & (data_series.index < end)
+    data_series = data_series[mask_time]
+
+    if data_series.empty:
+        return pd.Series([], dtype='bool')
+
+    low, high = threshold
+    mask = pd.Series(False, index=data_series.index)
+    if low is not None:
+        mask |= data_series < low
+    if high is not None:
+        mask |= data_series > high
+
+    return data_series[mask]
+
+    
+def check_threshold(
+    data_series: pd.Series,
     channel_name: str,
-    string: str | int,
-    email_message: list,
+    last_checked: float | None | str,
+    t0: list,
+    threshold: list,
     parameter: str,
+    output: dict,
 ):
     """Check if a given parameter is over threshold and update the email message list.
 
@@ -1390,84 +1455,31 @@ def check_threshold(
     ----------
     data_series : pd.Series
         Series of gain differences indexed by timestamp.
-    pswd_email : str or None
-        Email password to trigger alert (used as a flag).
     last_checked : float
         Timestamp (in seconds since epoch) of last check.
     t0 : list of pd.Timestamp
         List of start times for time windows.
-    pars_data : dict
-        Dictionary containing parameters including 'res' for thresholds.
     threshold: list
         Threshold (int or float).
-    period : str
-        Period string (e.g., "P03").
-    current_run : str or int
-        Identifier of the current run.
     channel_name : str
         Name of the channel.
-    string : str or int
-        String identifier for the channel.
-    email_message : list
-        List of messages to be sent via email.
     parameter : str
         Parameter name under inspection.
+    output: dict
+        Dictionary containing summary cal and phy info.
     """
-    if (
-        data_series is None
-        or pswd_email is None
-        or last_checked == "None"
-        or (threshold[0] is None and threshold[1] is None)
-    ):
-        return email_message
+    # no available FWHM to compare gain variations with
+    if parameter == "pulser_stab" and not output[channel_name]['cal']['fwhm_ok']:
+        update_evaluation_in_memory(output, channel_name, "phy", parameter, False)
+        return 
 
-    timestamps = data_series.index
-    cutoff = pd.to_datetime(float(last_checked), unit="s", utc=True)
-    filtered_series = data_series[data_series.index > cutoff]
+    over_threshold_timestamps = find_over_threshold(data_series, last_checked, t0, threshold)
+    condition = (
+        not over_threshold_timestamps.empty 
+    )
+    update_evaluation_in_memory(output, channel_name, "phy", parameter, not condition)
 
-    if filtered_series.empty:
-        return email_message
-
-    time_range_start = pd.Timestamp(t0[0])
-    time_range_end = time_range_start + pd.Timedelta(days=7)
-
-    # ensure UTC awareness
-    if time_range_start.tzinfo is None:
-        time_range_start = time_range_start.tz_localize("UTC")
-    else:
-        time_range_start = time_range_start.tz_convert("UTC")
-
-    if time_range_end.tzinfo is None:
-        time_range_end = time_range_end.tz_localize("UTC")
-    else:
-        time_range_end = time_range_end.tz_convert("UTC")
-
-    # filter by time range
-    mask_time_range = (timestamps >= time_range_start) & (timestamps < time_range_end)
-    filtered_timestamps = timestamps[mask_time_range]
-    data_series_in_range = data_series[mask_time_range]
-
-    low, high = threshold  # threshold = [low, high]
-    mask = pd.Series(True, index=data_series_in_range.index)  # start with all True
-
-    if low is not None:
-        mask &= data_series_in_range < low
-    if high is not None:
-        mask &= data_series_in_range > high
-
-    over_threshold_timestamps = filtered_timestamps[mask]
-
-    if not over_threshold_timestamps.empty:
-        if len(email_message) == 0:
-            email_message = [
-                f"ALERT: Data monitoring threshold exceeded in {period}-{current_run}.\n"
-            ]
-        email_message.append(
-            f"- {parameter} over threshold for {channel_name} (string {string}) "
-            f"for {len(over_threshold_timestamps)} times"
-        )
-
-    return email_message
+    return 
 
 
 def get_map_dict(data_analysis: DataFrame):
@@ -1556,10 +1568,26 @@ def get_status_map(path: str, version: str, first_timestamp: str, datatype: str)
 # -------------------------------------------------------------------------
 # Build runinfo file with livetime info
 # -------------------------------------------------------------------------
-def update_runinfo(run_info, period, run, data_type, my_global_path):
-    files = os.listdir(my_global_path)
+def update_runinfo(run_info: dict, period: str, run: str, data_type: str, mtg_files_path: str):
+    """
+    Update run information dict, with livetime in seconds for phy data; it automatically removes cycles that are flagged as unusable via keys stored in `settings/ignore-keys.yaml`.
+
+    Parameters
+    ----------
+    run_info : dict
+        Dictionary containing metadata for runs, separated by period, run, and data type (cal, phy, ...).
+    period : str
+        Period under inspection.
+    run : str
+        Run under inspection.
+    data_type : str
+        Data type to process (cal, phy, ...).
+    mtg_files_path : str
+        Path where the monitoring HDF5 files were stored for a specifi period and run.
+    """
+    files = os.listdir(mtg_files_path)
     files = [
-        os.path.join(my_global_path, f) for f in files if f"{data_type}-geds.hdf" in f
+        os.path.join(mtg_files_path, f) for f in files if f"{data_type}-geds.hdf" in f
     ]
 
     with open("settings/ignore-keys.yaml") as f:

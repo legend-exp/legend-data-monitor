@@ -153,13 +153,6 @@ def evaluate_psd_performance(
     return results
 
 
-def update_psd_evaluation_in_memory(
-    data: dict, det_name: str, data_type: str, key: str, value: bool | float
-):
-    """Update the key entry in memory dict, where value can be bool or nan if not available; data_type is either 'cal' or 'phy'."""
-    data.setdefault(det_name, {}).setdefault(data_type, {})[key] = value
-
-
 def evaluate_psd_usability_and_plot(
     period: str,
     current_run: str,
@@ -323,7 +316,7 @@ def evaluate_psd_usability_and_plot(
     plt.close()
 
     # supdate psd status
-    update_psd_evaluation_in_memory(
+    utils.update_evaluation_in_memory(
         psd_data, det_name, "cal", "PSD", eval_result["status"]
     )
 
@@ -388,7 +381,7 @@ def check_psd(
             "Only one available calibration run. Save all entries as None and exit."
         )
         for det_name in detectors_name:
-            update_psd_evaluation_in_memory(psd_data, det_name, "cal", "PSD", None)
+            utils.update_evaluation_in_memory(psd_data, det_name, "cal", "PSD", None)
 
         with open(usability_map_file, "w") as f:
             yaml.dump(psd_data, f, sort_keys=False)
@@ -776,6 +769,10 @@ def check_calibration(
             if not item["processable"]:
                 continue
 
+            # avoid cases where the detector is not present in the output files
+            if item["channel_str"] not in lh5.ls(hit_files[0],''):
+                continue
+
             hit_files_data = lh5.read_as(
                 item["channel_str"] + "/hit/",
                 hit_files,
@@ -826,11 +823,11 @@ def check_calibration(
             
             # true only if both peaks are valid
             overall_valid = fep_valid and low_valid
-            update_psd_evaluation_in_memory(output, ged, "cal", "npeak", overall_valid)
+            utils.update_evaluation_in_memory(output, ged, "cal", "npeak", overall_valid)
             
             fwhm = ecal["eres_linear"]["Qbb_fwhm_in_kev"]
             fwhm_ok = not np.isnan(fwhm)
-            update_psd_evaluation_in_memory(output, ged, "cal", "fwhm_ok", fwhm_ok)
+            utils.update_evaluation_in_memory(output, ged, "cal", "fwhm_ok", fwhm_ok)
 
             if fwhm_ok:
                 # FEP gain stability
@@ -840,7 +837,7 @@ def check_calibration(
                     stable = bool(np.all(np.abs(arr[~np.isnan(arr)]) <= 2))
                 else:
                     stable = False
-                update_psd_evaluation_in_memory(
+                utils.update_evaluation_in_memory(
                     output, ged, "cal", "FEP_gain_stab", stable
                 )
 
@@ -853,16 +850,16 @@ def check_calibration(
                             "eres_linear"
                         ]["parameters"]["a"]
                         gain_dev = abs(gain - prev_gain) / prev_gain * 2039
-                        update_psd_evaluation_in_memory(
+                        utils.update_evaluation_in_memory(
                             output, ged, "cal", "const_stab", gain_dev <= 2
                         )
 
             else:
-                update_psd_evaluation_in_memory(
+                utils.update_evaluation_in_memory(
                     output, ged, "cal", "FEP_gain_stab", False
                 )
                 if not first_run:
-                    update_psd_evaluation_in_memory(
+                    utils.update_evaluation_in_memory(
                         output, ged, "cal", "const_stab", False
                     )
 

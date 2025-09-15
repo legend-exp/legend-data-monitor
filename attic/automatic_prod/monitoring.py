@@ -142,6 +142,10 @@ def main():
         partition = args.partition
         quadratic = args.quad_res
         zoom = args.zoom
+        
+        det_info = legend_data_monitor.utils.build_detector_info(
+            os.path.join(auto_dir_path, "inputs"), start_key=start_key
+        )
 
         legend_data_monitor.monitoring.plot_time_series(
             auto_dir_path,
@@ -151,13 +155,22 @@ def main():
             period,
             runs,
             current_run,
-            pswd_email,
+            det_info,
             save_pdf,
             escale_val,
             last_checked,
             partition,
             quadratic,
             zoom,
+        )
+
+        legend_data_monitor.utils.check_cal_phy_thresholds(
+            output_folder,
+            period,
+            current_run,
+            "phy",
+            det_info["detectors"],
+            pswd_email,
         )
 
     elif args.command == "check_calib":

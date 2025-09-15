@@ -415,7 +415,7 @@ def extract_fep_peak(pars_dict: dict, channel: str):
     pk_fits = get_energy_key(ecal_results).get("pk_fits", {})
 
     try:
-        fep_energy = [p for p in pk_fits if 2613 < p < 2616][0]
+        fep_energy = [p for p in sorted(pk_fits) if 2613 < float(p) < 2616][0]
         try:
             fep_peak_pos = pk_fits[fep_energy]["parameters_in_ADC"]["mu"]
             fep_peak_pos_err = pk_fits[fep_energy]["uncertainties_in_ADC"]["mu"]
@@ -866,7 +866,7 @@ def get_dfs(phy_mtg_data: str, period: str, run_list: list, parameter: str):
             run_dir, include=["pulser01ana"], exclude=["res", "min"]
         )
         if not hdf_puls:
-            utils.logger.debug("hdf_puls is empty")
+            utils.logger.debug("hdf_puls is empty for gain")
             # there's no need to return None, as the code will automatically handle the case of missing pulser file later on
         else:
             puls_abs = read_if_key_exists(hdf_puls, f"IsPulser_{parameter}")
@@ -947,7 +947,7 @@ def get_traptmax_tp0est(phy_mtg_data: str, period: str, run_list: list):
             if tp0est is not None:
                 puls_df_tp0est.append(tp0est)
         else:
-            utils.logger.debug("hdf_puls is empty")
+            utils.logger.debug("hdf_puls is empty for tp0est")
 
     return (
         (
@@ -1006,7 +1006,16 @@ def filter_series_by_ignore_keys(
 
 
 def filter_by_period(series: pd.Series, period: str | list) -> pd.Series:
-    """Filter a series by ignore keys for the given period(s)."""
+    """
+    Return a series filtered by ignore keys for the given period(s).
+    
+    Parameters
+    ----------
+    series : pd.Series
+        Input time series (indexed by timestamps) to filter.
+    period : str or list
+        Period (or list of periods) to inspect.
+    """
     if isinstance(period, list):
         for p in period:
             series = filter_series_by_ignore_keys(series, IGNORE_KEYS, p)
@@ -1019,7 +1028,20 @@ def filter_by_period(series: pd.Series, period: str | list) -> pd.Series:
 def compute_diff_and_rescaling(
     series: pd.Series, reference: float, escale: float, variations: bool
 ):
-    """Compute relative differences (if 'variations' is True) and rescale values by 'escale'."""
+    """
+    Compute relative differences (if 'variations' is True) and rescale values by 'escale'.
+    
+    Parameters
+    ----------
+    series : pd.Series
+        Input time series of numerical values.
+    reference : float
+        Reference value used to compute relative differences.
+    escale : float
+        Scaling factor, eg 2039 keV.
+    variations : bool
+        If true, compute relative difference (series - reference)/reference.
+    """
     if variations:
         diff = (series - reference) / reference
     else:
@@ -1029,7 +1051,18 @@ def compute_diff_and_rescaling(
 
 
 def resample_series(series: pd.Series, resampling_time: str, mask: pd.Series):
-    """Calculate mean/std for resampled time ranges to which a mask is then applied. The function already adds UTC timezones to the series."""
+    """
+    Calculate mean/std for resampled time ranges to which a mask is then applied. The function already adds UTC timezones to the series.
+    
+    Parameters
+    ----------
+    series : pd.Series
+        Input time series of numerical values.
+    resampling_time : str
+        Resampling frequency, eg '1h'.
+    mask : pd.Series 
+        Boolean mask aligned to the datetime index; false values mark timestamps that should be excluded, ie set to nan value.
+    """
     mean = series.resample(resampling_time).mean()
     std = series.resample(resampling_time).std()
 
@@ -1279,7 +1312,7 @@ def plot_time_series(
     period: str,
     runs: list,
     current_run: str,
-    pswd_email: str | None,
+    det_info: dict,
     save_pdf: bool,
     escale_val: float,
     last_checked: float | None,
@@ -1314,8 +1347,8 @@ def plot_time_series(
         Available runs to inspect for a given period.
     current_run : str
         Run under inspection.
-    pswd_email : str | None
-        Password to access the legend.data.monitoring@gmail.com account for sending alert messages.
+    det_info : dict
+        Dictionary containing detector metadata.
     save_pdf : bool
         True if you want to save pdf files too; default: False.
     escale_val : float
@@ -1333,17 +1366,17 @@ def plot_time_series(
     for entry in runs:
         new_entry = entry.replace(",", "").replace("[", "").replace("]", "")
         avail_runs.append(new_entry)
-
     dataset = {period: avail_runs}
-
+    period_list = list(dataset.keys())
     xlim_idx = 1
     fit_flag = "quadratic" if quadratic is True else "linear"
 
-    det_info = utils.build_detector_info(
-        os.path.join(auto_dir_path, "inputs/"), start_key=start_key
-    )
     detectors = det_info["detectors"]
     str_chns = det_info["str_chns"]
+    usability_map_file = os.path.join(
+        output_folder, period, current_run, f"l200-{period}-{current_run}-qcp_summary.yaml"
+    )
+    output = utils.load_yaml_or_default(usability_map_file, detectors)
 
     email_message = []
 
@@ -1353,7 +1386,6 @@ def plot_time_series(
         f'(channel == "{channel}" and period in {periods})'
         for channel, periods in no_puls_dets.items()
     )
-    period_list = list(dataset.keys())
 
     # gain over period
     for index_i in range(len(period_list)):
@@ -1658,9 +1690,9 @@ def plot_time_series(
         "BlStd": False,
     }
     titles = {
-        "TrapemaxCtcCal": "Gain",
-        "Baseline": "FPGA baseline",
-        "BlStd": "Baseline std",
+        "TrapemaxCtcCal": "pulser_stab",
+        "Baseline": "baseln_stab",
+        "BlStd": "baseln_spike",
     }
     limits = {
         "TrapemaxCtcCal": [None, None],
@@ -1668,6 +1700,8 @@ def plot_time_series(
         "BlStd": [None, 50],
     }
     for inspected_parameter in ["Baseline", "TrapemaxCtcCal", "BlStd"]:
+        escale_par = escale_val if inspected_parameter == "TrapemaxCtcCal" else 1
+        
         for index_i in range(len(period_list)):
             period = period_list[index_i]
 
@@ -1680,15 +1714,17 @@ def plot_time_series(
                 get_traptmax_tp0est(phy_mtg_data, period, [current_run])
             )
 
+            
             if (
                 geds_df_cuspEmax_abs is None
                 or geds_df_cuspEmax_abs_corr is None
-                or puls_df_cuspEmax_abs is None
+                # no need to exit if pulser01ana does not exits, handled it properly now
+                #or puls_df_cuspEmax_abs is None
             ):
-                utils.logger.debug("Dataframes are None for %s!", period)
+                utils.logger.debug("Dataframes are None for %s-%s!", period, current_run)
                 continue
             if geds_df_cuspEmax_abs.empty:
-                utils.logger.debug("Dataframes are empty for %s!", period)
+                utils.logger.debug("Dataframes are empty for %s-%s!", period, current_run)
                 continue
             dfs = [
                 geds_df_cuspEmax_abs,
@@ -1736,11 +1772,7 @@ def plot_time_series(
                             period,
                             dfs,
                             rawid,
-                            escale=(
-                                escale_val
-                                if inspected_parameter == "TrapemaxCtcCal"
-                                else 1
-                            ),
+                            escale=escale_par,
                             variations=percentage[inspected_parameter],
                         )
 
@@ -1751,11 +1783,7 @@ def plot_time_series(
                             [current_run],
                             [channel, channel_name],
                             partition,
-                            escale=(
-                                escale_val
-                                if inspected_parameter == "TrapemaxCtcCal"
-                                else 1
-                            ),
+                            escale=escale_par,
                             fit=fit_flag,
                         )
                         threshold = (
@@ -1772,20 +1800,15 @@ def plot_time_series(
                                 else pulser_data["diff"]["kevdiff_av"]
                             )
 
-                            # check threshold and send automatic mail
-                            email_message = utils.check_threshold(
+                            # check threshold and update YAML summary file
+                            utils.check_threshold(
                                 kevdiff,
-                                pswd_email,
+                                channel_name,
                                 last_checked,
                                 t0,
-                                pars_data,
                                 threshold,
-                                period,
-                                current_run,
-                                channel_name,
-                                string,
-                                email_message,
                                 titles[inspected_parameter],
+                                output,
                             )
 
                             # PULS01ANA has a signal - we can correct GEDS energies for it!
@@ -1819,7 +1842,7 @@ def plot_time_series(
                             else:
                                 if (
                                     percentage[inspected_parameter] is True
-                                    and escale_val == 1.0
+                                    and float(escale_par) == 1.0
                                 ):
                                     pulser_data["ged"]["kevdiff_av"] *= 100
                                     pulser_data["ged"]["kevdiff_std"] *= 100
@@ -1938,11 +1961,5 @@ def plot_time_series(
                         ] = serialized_plot
                         plt.close(fig)
 
-    if len(email_message) > 1 and pswd_email is not None:
-        with open("message.txt", "w") as f:
-            for line in email_message:
-                f.write(line + "\n")
-        utils.send_email_alert(
-            pswd_email, ["sofia.calgaro@physik.uzh.ch"], "message.txt"
-        )
-        os.remove("message.txt")
+    with open(usability_map_file, "w") as f:
+        yaml.dump(output, f)
