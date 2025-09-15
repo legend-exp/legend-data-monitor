@@ -1315,6 +1315,61 @@ def send_email_alert(app_password: str, recipients: list, text_file_path: str):
         logger.info("Error: unable to send email: %s", e)
 
 
+
+def check_cal_phy_thresholds(
+    output_folder: str,
+    period: str,
+    run: str,
+    key: str,
+    detectors: list,
+    pswd_email: str | None,
+):
+    """
+    Check detector calibration/physics thresholds for a given run and optionally send an alert mail.
+
+    Parameters
+    ----------
+    output_folder : str
+        Path to output folder where the output summary YAML and plots will be stored.
+    period : str
+        Period to inspect.
+    run : str
+        Run to inspect.
+    key : str
+        Data type key to inspect, either 'cal' or 'phy'.
+    detectors : list
+        List of detector names.
+    pswd_email : str or None
+        Password for the email account used to send alerts; if None, no email is sent.
+    """
+    usability_map_file = os.path.join(
+        output_folder, period, run, f"l200-{period}-{run}-qcp_summary.yaml"
+    )
+    output = load_yaml_or_default(usability_map_file, detectors)
+    email_message = []
+
+    for ged, det_data in output.items():
+        cal_dict = det_data.get(key, {})
+        ct = sum(1 for v in cal_dict.values() if v is False)
+        if ct != 0:
+            if not email_message:
+                email_message.append(f"ALERT: Data monitoring thresholds exceeded in {period}.\n")
+            email_message.append(
+                f"- {ged} has {ct}/{len(cal_dict)} failed entries in {run} cal"
+            )
+    
+    if len(email_message) > 1 and pswd_email is not None:
+        print(email_message)
+        with open("message.txt", "w") as f:
+            for line in email_message:
+                f.write(line + "\n")
+        send_email_alert(
+            pswd_email, ["sofia.calgaro@physik.uzh.ch"], "message.txt"
+        )
+        os.remove("message.txt")
+
+
+
 def check_threshold(
     data_series: pd.Series,
     pswd_email: str | None,

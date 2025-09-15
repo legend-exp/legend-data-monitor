@@ -214,7 +214,7 @@ def main():
             save_pdf,
         )
 
-        legend_data_monitor.calibration.check_cal_thresholds(
+        legend_data_monitor.utils.check_cal_phy_thresholds(
             output_folder,
             period,
             current_run,
