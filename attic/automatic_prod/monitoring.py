@@ -95,6 +95,11 @@ def main():
         default=False,
         help="True if you want to save pdf files too; default: False.",
     )
+    func3_parser.add_argument(
+        "--pswd_email",
+        default=None,
+        help="Password to access the legend.data.monitoring@gmail.com account for sending alert messages.",
+    )
 
     func4_parser = subparsers.add_parser(
         "qc_avg_series",
@@ -161,6 +166,7 @@ def main():
         period = args.period
         save_pdf = args.pdf
         current_run = args.current_run
+        pswd_email = args.pswd_email
 
         found = False
         for tier in ["hit", "pht"]:
@@ -206,6 +212,15 @@ def main():
             current_run,
             det_info,
             save_pdf,
+        )
+
+        legend_data_monitor.calibration.check_cal_thresholds(
+            output_folder,
+            period,
+            current_run,
+            "cal",
+            det_info["detectors"],
+            pswd_email,
         )
 
     elif args.command == "qc_avg_series":

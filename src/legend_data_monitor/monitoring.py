@@ -1665,7 +1665,7 @@ def plot_time_series(
     limits = {
         "TrapemaxCtcCal": [None, None],
         "Baseline": [-10, 10],
-        "BlStd": [None, 100],
+        "BlStd": [None, 50],
     }
     for inspected_parameter in ["Baseline", "TrapemaxCtcCal", "BlStd"]:
         for index_i in range(len(period_list)):

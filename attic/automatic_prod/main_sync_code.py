@@ -352,7 +352,7 @@ def main():
         pass
     else:
         os.makedirs(os.path.join(phy_folder, period, run, "mtg/pdf"), exist_ok=True)
-        cal_bash_command = f"{cmd} python monitoring.py check_calib --public_data {auto_dir_path} --output {phy_folder} --period {period} --current_run {run}"
+        cal_bash_command = f"{cmd} python monitoring.py check_calib --public_data {auto_dir_path} --output {phy_folder} --period {period} --current_run {run} --pswd_email {pswd_email}"
         if save_pdf is True:
             cal_bash_command += " --pdf True"
         logger.debug(f"...running command {cal_bash_command}")
@@ -521,7 +521,7 @@ def main():
             logger.info("...monitoring plots generated!")
 
             # QC - average + time series
-            qc_bash_command = f"{cmd} python monitoring.py qc_avg_series --public_data {auto_dir_path} --output {mtg_folder} --start_key {start_key} --p {period} --current_run {run}"
+            qc_bash_command = f"{cmd} python monitoring.py qc_avg_series --public_data {auto_dir_path} --output {mtg_folder} --start_key {start_key} --period {period} --current_run {run}"
             if save_pdf is True:
                 qc_bash_command += " --pdf True"
             logger.debug(f"...running command {qc_bash_command}")
