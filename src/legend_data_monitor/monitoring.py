@@ -847,28 +847,22 @@ def get_dfs(phy_mtg_data: str, period: str, run_list: list, parameter: str):
 
         # geds file
         hdf_geds = find_hdf_file(run_dir, include=["geds"], exclude=["res", "min"])
-        if not hdf_geds:
-            utils.logger.debug("hdf_geds is empty")
-            return None, None, None
-
-        geds_abs = read_if_key_exists(hdf_geds, f"IsPulser_{parameter}")
-        if geds_abs is not None:
-            geds_df_cuspEmax_abs.append(geds_abs)
-
-        geds_puls_abs = read_if_key_exists(
-            hdf_geds, f"IsPulser_{parameter}_pulser01anaDiff"
-        )
-        if geds_puls_abs is not None:
-            geds_df_cuspEmax_abs_corr.append(geds_puls_abs)
+        if hdf_geds:
+            geds_abs = read_if_key_exists(hdf_geds, f"IsPulser_{parameter}")
+            if geds_abs is not None:
+                geds_df_cuspEmax_abs.append(geds_abs)
+    
+            geds_puls_abs = read_if_key_exists(
+                hdf_geds, f"IsPulser_{parameter}_pulser01anaDiff"
+            )
+            if geds_puls_abs is not None:
+                geds_df_cuspEmax_abs_corr.append(geds_puls_abs)
 
         # pulser file
         hdf_puls = find_hdf_file(
             run_dir, include=["pulser01ana"], exclude=["res", "min"]
         )
-        if not hdf_puls:
-            utils.logger.debug("hdf_puls is empty for gain")
-            # there's no need to return None, as the code will automatically handle the case of missing pulser file later on
-        else:
+        if hdf_puls:
             puls_abs = read_if_key_exists(hdf_puls, f"IsPulser_{parameter}")
             if puls_abs is not None:
                 puls_df_cuspEmax_abs.append(puls_abs)
@@ -931,8 +925,6 @@ def get_traptmax_tp0est(phy_mtg_data: str, period: str, run_list: list):
             tp0est = read_if_key_exists(hdf_geds, "IsPulser_Tp0Est")
             if tp0est is not None:
                 geds_df_tp0est.append(tp0est)
-        else:
-            utils.logger.debug("hdf_geds is empty")
 
         # pulser
         hdf_puls = find_hdf_file(
@@ -946,8 +938,6 @@ def get_traptmax_tp0est(phy_mtg_data: str, period: str, run_list: list):
             tp0est = read_if_key_exists(hdf_puls, "IsPulser_Tp0Est")
             if tp0est is not None:
                 puls_df_tp0est.append(tp0est)
-        else:
-            utils.logger.debug("hdf_puls is empty for tp0est")
 
     return (
         (
@@ -1022,7 +1012,7 @@ def filter_by_period(series: pd.Series, period: str | list) -> pd.Series:
     else:
         series = filter_series_by_ignore_keys(series, IGNORE_KEYS, period)
 
-    return series.dropna()
+    return series
 
 
 def compute_diff_and_rescaling(
@@ -1114,11 +1104,25 @@ def get_pulser_data(
     # geds
     ser_ged_cusp = dfs[0][channel].sort_index()
     ser_ged_cusp = filter_by_period(ser_ged_cusp, period)
+    ser_pul_tp0est_new = pd.DataFrame()
 
     if ser_ged_cusp.empty:
         utils.logger.debug("...geds series is empty after filtering")
         return None
 
+    # check if these dfs are empty or not - if not, then remove spikes
+    if isinstance(dfs[6], pd.DataFrame) and not dfs[6].empty:
+        ser_pul_tp0est = dfs[6][1027203].sort_index()
+        ser_pul_tp0est = filter_by_period(ser_pul_tp0est, period)
+    
+        mask = (ser_pul_tp0est > 4.8e4) & (ser_pul_tp0est < 5e4)
+        ser_pul_tp0est_new = ser_pul_tp0est[mask]
+        if not ser_pul_tp0est_new.empty:
+            valid_idx = ser_ged_cusp.index.intersection(ser_pul_tp0est_new.index)
+            ser_ged_cusp = ser_ged_cusp.reindex(valid_idx)
+
+    # if before, potential mismatches with ser_pul_tp0est
+    ser_ged_cusp = ser_ged_cusp.dropna()
     # compute average over the first 10% of elements
     n_elements = max(int(len(ser_ged_cusp) * 0.10), 1)
     ged_cusp_av = np.nanmean(ser_ged_cusp.iloc[:n_elements])
@@ -1150,6 +1154,14 @@ def get_pulser_data(
 
         # pulser average and diffs
         if not ser_pul_cusp.empty:
+            # check if these dfs are empty or not - if not, then remove spikes
+            if isinstance(dfs[6], pd.DataFrame) and not dfs[6].empty:
+                if not ser_pul_tp0est_new.empty:
+                    valid_idx = ser_pul_cusp.index.intersection(ser_pul_tp0est_new.index)
+                    ser_pul_cusp = ser_pul_cusp.reindex(valid_idx)
+
+            # if before, potential mismatches with ser_pul_tp0est
+            ser_pul_cusp = ser_ged_cusp.dropna()
             n_elements_pul = max(int(len(ser_pul_cusp) * 0.10), 1)
             pul_cusp_av = np.nanmean(ser_pul_cusp.iloc[:n_elements_pul])
             ser_pul_cuspdiff, ser_pul_cuspdiff_kev = compute_diff_and_rescaling(
