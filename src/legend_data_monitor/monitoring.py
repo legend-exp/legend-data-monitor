@@ -857,6 +857,8 @@ def get_dfs(phy_mtg_data: str, period: str, run_list: list, parameter: str):
             )
             if geds_puls_abs is not None:
                 geds_df_cuspEmax_abs_corr.append(geds_puls_abs)
+        else:
+            utils.logger.debug("...hdf_geds missing in %s", r)
 
         # pulser file
         hdf_puls = find_hdf_file(
@@ -866,6 +868,8 @@ def get_dfs(phy_mtg_data: str, period: str, run_list: list, parameter: str):
             puls_abs = read_if_key_exists(hdf_puls, f"IsPulser_{parameter}")
             if puls_abs is not None:
                 puls_df_cuspEmax_abs.append(puls_abs)
+        else:
+            utils.logger.debug("...hdf_puls missing in %s", r)
 
     if (
         not geds_df_cuspEmax_abs
@@ -1115,8 +1119,11 @@ def get_pulser_data(
         ser_pul_tp0est = dfs[6][1027203].sort_index()
         ser_pul_tp0est = filter_by_period(ser_pul_tp0est, period)
     
-        mask = (ser_pul_tp0est > 4.8e4) & (ser_pul_tp0est < 5e4)
+        low_lim = 4.8e4
+        upp_lim = 5.0e4
+        mask = (ser_pul_tp0est > low_lim) & (ser_pul_tp0est < upp_lim)
         ser_pul_tp0est_new = ser_pul_tp0est[mask]
+        
         if not ser_pul_tp0est_new.empty:
             valid_idx = ser_ged_cusp.index.intersection(ser_pul_tp0est_new.index)
             ser_ged_cusp = ser_ged_cusp.reindex(valid_idx)
@@ -1138,15 +1145,15 @@ def get_pulser_data(
     mask = ser_ged_cusp.resample(resampling_time).count() > 0
 
     # resample geds series
-    ged_cusp_hr_av_, ged_cusp_hr_std = resample_series(
+    ged_cusp_hr_av, ged_cusp_hr_std = resample_series(
         ser_ged_cuspdiff_kev, resampling_time, mask
     )
 
     # pulser series
-    ser_pul_cusp = ser_pul_cuspdiff = ser_pul_cuspdiff_kev = pul_cusp_hr_av_ = (
+    ser_pul_cusp = ser_pul_cuspdiff = ser_pul_cuspdiff_kev = pul_cusp_hr_av = (
         pul_cusp_hr_std
     ) = None
-    ged_cusp_corr = ged_cusp_corr_kev = ged_cusp_cor_hr_av_ = ged_cusp_cor_hr_std = None
+    ged_cusp_corr = ged_cusp_corr_kev = ged_cusp_cor_hr_av = ged_cusp_cor_hr_std = None
     # ...if pulser is available:
     if not dfs[2].empty:
         ser_pul_cusp = dfs[2][1027203].sort_index()
@@ -1161,14 +1168,14 @@ def get_pulser_data(
                     ser_pul_cusp = ser_pul_cusp.reindex(valid_idx)
 
             # if before, potential mismatches with ser_pul_tp0est
-            ser_pul_cusp = ser_ged_cusp.dropna()
+            ser_pul_cusp = ser_pul_cusp.dropna()
             n_elements_pul = max(int(len(ser_pul_cusp) * 0.10), 1)
             pul_cusp_av = np.nanmean(ser_pul_cusp.iloc[:n_elements_pul])
             ser_pul_cuspdiff, ser_pul_cuspdiff_kev = compute_diff_and_rescaling(
                 ser_pul_cusp, pul_cusp_av, escale, variations
             )
 
-            pul_cusp_hr_av_, pul_cusp_hr_std = resample_series(
+            pul_cusp_hr_av, pul_cusp_hr_std = resample_series(
                 ser_pul_cuspdiff_kev, resampling_time, mask
             )
 
@@ -1178,7 +1185,7 @@ def get_pulser_data(
                 ser_ged_cuspdiff[common_index] - ser_pul_cuspdiff[common_index]
             )
             ged_cusp_corr_kev = ged_cusp_corr * escale
-            ged_cusp_cor_hr_av_, ged_cusp_cor_hr_std = resample_series(
+            ged_cusp_cor_hr_av, ged_cusp_cor_hr_std = resample_series(
                 ged_cusp_corr_kev, resampling_time, mask
             )
 
@@ -1187,21 +1194,21 @@ def get_pulser_data(
             "cusp": ser_ged_cusp,
             "cuspdiff": ser_ged_cuspdiff,
             "cuspdiff_kev": ser_ged_cuspdiff_kev,
-            "kevdiff_av": ged_cusp_hr_av_,
+            "kevdiff_av": ged_cusp_hr_av,
             "kevdiff_std": ged_cusp_hr_std,
         },
         "pul_cusp": {
             "raw": ser_pul_cusp,
             "rawdiff": ser_pul_cuspdiff,
             "kevdiff": ser_pul_cuspdiff_kev,
-            "kevdiff_av": pul_cusp_hr_av_,
+            "kevdiff_av": pul_cusp_hr_av,
             "kevdiff_std": pul_cusp_hr_std,
         },
         "diff": {
             "raw": None,
             "rawdiff": ged_cusp_corr,
             "kevdiff": ged_cusp_corr_kev,
-            "kevdiff_av": ged_cusp_cor_hr_av_,
+            "kevdiff_av": ged_cusp_cor_hr_av,
             "kevdiff_std": ged_cusp_cor_hr_std,
         },
     }
@@ -1505,9 +1512,7 @@ def plot_time_series(
                                 float
                             )
                             x = pulser_data["diff"]["kevdiff_av"].index.values
-
-                            plt.plot(pul_cusp_av, "C2", label="PULS01ANA")
-                            plt.plot(diff_av, "C4", label="GED corrected")
+                            
                             plt.fill_between(
                                 x,
                                 diff_av - diff_std,
@@ -1516,6 +1521,8 @@ def plot_time_series(
                                 alpha=0.2,
                                 label=r"±1$\sigma$",
                             )
+                            plt.plot(x, pul_cusp_av, "C2", label="PULS01ANA")
+                            plt.plot(x, diff_av, "C4", label="GED corrected")
                         else:
                             ged_av = pulser_data["ged"]["kevdiff_av"].values.astype(
                                 float
@@ -1525,9 +1532,6 @@ def plot_time_series(
                             )
                             x = pulser_data["ged"]["kevdiff_av"].index.values
 
-                            plt.plot(
-                                x, ged_av, color="dodgerblue", label="GED uncorrected"
-                            )
                             plt.fill_between(
                                 x,
                                 ged_av - ged_std,
@@ -1535,6 +1539,9 @@ def plot_time_series(
                                 color="k",
                                 alpha=0.2,
                                 label=r"±1$\sigma$",
+                            )
+                            plt.plot(
+                                x, ged_av, color="dodgerblue", label="GED uncorrected"
                             )
 
                     plt.plot(
@@ -1555,62 +1562,42 @@ def plot_time_series(
 
                     for i in range(len(t0)):
                         if i == len(pars_data["run_start"]) - 1:
-                            plt.plot(
-                                [t0[i], t0[i] + pd.Timedelta(days=7)],
-                                [pars_data["res"][i] / 2, pars_data["res"][i] / 2],
-                                "b-",
+                            plt.axhline(
+                                pars_data["res"][i] / 2, 
+                                color="b", linestyle='-',
                             )
-                            plt.plot(
-                                [t0[i], t0[i] + pd.Timedelta(days=7)],
-                                [-pars_data["res"][i] / 2, -pars_data["res"][i] / 2],
-                                "b-",
+                            plt.axhline(
+                                -pars_data["res"][i] / 2, 
+                                color="b", linestyle='-',
                             )
                             if quadratic:
-                                plt.plot(
-                                    [t0[i], t0[i] + pd.Timedelta(days=7)],
-                                    [
-                                        pars_data["res_quad"][i] / 2,
-                                        pars_data["res_quad"][i] / 2,
-                                    ],
+                                plt.axhline(
+                                    pars_data["res_quad"][i] / 2,
                                     color="dodgerblue",
                                     linestyle="-",
                                 )
-                                plt.plot(
-                                    [t0[i], t0[i] + pd.Timedelta(days=7)],
-                                    [
-                                        -pars_data["res_quad"][i] / 2,
-                                        -pars_data["res_quad"][i] / 2,
-                                    ],
+                                plt.axhline(
+                                    -pars_data["res_quad"][i] / 2,
                                     color="dodgerblue",
                                     linestyle="-",
                                 )
                         else:
-                            plt.plot(
-                                [t0[i], t0[i + 1]],
-                                [pars_data["res"][i] / 2, pars_data["res"][i] / 2],
-                                "b-",
+                            plt.axhline(
+                                pars_data["res"][i] / 2, 
+                                color="b", linestyle='-',
                             )
-                            plt.plot(
-                                [t0[i], t0[i + 1]],
-                                [-pars_data["res"][i] / 2, -pars_data["res"][i] / 2],
-                                "b-",
+                            plt.axhline(
+                                -pars_data["res"][i] / 2,
+                                color="b", linestyle='-',
                             )
                             if quadratic:
-                                plt.plot(
-                                    [t0[i], t0[i + 1]],
-                                    [
-                                        pars_data["res_quad"][i] / 2,
-                                        pars_data["res_quad"][i] / 2,
-                                    ],
+                                plt.axhline(
+                                    pars_data["res_quad"][i] / 2,
                                     color="dodgerblue",
                                     linestyle="-",
                                 )
-                                plt.plot(
-                                    [t0[i], t0[i + 1]],
-                                    [
-                                        -pars_data["res_quad"][i] / 2,
-                                        -pars_data["res_quad"][i] / 2,
-                                    ],
+                                plt.axhline(
+                                    -pars_data["res_quad"][i] / 2,
                                     color="dodgerblue",
                                     linestyle="-",
                                 )
@@ -1840,8 +1827,8 @@ def plot_time_series(
                                 ].values.astype(float)
                                 x = pulser_data["diff"]["kevdiff_av"].index.values
 
-                                plt.plot(pul_cusp_av, "C2", label="PULS01ANA")
-                                plt.plot(diff_av, "C4", label="GED corrected")
+                                plt.plot(x, pul_cusp_av, "C2", label="PULS01ANA")
+                                plt.plot(x, diff_av, "C4", label="GED corrected")
                                 plt.fill_between(
                                     x,
                                     diff_av - diff_std,
