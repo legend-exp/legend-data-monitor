@@ -6,6 +6,7 @@ import shelve
 import sys
 
 import h5py
+import math
 import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
@@ -38,6 +39,131 @@ IGNORE_KEYS = utils.IGNORE_KEYS
 CALIB_RUNS = utils.CALIB_RUNS
 
 # -------------------------------------------------------------------------
+def qc_distributions(
+    auto_dir_path: str,
+    phy_mtg_data: str,
+    output_folder: str,
+    start_key: str,
+    period: str,
+    run: str,
+    det_info: dict,
+    save_pdf: bool,
+):
+    pars_to_inspect = [
+        "IsValidBlSlopeClassifier",
+        "IsValidTailRmsClassifier",
+        "IsValidPzSlopeClassifier",
+        "IsValidBlSlopeRmsClassifier",
+        "IsValidCuspeminClassifier",
+        "IsValidCuspemaxClassifier",
+    ]
+
+    my_file = os.path.join(output_folder, f"{period}/{run}/l200-{period}-{run}-phy-geds.hdf")
+    detectors = det_info["detectors"]
+    str_chns = det_info["str_chns"]
+    utils.logger.debug("...inspecting QC classifiers")
+
+    end_folder = os.path.join(
+        output_folder,
+        period,
+        run,
+        "mtg",
+    )
+    os.makedirs(end_folder, exist_ok=True)
+    shelve_path = os.path.join(
+        end_folder,
+        f"l200-{period}-{run}-phy-monitoring",
+    )
+
+    step = 0.5
+    with (
+        shelve.open(shelve_path, "c", protocol=pickle.HIGHEST_PROTOCOL) as shelf,
+        pd.HDFStore(my_file, "r") as store,
+    ):
+        df_energy_IsPhysics = store["/IsPhysics_TrapemaxCtcCal"]
+            
+        for par in pars_to_inspect:
+            df_All = store[f"/All_{par}"]
+            df_IsPulser = store[f"/IsPulser_{par}"]
+            df_IsBsln = store[f"/IsBsln_{par}"]
+            df_IsPhysics = store[f"/IsPhysics_{par}"]
+            df_IsPhysics = df_IsPhysics.where(df_energy_IsPhysics > 25)
+
+            for string, det_list in str_chns.items():
+                # grid size
+                n_dets = len(det_list)
+                ncols = math.ceil(math.sqrt(n_dets))
+                nrows = math.ceil(n_dets / ncols)
+
+                fig, axes = plt.subplots(nrows, ncols, figsize=(6*ncols, 3.5*nrows))
+                axes = axes.flatten() 
+
+                for i, det in enumerate(det_list):
+                    if not det_info['detectors'][det]['processable']:
+                        continue
+                        
+                    ax = axes[i]
+                    ch = det_info['detectors'][det]['daq_rawid']
+                    vals_all = df_All[ch].values
+                    vals_pulser = df_IsPulser[ch].values
+                    vals_bsln = df_IsBsln[ch].values
+                    vals_phys = df_IsPhysics[ch].values
+                    
+                    vals_all = vals_all[~np.isnan(vals_all)]
+                    vals_pulser = vals_pulser[~np.isnan(vals_pulser)]
+                    vals_bsln = vals_bsln[~np.isnan(vals_bsln)]
+                    vals_phys = vals_phys[~np.isnan(vals_phys)]
+                    
+                    # global bins
+                    bins = np.arange(-15, 15 + step, step)
+                    
+                    # percentages
+                    perc_all = 100 * np.mean((vals_all >= -5) & (vals_all <= 5))
+                    perc_pulser = 100 * np.mean((vals_pulser >= -5) & (vals_pulser <= 5))
+                    perc_bsln = 100 * np.mean((vals_bsln >= -5) & (vals_bsln <= 5))
+                    perc_phys = 100 * np.mean((vals_phys >= -5) & (vals_phys <= 5))
+                    
+                    # plotting
+                    ax.hist(vals_all, bins=bins, label=f'All events - {perc_all:.1f}%', histtype='step', facecolor='g')
+                    ax.hist(vals_pulser, bins=bins, label=f'TP - {perc_pulser:.1f}%', histtype='step', facecolor='g')
+                    ax.hist(vals_bsln, bins=bins, label=f'FT - {perc_bsln:.1f}%', histtype='step', facecolor='g')
+                    ax.hist(vals_phys, bins=bins, label=f'~TP, ~FT, E>25 keV - {perc_phys:.1f}%', histtype='step', facecolor='g')
+                    
+                    ax.axvline(-5, color='k', linestyle='--')
+                    ax.axvline(5, color='k', linestyle='--')
+                    ax.axvspan(-15, -5, color='darkgray', alpha=0.2)
+                    ax.axvspan(5, 15, color='darkgray', alpha=0.2)
+                    ax.set_ylabel('Counts')
+                    ax.set_xlabel('Classifiers')
+                    ax.legend(title=f"{det} (pos {det_info['detectors'][det]['position']})")
+                    ax.set_yscale('log')
+                    ax.grid(False)
+                    ax.set_xlim(-10,10)
+                    
+                # hide any unused subplots
+                for j in range(i+1, len(axes)):
+                    axes[j].axis("off")
+            
+                fig.suptitle(f"{period} - {run} - string {string} - {par}")
+                fig.tight_layout()
+    
+                if save_pdf:
+                    pdf_folder = os.path.join(output_folder, f"{period}/{run}/mtg/pdf", f"st{string}")
+                    os.makedirs(pdf_folder, exist_ok=True)
+                    plt.savefig(
+                        os.path.join(
+                            pdf_folder,
+                            f"{period}_{run}_string{string}_{par}.pdf",
+                        ),
+                        bbox_inches="tight",
+                    )
+
+                # serialize+plot in a shelve object
+                shelf[f"{period}_{run}_{par}"] = pickle.dumps(fig)
+                plt.close()
+
+
+    
 def box_summary_plot(
     period: str,
     run: str,

@@ -147,6 +147,19 @@ def main():
             os.path.join(auto_dir_path, "inputs"), start_key=start_key
         )
 
+        # qc classifier plots
+        legend_data_monitor.monitoring.qc_distributions(
+            auto_dir_path,
+            phy_mtg_data,
+            output_folder,
+            start_key,
+            period,
+            current_run,
+            det_info,
+            save_pdf,
+        )
+
+        # stability plots
         results = legend_data_monitor.monitoring.plot_time_series(
             auto_dir_path,
             phy_mtg_data,
@@ -164,6 +177,7 @@ def main():
             zoom,
         )
 
+        # load par summary yaml cal files
         found = False
         filename = ""
         for tier in ["hit", "pht"]:
@@ -178,7 +192,7 @@ def main():
         pars_path = legend_data_monitor.utils.retrieve_json_or_yaml(cal_path, filename)
         pars = legend_data_monitor.utils.read_json_or_yaml(pars_path)
 
-        # loop over parameters
+        # phy box summary pltos
         for k in results.keys():
             pars_dict = pars if k in ['TrapemaxCtcCal'] else None
             legend_data_monitor.monitoring.box_summary_plot(period, current_run, pars_dict, det_info, results[k], legend_data_monitor.utils.MTG_PLOT_INFO[k], output_folder, 'phy', save_pdf)
