@@ -237,9 +237,9 @@ class AnalysisData:
                 "... keeping only physical (non-pulser & non-FCbsln & non-muon) events"
             )
             self.data = self.data[
-                (~self.data["flag_pulser"])
-                | (~self.data["flag_fc_bsln"])
-                | (~self.data["flag_muon"])
+                (~self.data["flag_pulser"]) 
+                & (~self.data["flag_fc_bsln"]) 
+                & (~self.data["flag_muon"])
             ]
         elif self.evt_type == "K_events":
             utils.logger.info("... selecting K lines in physical (non-pulser) events")
