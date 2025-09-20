@@ -43,6 +43,10 @@ pkg = importlib.resources.files("legend_data_monitor")
 with open(pkg / "settings" / "par-settings.yaml") as f:
     PLOT_INFO = yaml.load(f, Loader=yaml.CLoader)
 
+# load dictionary with plot info for Dashboard plots
+with open(pkg / "settings" / "mtg-plot-settings.yaml") as f:
+    MTG_PLOT_INFO = yaml.load(f, Loader=yaml.CLoader)
+
 # which parameter belongs to which tier
 with open(pkg / "settings" / "parameter-tiers.yaml") as f:
     PARAMETER_TIERS = yaml.load(f, Loader=yaml.CLoader)
@@ -1350,13 +1354,17 @@ def check_cal_phy_thresholds(
 
     for ged, det_data in output.items():
         cal_dict = det_data.get(key, {})
-        ct = sum(1 for v in cal_dict.values() if v is False)
-        if ct != 0:
+        failed = [k for k, v in cal_dict.items() if v is False]  # collect failed parameters
+        
+        if failed:
             if not email_message:
-                email_message.append(f"ALERT: Data monitoring thresholds exceeded in {period}-{run}-{key}.\n")
+                email_message.append(
+                    f"ALERT: Data monitoring thresholds exceeded in {period}-{run}-{key}.\n"
+                )
             email_message.append(
-                f"- {ged} has {ct}/{len(cal_dict)} failed entries"
+                f"- {ged} has {len(failed)}/{len(cal_dict)} failed entries: {', '.join(failed)}"
             )
+
     
     if len(email_message) > 1 and pswd_email is not None:
         with open("message.txt", "w") as f:

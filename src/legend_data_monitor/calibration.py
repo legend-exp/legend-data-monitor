@@ -503,8 +503,7 @@ def fep_gain_variation(
 
         plt.axhline(0, ls="--", color="black")
         plt.axhline(-fwhm / 2, ls="-", color="blue")
-        plt.axhline(fwhm / 2, ls="-", color="blue", label="±FWHM/2")
-        plt.text(0, fwhm / 2 + 0.5, f"+FWHM/2 = {fwhm/2:.2f} keV", color="k")
+        plt.axhline(fwhm / 2, ls="-", color="blue", label=f"±FWHM/2 = ±{fwhm/2:.2f} keV")
 
     plt.legend(loc="lower left")
     plt.xlabel("time [s]")
@@ -518,7 +517,7 @@ def fep_gain_variation(
         plt.savefig(
             os.path.join(
                 pdf_folder,
-                f"{period}_{run}_str{string}_pos{position}_{ged}_FEP_gain_variation.pdf",
+                f"{period}_{run}_string{string}_pos{position}_{ged}_FEP_gain_variation.pdf",
             ),
             bbox_inches="tight",
         )
@@ -534,155 +533,6 @@ def fep_gain_variation(
         return None
 
     return means
-
-
-def fep_gain_variation_summary(
-    period: str,
-    run: str,
-    pars: dict,
-    detectors: dict,
-    results: dict,
-    output_dir: str,
-    save_pdf: bool,
-):
-    """
-    Box plot summary for FEP gain variations for multiple detectors.
-
-    Parameters
-    ----------
-    period : str
-        Period to inspect.
-    run : str
-        Run to inspect.
-    pars : dict
-        Calibration results for each detector.
-    detectors : dict
-        Detector info, with detector names as keys.
-    results : dict
-        FEP gain variation arrays per detector; None if invalid.
-    output_dir : str
-        Output folder for saving plots and shelve data.
-    save_pdf : bool
-        If True, save the summary plot as a PDF.
-    """
-    plot_data = []
-    for ged, item in results.items():
-        meta_info = detectors[ged]
-        if item is None or len(item) == 0:
-            mean = std = min_val = max_val = np.nan
-        else:
-            mean = item.mean()
-            std = item.std()
-            min_val = item.min()
-            max_val = item.max()
-        fwhm = pars[ged]["results"]["ecal"]["cuspEmax_ctc_cal"]["eres_linear"][
-            "Qbb_fwhm_in_kev"
-        ]
-        plot_data.append(
-            {
-                "ged": ged,
-                "string": meta_info["string"],
-                "pos": meta_info["position"],
-                "mean": mean,
-                "std": std,
-                "min": min_val,
-                "max": max_val,
-                "fwhm": fwhm,
-            }
-        )
-
-    df_plot = pd.DataFrame(plot_data)
-
-    # Sort by string then position
-    df = df_plot.sort_values(["string", "pos"]).reset_index(drop=True)
-
-    # Assuming df is already built and sorted
-    fig, ax = plt.subplots(figsize=(12, 6))
-
-    x = np.arange(len(df))
-
-    # Plot bars for std around the mean
-    ax.bar(
-        x,
-        2 * df["std"],  # total height = 2σ
-        bottom=df["mean"] - df["std"],  # center bar on mean
-        width=0.6,
-        color="skyblue",
-        alpha=0.7,
-        label="±1σ",
-    )
-
-    ax.bar(
-        x,
-        df["fwhm"],
-        bottom=-df["fwhm"] / 2,
-        width=0.4,
-        color="orange",
-        alpha=0.2,
-        label="FWHM",
-    )
-
-    # Overlay mean as a point
-    ax.scatter(x, df["mean"], color="black", zorder=3, label="Mean")
-
-    # Overlay min/max as error bars
-    ax.errorbar(
-        x,
-        df["mean"],
-        yerr=[df["mean"] - df["min"], df["max"] - df["mean"]],
-        fmt="none",
-        ecolor="red",
-        capsize=4,
-        label="Min/Max",
-    )
-
-    # X-axis formatting
-    ax.set_xticks(x)
-    ax.set_xticklabels(df["ged"], rotation=90)
-    ax.axvline(-0.5, color="gray", ls="--", alpha=0.5)
-
-    unique_strings = df["string"].unique()
-    for s in unique_strings:
-        idx = df.index[df["string"] == s]
-        left, right = idx.min(), idx.max()
-        ax.axvline(right + 0.5, color="gray", ls="--", alpha=0.5)
-        ax.text(left, -3.5, f"String {s}", rotation=90)
-
-    ax.set_ylabel("FEP gain variation [keV]")
-    ax.set_title(f"{period} {run}")
-    ax.legend(loc="upper right")
-
-    ax.axhline(0, ls="--", color="black")
-
-    plt.ylim(-5, 5)
-    plt.tight_layout()
-
-    if save_pdf:
-        pdf_folder = os.path.join(output_dir, f"{period}/{run}/mtg/pdf")
-        os.makedirs(pdf_folder, exist_ok=True)
-        plt.savefig(
-            os.path.join(
-                pdf_folder,
-                f"{period}_{run}_FEP_gain_variation_summary.pdf",
-            ),
-            bbox_inches="tight",
-        )
-
-    # serialize+plot in a shelve object
-    serialized_plot = pickle.dumps(fig)
-    with shelve.open(
-        os.path.join(
-            output_dir,
-            period,
-            run,
-            f"mtg/l200-{period}-{run}-cal-monitoring",
-        ),
-        "c",
-        protocol=pickle.HIGHEST_PROTOCOL,
-    ) as shelf:
-        shelf[f"{period}_{run}_FEP_gain_variation_summary"] = serialized_plot
-
-    plt.close()
 
 
 def check_calibration(
@@ -828,19 +678,19 @@ def check_calibration(
             fwhm = ecal["eres_linear"]["Qbb_fwhm_in_kev"]
             fwhm_ok = not np.isnan(fwhm)
             utils.update_evaluation_in_memory(output, ged, "cal", "fwhm_ok", fwhm_ok)
+            
+            # FEP gain stability - independent from fwhm; if we use that value, than put it back in the if statement
+            if fep_mean_results[ged] is not None:
+                # remove nan (gaps) or it will return False
+                arr = np.array(fep_mean_results[ged], dtype=float)
+                stable = bool(np.all(np.abs(arr[~np.isnan(arr)]) <= 2))
+            else:
+                stable = False
+            utils.update_evaluation_in_memory(
+                output, ged, "cal", "FEP_gain_stab", stable
+            )
 
             if fwhm_ok:
-                # FEP gain stability
-                if fep_mean_results[ged] is not None:
-                    # remove nan (gaps) or it will return False
-                    arr = np.array(fep_mean_results[ged], dtype=float)
-                    stable = bool(np.all(np.abs(arr[~np.isnan(arr)]) <= 2))
-                else:
-                    stable = False
-                utils.update_evaluation_in_memory(
-                    output, ged, "cal", "FEP_gain_stab", stable
-                )
-
                 # bsln stability (only if not first run)
                 if not first_run:
                     # channel might not be present in the previous run, leave it None if so
@@ -855,18 +705,15 @@ def check_calibration(
                         )
 
             else:
-                utils.update_evaluation_in_memory(
-                    output, ged, "cal", "FEP_gain_stab", False
-                )
                 if not first_run:
                     utils.update_evaluation_in_memory(
                         output, ged, "cal", "const_stab", False
                     )
 
     # plot
-    fep_gain_variation_summary(
-        period, run, pars, detectors, fep_mean_results, output_folder, save_pdf
+    monitoring.box_summary_plot(
+        period, run, pars, det_info, fep_mean_results, utils.MTG_PLOT_INFO['FEP_variation'], output_folder, 'cal', save_pdf
     )
-
+    
     with open(usability_map_file, "w") as f:
         yaml.dump(output, f)

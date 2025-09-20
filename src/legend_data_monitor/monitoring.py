@@ -38,6 +38,165 @@ IGNORE_KEYS = utils.IGNORE_KEYS
 CALIB_RUNS = utils.CALIB_RUNS
 
 # -------------------------------------------------------------------------
+def box_summary_plot(
+    period: str,
+    run: str,
+    pars: dict,
+    det_info: dict,
+    results: dict,
+    info: dict,
+    output_dir: str,
+    data_type: str,
+    save_pdf: bool,
+):
+    """
+    Box plot summary for FEP gain variations for multiple detectors.
+
+    Parameters
+    ----------
+    period : str
+        Period to inspect.
+    run : str
+        Run to inspect.
+    pars : dict
+        Calibration results for each detector.
+    det_info : dict
+        Dictionary with channel names, IDs, and mapping to string and position.
+    results : dict
+        Dictionary with arrays values (per detector); None if invalid.
+    info : dict
+        Dictionary containing info on a parameter basis (eg label name, file title, colours, limits, ...).
+    output_dir : str
+        Output folder for saving plots and shelve data.
+    data_type : str
+        Type of data, either 'cal' or 'phy'.
+    save_pdf : bool
+        If True, save the summary plot as a PDF.
+    """
+    detectors = det_info['detectors']
+    plot_data = []
+    for ged, item in results.items():
+        if ged not in detectors: continue
+        
+        channel = detectors[ged]
+        meta_info = detectors[ged]
+        if item is None or len(item) == 0:
+            mean = std = min_val = max_val = np.nan
+        else:
+            mean = item.mean()
+            std = item.std()
+            min_val = item.min()
+            max_val = item.max()
+        try:
+            fwhm = pars[ged]["results"]["ecal"]["cuspEmax_ctc_cal"]["eres_linear"]["Qbb_fwhm_in_kev"]
+        except (KeyError, TypeError):
+            fwhm = np.nan
+            
+        plot_data.append(
+            {
+                "ged": ged,
+                "string": meta_info["string"],
+                "pos": meta_info["position"],
+                "mean": mean,
+                "std": std,
+                "min": min_val,
+                "max": max_val,
+                "fwhm": fwhm,
+            }
+        )
+
+    df_plot = pd.DataFrame(plot_data)
+    # sort by string, and then position
+    df = df_plot.sort_values(["string", "pos"]).reset_index(drop=True)
+
+    fig, ax = plt.subplots(figsize=(12, 6))
+    x = np.arange(len(df))
+    if not df["fwhm"].isna().all():
+        ax.bar(
+            x,
+            df["fwhm"],
+            bottom=-df["fwhm"] / 2,
+            width=0.4,
+            color="orange",
+            alpha=0.2,
+            label="FWHM",
+        )
+        
+    ax.bar(
+        x,
+        2 * df["std"],  # total height = twice 1 std
+        bottom=df["mean"] - df["std"],  # center bar on mean
+        width=0.6,
+        color="skyblue",
+        alpha=0.7,
+        label="±1σ",
+    )
+
+    ax.scatter(x, df["mean"], color="black", zorder=3, label="Mean")
+
+    ax.errorbar(
+        x,
+        df["mean"],
+        yerr=[df["mean"] - df["min"], df["max"] - df["mean"]],
+        fmt="none",
+        ecolor="red",
+        capsize=4,
+        label="Min/Max",
+    )
+
+    ax.set_xticks(x)
+    ax.set_xticklabels(df["ged"], rotation=90)
+    ax.axvline(-0.5, color="gray", ls="--", alpha=0.5)
+
+    ymin, ymax = ax.get_ylim()
+    label_y = ymin * (ymax / ymin) ** 0.05 if ymin > 0 else -4
+    unique_strings = df["string"].unique()
+    for s in unique_strings:
+        idx = df.index[df["string"] == s]
+        left, right = idx.min(), idx.max()
+        ax.axvline(right + 0.5, color="gray", ls="--", alpha=0.5)
+        ax.text(left, label_y, f"String {s}", rotation=90)
+
+    ax.set_ylabel(info['ylabel'])
+    ax.set_title(f"{period} {run}")
+    ax.legend(loc="upper right")
+
+    if info['title'] in ['baseln_stab']: ax.axhline(-5, ls="--", color="black"); ax.axhline(5, ls="--", color="black")
+    if info['title'] in ['baseln_spike']: ax.axhline(50, ls="--", color="black");
+
+    if info['title'] in ['FEP_gain','pulser_stab']: plt.ylim(-6,6)
+    if info['title'] in ['baseln_stab']: plt.ylim(-20,20)
+    if info['title'] in ['baseln_spike']: plt.ylim(0, 100)
+    
+    plt.tight_layout()
+
+    if save_pdf:
+        pdf_folder = os.path.join(output_dir, f"{period}/{run}/mtg/pdf")
+        os.makedirs(pdf_folder, exist_ok=True)
+        plt.savefig(
+            os.path.join(
+                pdf_folder,
+                f"{period}_{run}_{info['title']}.pdf",
+            ),
+            bbox_inches="tight",
+        )
+
+    # serialize+plot in a shelve object
+    serialized_plot = pickle.dumps(fig)
+    with shelve.open(
+        os.path.join(
+            output_dir,
+            period,
+            run,
+            f"mtg/l200-{period}-{run}-{data_type}-monitoring",
+        ),
+        "c",
+        protocol=pickle.HIGHEST_PROTOCOL,
+    ) as shelf:
+        shelf[f"{period}_{run}_{info['title']}"] = serialized_plot
+
+    plt.close()
+    
 def compute_dead_time(df, window_ms=10):
     """
     Compute dead time percentage based on discharge windows.
@@ -443,7 +602,7 @@ def extract_resolution_at_q_bb(
     pars_dict : dict
         Dictionary containing calibration outputs.
     channel : str
-        Channel name or IDs.
+        Channel name or IDs (eg ch10000).
     key_result : str
         Key name used to extract the resolution results from the parsed file.
     fit : str
@@ -1671,35 +1830,14 @@ def plot_time_series(
                     #  - p08_string1_pos1_V02160A_param
                     #  - p08_string1_pos2_V02160B_param
                     #  - ...
-
+    
     # parameters (bsln, gain, ...) variations over run
-    ylabels = {
-        "TrapemaxCtcCal": "Energy diff / keV",
-        "Baseline": "Baseline % variations",
-        "BlStd": "Baseline std [ADC]",
-    }
-    colors = {
-        "TrapemaxCtcCal": ["dodgerblue", "b"],
-        "Baseline": ["r", "firebrick"],
-        "BlStd": ["peru", "saddlebrown"],
-    }
-    percentage = {
-        "TrapemaxCtcCal": True,
-        "Baseline": True,
-        "BlStd": False,
-    }
-    titles = {
-        "TrapemaxCtcCal": "pulser_stab",
-        "Baseline": "baseln_stab",
-        "BlStd": "baseln_spike",
-    }
-    limits = {
-        "TrapemaxCtcCal": [None, None],
-        "Baseline": [-10, 10],
-        "BlStd": [None, 50],
-    }
+    info = utils.MTG_PLOT_INFO
+    results = {}
+    
     for inspected_parameter in ["Baseline", "TrapemaxCtcCal", "BlStd"]:
         escale_par = escale_val if inspected_parameter == "TrapemaxCtcCal" else 1
+        results.update({ inspected_parameter: {} })
         
         for index_i in range(len(period_list)):
             period = period_list[index_i]
@@ -1772,7 +1910,7 @@ def plot_time_series(
                             dfs,
                             rawid,
                             escale=escale_par,
-                            variations=percentage[inspected_parameter],
+                            variations=info[inspected_parameter]['percentage'],
                         )
 
                         fig, ax = plt.subplots(figsize=(12, 4))
@@ -1788,7 +1926,7 @@ def plot_time_series(
                         threshold = (
                             [pars_data["res"][0], pars_data["res"][0]]
                             if inspected_parameter == "TrapemaxCtcCal"
-                            else limits[inspected_parameter]
+                            else info[inspected_parameter]['limits']
                         )
 
                         t0 = pars_data["run_start"]
@@ -1806,7 +1944,7 @@ def plot_time_series(
                                 last_checked,
                                 t0,
                                 threshold,
-                                titles[inspected_parameter],
+                                info[inspected_parameter]['title'],
                                 output,
                             )
 
@@ -1837,10 +1975,12 @@ def plot_time_series(
                                     alpha=0.2,
                                     label=r"±1$\sigma$",
                                 )
+
+                                results[inspected_parameter].update({channel_name: pul_cusp_av.values.astype(float)})
                             # else, no correction is applied
                             else:
                                 if (
-                                    percentage[inspected_parameter] is True
+                                    info[inspected_parameter]['percentage'] is True
                                     and float(escale_par) == 1.0
                                 ):
                                     pulser_data["ged"]["kevdiff_av"] *= 100
@@ -1857,7 +1997,7 @@ def plot_time_series(
                                 plt.plot(
                                     x,
                                     vals_av,
-                                    color=colors[inspected_parameter][0],
+                                    color=info[inspected_parameter]['colors'][0],
                                     label="GED uncorrected",
                                 )
                                 plt.fill_between(
@@ -1868,19 +2008,21 @@ def plot_time_series(
                                     alpha=0.2,
                                     label=r"±1$\sigma$",
                                 )
+                                
+                                results[inspected_parameter].update({channel_name: pulser_data["ged"]["kevdiff_av"].values.astype(float)})
 
                         # plot resolution only for the energy parameters
                         if inspected_parameter == "TrapemaxCtcCal":
                             plt.plot(
                                 [t0[0], t0[0] + pd.Timedelta(days=7)],
                                 [pars_data["res"][0] / 2, pars_data["res"][0] / 2],
-                                color=colors[inspected_parameter][1],
+                                color=info[inspected_parameter]['colors'][1],
                                 ls="-",
                             )
                             plt.plot(
                                 [t0[0], t0[0] + pd.Timedelta(days=7)],
                                 [-pars_data["res"][0] / 2, -pars_data["res"][0] / 2],
-                                color=colors[inspected_parameter][1],
+                                color=info[inspected_parameter]['colors'][1],
                                 ls="-",
                             )
 
@@ -1891,37 +2033,37 @@ def plot_time_series(
                                     t0[0],
                                     pars_data["res"][0] / 2 * 1.1,
                                     "{:.2f}".format(pars_data["res"][0]),
-                                    color=colors[inspected_parameter][1],
+                                    color=info[inspected_parameter]['colors'][1],
                                 )
                             plt.plot(
                                 [0, 1],
                                 [0, 1],
-                                color=colors[inspected_parameter][1],
+                                color=info[inspected_parameter]['colors'][1],
                                 label="Qbb FWHM keV lin.",
                             )
                         else:
-                            if limits[inspected_parameter][1] is not None:
+                            if info[inspected_parameter]['limits'][1] is not None:
                                 plt.plot(
                                     [t0[0], t0[0] + pd.Timedelta(days=7)],
                                     [
-                                        limits[inspected_parameter][1],
-                                        limits[inspected_parameter][1],
+                                        info[inspected_parameter]['limits'][1],
+                                        info[inspected_parameter]['limits'][1],
                                     ],
-                                    color=colors[inspected_parameter][1],
+                                    color=info[inspected_parameter]['colors'][1],
                                     ls="-",
                                 )
-                            if limits[inspected_parameter][0] is not None:
+                            if info[inspected_parameter]['limits'][0] is not None:
                                 plt.plot(
                                     [t0[0], t0[0] + pd.Timedelta(days=7)],
                                     [
-                                        limits[inspected_parameter][0],
-                                        limits[inspected_parameter][0],
+                                        info[inspected_parameter]['limits'][0],
+                                        info[inspected_parameter]['limits'][0],
                                     ],
-                                    color=colors[inspected_parameter][1],
+                                    color=info[inspected_parameter]['colors'][1],
                                     ls="-",
                                 )
 
-                        plt.ylabel(ylabels[inspected_parameter])
+                        plt.ylabel(info[inspected_parameter]['ylabel'])
                         fig.suptitle(
                             f"period: {period} - string: {string} - position: {pos} - ged: {channel_name}"
                         )
@@ -1962,3 +2104,5 @@ def plot_time_series(
 
     with open(usability_map_file, "w") as f:
         yaml.dump(output, f)
+
+    return results

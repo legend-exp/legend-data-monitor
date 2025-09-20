@@ -142,12 +142,12 @@ def main():
         partition = args.partition
         quadratic = args.quad_res
         zoom = args.zoom
-        
+
         det_info = legend_data_monitor.utils.build_detector_info(
             os.path.join(auto_dir_path, "inputs"), start_key=start_key
         )
 
-        legend_data_monitor.monitoring.plot_time_series(
+        results = legend_data_monitor.monitoring.plot_time_series(
             auto_dir_path,
             phy_mtg_data,
             output_folder,
@@ -163,6 +163,25 @@ def main():
             quadratic,
             zoom,
         )
+
+        found = False
+        filename = ""
+        for tier in ["hit", "pht"]:
+            cal_path = os.path.join(auto_dir_path, "generated/par", tier, "cal", period, current_run)
+            if os.path.isdir(cal_path):
+                found = True
+                filename = [f for f in os.listdir(cal_path) if f.endswith('.yaml') or f.endswith('.json')][0].split('.')[0]
+                break
+        if not found:
+            legend_data_monitor.utils.logger.debug(f"No valid folder {cal_path} found. Exiting.")
+            return
+        pars_path = legend_data_monitor.utils.retrieve_json_or_yaml(cal_path, filename)
+        pars = legend_data_monitor.utils.read_json_or_yaml(pars_path)
+
+        # loop over parameters
+        for k in results.keys():
+            pars_dict = pars if k in ['TrapemaxCtcCal'] else None
+            legend_data_monitor.monitoring.box_summary_plot(period, current_run, pars_dict, det_info, results[k], legend_data_monitor.utils.MTG_PLOT_INFO[k], output_folder, 'phy', save_pdf)
 
         legend_data_monitor.utils.check_cal_phy_thresholds(
             output_folder,
