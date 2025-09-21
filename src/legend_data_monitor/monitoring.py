@@ -4,7 +4,9 @@ import os
 import pickle
 import shelve
 import sys
-
+from lgdo.lh5 import read_as
+import glob
+import awkward as ak
 import h5py
 import math
 import matplotlib
@@ -75,7 +77,7 @@ def qc_distributions(
         f"l200-{period}-{run}-phy-monitoring",
     )
 
-    step = 0.5
+    step = 0.4
     with (
         shelve.open(shelve_path, "c", protocol=pickle.HIGHEST_PROTOCOL) as shelf,
         pd.HDFStore(my_file, "r") as store,
@@ -135,7 +137,7 @@ def qc_distributions(
                     ax.axvspan(5, 15, color='darkgray', alpha=0.2)
                     ax.set_ylabel('Counts')
                     ax.set_xlabel('Classifiers')
-                    ax.legend(title=f"{det} (pos {det_info['detectors'][det]['position']})")
+                    ax.legend(title=f"{det} (pos {det_info['detectors'][det]['position']})", loc='upper right')
                     ax.set_yscale('log')
                     ax.grid(False)
                     ax.set_xlim(-10,10)
@@ -162,6 +164,202 @@ def qc_distributions(
                 shelf[f"{period}_{run}_{par}"] = pickle.dumps(fig)
                 plt.close()
 
+
+def qc_FT_failure_rates(
+    auto_dir_path: str,
+    phy_mtg_data: str,
+    output_folder: str,
+    start_key: str,
+    period: str,
+    run: str,
+    det_info: dict,
+    save_pdf: bool,
+):
+    my_file = os.path.join(output_folder, f"{period}/{run}/l200-{period}-{run}-phy-geds.hdf")
+    detectors = det_info["detectors"]
+    str_chns = det_info["str_chns"]
+    utils.logger.debug("...inspecting FT failure rates")
+
+    end_folder = os.path.join(
+        output_folder,
+        period,
+        run,
+        "mtg",
+    )
+    os.makedirs(end_folder, exist_ok=True)
+    shelve_path = os.path.join(
+        end_folder,
+        f"l200-{period}-{run}-phy-monitoring",
+    )
+
+    with (
+        shelve.open(shelve_path, "c", protocol=pickle.HIGHEST_PROTOCOL) as shelf,
+        pd.HDFStore(my_file, "r") as store,
+    ):
+        df = store["/IsBsln_IsBbLike"]
+        df_DD = store["/IsBsln_IsDelayedDischarge"]
+        df_clean = df[~df_DD]  
+        color_cycle = itertools.cycle(plt.cm.tab20.colors)
+            
+        for string, det_list in str_chns.items():
+            fig, ax = plt.subplots(figsize=(12, 6))
+
+            for i, det in enumerate(det_list):
+                if not det_info['detectors'][det]['processable']:
+                    continue
+                    
+                ch = det_info["detectors"][det]["daq_rawid"]
+                pos = det_info["detectors"][det]["position"]
+
+                if ch not in df_clean.columns:
+                    continue
+
+                # Take channel data and resample to hourly counts
+                data = df_clean[ch].copy()
+                hourly_counts = data.resample("1H").sum()
+
+                # convert to mHz: (counts / 3600 sec) * 1000
+                hourly_rate = hourly_counts / 3600 * 1000
+
+                color = next(color_cycle)
+                hourly_rate.plot(
+                    ax=ax,
+                    drawstyle="steps-mid",
+                    label=f"{det} - pos {pos}",
+                    color=color,
+                )
+
+                
+                
+                ax.set_ylabel('FT failure rate [mHz]')
+                ax.legend(ncol=2, fontsize="small", loc='upper left')
+                ax.grid(False)
+                
+            fig.suptitle(f"{period} - {run} - string {string}")
+            fig.tight_layout()
+
+            if save_pdf:
+                pdf_folder = os.path.join(output_folder, f"{period}/{run}/mtg/pdf", f"st{string}")
+                os.makedirs(pdf_folder, exist_ok=True)
+                plt.savefig(
+                    os.path.join(
+                        pdf_folder,
+                        f"{period}_{run}_string{string}_FT_failure.pdf",
+                    ),
+                    bbox_inches="tight",
+                )
+
+            # serialize+plot in a shelve object
+            shelf[f"{period}_{run}_FT_failure"] = pickle.dumps(fig)
+            plt.close()
+
+
+def qc_FT_failure_rates_from_lh5(
+    auto_dir_path: str,
+    phy_mtg_data: str,
+    output_folder: str,
+    start_key: str,
+    period: str,
+    run: str,
+    det_info: dict,
+    save_pdf: bool,
+):
+    utils.logger.debug("...inspecting FT failure rates")
+    evt_files_phy = sorted(glob.glob(f"{auto_dir_path}/generated/tier/evt/phy/{period}/*/*.lh5"))
+    energies  = read_as("evt/geds", evt_files_phy, 'ak', field_mask=['energy'])
+    ged_pul   = read_as("evt/coincident", evt_files_phy, 'ak', field_mask=['geds', 'puls'])
+    forced    = read_as("evt/trigger", evt_files_phy, 'ak', field_mask=['is_forced', 'timestamp'])
+    is_bb     = read_as("evt/geds/quality", evt_files_phy, 'ak', field_mask=['is_bb_like', 'is_bb_like_old', 'is_good_channel'])
+    is_dis    = read_as("evt/geds/quality/is_not_bb_like", evt_files_phy, 'ak', field_mask=['is_delayed_discharge'])
+    is_fail   = read_as("evt/geds/quality/is_not_bb_like", evt_files_phy, 'ak', field_mask=['is_empty_bits', 'rawid'])
+
+    temp = is_fail.rawid[forced.is_forced & ~is_bb.is_bb_like & ~is_dis.is_delayed_discharge]
+    y = {ch: np.zeros(len(forced.timestamp[forced.is_forced & ~is_bb.is_bb_like & ~is_dis.is_delayed_discharge]))
+         for ch in set(ak.flatten(temp))}
+
+    for i in range(len(temp)):
+        if len(temp[i]) == 0:
+            continue
+        for ch in temp[i]:
+            y[ch][i] += 1
+
+    y['timestamp'] = ak.to_numpy(forced.timestamp[forced.is_forced & ~is_bb.is_bb_like & ~is_dis.is_delayed_discharge])
+
+    # --- Build DataFrame
+    df = pd.DataFrame(y)
+    df['timestamp'] = pd.to_datetime(df['timestamp'], unit='s')
+    df.set_index('timestamp', inplace=True)
+    daily_cnt = df.resample('H').sum()
+
+    end_folder = os.path.join(output_folder, period, "mtg")
+    os.makedirs(end_folder, exist_ok=True)
+    shelve_path = os.path.join(end_folder, f"l200-{period}-phy-monitoring")
+
+    str_counts = {}
+    color_cycle = itertools.cycle(plt.cm.tab20.colors)
+
+    with shelve.open(shelve_path, "c", protocol=pickle.HIGHEST_PROTOCOL) as shelf:
+        # --- Per-string plots ---
+        for string, det_list in det_info['str_chns'].items():
+            fig, ax = plt.subplots(figsize=(12, 6))
+            string_sum = None  # for summing counts of this string
+
+            for det in det_list:
+                if not det_info['detectors'][det]['processable']:
+                    continue
+                ch = det_info['detectors'][det]['daq_rawid']
+                if ch not in daily_cnt.columns:
+                    continue
+
+                hourly_rate = daily_cnt[ch] / 3600 * 1000
+                color = next(color_cycle)
+                hourly_rate.plot(ax=ax, drawstyle='steps-mid', label=det, color=color)
+
+                string_sum = hourly_rate if string_sum is None else string_sum + hourly_rate
+
+            str_counts[string] = string_sum
+
+            ax.set_ylabel('FT failure rate (mHz)')
+            ax.legend(ncol=2, fontsize='small', loc='upper left')
+            ax.grid(False)
+            fig.suptitle(f"{period} - {run} - string {string}")
+            fig.tight_layout()
+
+            if save_pdf:
+                pdf_folder = os.path.join(output_folder, f"{period}/mtg/pdf", f"st{string}") 
+                os.makedirs(pdf_folder, exist_ok=True)
+                plt.savefig(
+                    os.path.join(pdf_folder, f"{period}_string{string}_FT_failure.pdf"),
+                    bbox_inches='tight'
+                )
+
+            shelf[f"{period}_string{string}_FT_failure"] = pickle.dumps(fig)
+            plt.close(fig)
+
+        # --- Combined plot of all strings ---
+        fig, ax = plt.subplots(figsize=(12, 6))
+        color_cycle = itertools.cycle(plt.cm.tab20.colors)
+        for string, counts in str_counts.items():
+            if counts is not None:
+                color = next(color_cycle)
+                counts.plot(ax=ax, drawstyle='steps-mid', label=f"String {string}", color=color)
+
+        ax.set_ylabel('FT failure rate (mHz)')
+        ax.set_title(f"{period} - {run} - All strings")
+        ax.legend(ncol=2, fontsize='small', loc='upper left')
+        ax.grid(False)
+        fig.tight_layout()
+
+        if save_pdf:
+            pdf_folder = os.path.join(output_folder, f"{period}/mtg/pdf") 
+            os.makedirs(pdf_folder, exist_ok=True)
+            plt.savefig(
+                os.path.join(pdf_folder, f"{period}_all_strings_FT_failure.pdf"),
+                bbox_inches='tight'
+            )
+
+        shelf[f"{period}_all_strings_FT_failure"] = pickle.dumps(fig)
+        plt.close(fig)
 
     
 def box_summary_plot(
@@ -1690,6 +1888,7 @@ def plot_time_series(
         f'(channel == "{channel}" and period in {periods})'
         for channel, periods in no_puls_dets.items()
     )
+    utils.logger.debug("...inspecting gain/bsln/etc time series")
 
     # gain over period
     for index_i in range(len(period_list)):

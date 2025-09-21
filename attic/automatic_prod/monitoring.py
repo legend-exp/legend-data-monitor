@@ -147,6 +147,30 @@ def main():
             os.path.join(auto_dir_path, "inputs"), start_key=start_key
         )
 
+        # FT failure rate plots
+        """
+        legend_data_monitor.monitoring.qc_FT_failure_rates(
+            auto_dir_path,
+            phy_mtg_data,
+            output_folder,
+            start_key,
+            period,
+            current_run,
+            det_info,
+            save_pdf,
+        )
+        """
+        legend_data_monitor.monitoring.qc_FT_failure_rates_from_lh5(
+            auto_dir_path,
+            phy_mtg_data,
+            output_folder,
+            start_key,
+            period,
+            current_run,
+            det_info,
+            save_pdf,
+        )
+
         # qc classifier plots
         legend_data_monitor.monitoring.qc_distributions(
             auto_dir_path,
