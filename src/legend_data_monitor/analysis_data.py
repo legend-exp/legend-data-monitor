@@ -299,6 +299,25 @@ class AnalysisData:
                     "expression"
                 ]
 
+            try:
+                expression = evt_config["operations"]["geds___quality___is_not_bb_like___is_delayed_discharge"][
+                    "expression"
+                ]
+            except KeyError:
+                filepath_pattern = os.path.join(
+                    path,
+                    version,
+                    "inputs/dataprod/config",
+                    subdir,
+                    "*-geds_qc-evt_config.yaml",
+                )
+                filepath = glob.glob(filepath_pattern)[0]
+                with open(filepath) as file:
+                    evt_config = yaml.load(file, Loader=yaml.CLoader)
+                expression = evt_config["operations"]["geds___quality___is_not_bb_like___is_delayed_discharge"][
+                    "expression"
+                ]
+
             # extract key-value pairs like: hit.is_something == number
             pattern = r"hit\.(\w+)\s*==\s*(\d+)"
             matches = re.findall(pattern, expression)
