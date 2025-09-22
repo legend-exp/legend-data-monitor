@@ -1912,6 +1912,7 @@ def build_detector_info(metadata_path, start_key=None):
     """
     lmeta = LegendMetadata(metadata_path)
     chmap = lmeta.channelmap(start_key) if start_key else lmeta.channelmap()
+    germanium = lmeta.hardware.detectors.germanium
 
     detectors = {}
     str_chns = defaultdict(list)
@@ -1925,6 +1926,8 @@ def build_detector_info(metadata_path, start_key=None):
         string = int(info["location"]["string"])
         position = info["location"]["position"]
         processable = info.get("analysis", {}).get("processable", False)
+        usability = info.get("analysis", {}).get("usability", None)
+        mass_in_kg = float(germanium.diodes[det].production.mass_in_g/1000)
 
         # store detector info
         detectors[det] = {
@@ -1934,6 +1937,8 @@ def build_detector_info(metadata_path, start_key=None):
             "string": string,
             "position": position,
             "processable": processable,
+            "usability": usability,
+            "mass_in_kg": mass_in_kg,
         }
 
         # fill string

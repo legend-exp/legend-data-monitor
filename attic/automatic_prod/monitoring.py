@@ -148,19 +148,7 @@ def main():
         )
 
         # FT failure rate plots
-        """
-        legend_data_monitor.monitoring.qc_FT_failure_rates(
-            auto_dir_path,
-            phy_mtg_data,
-            output_folder,
-            start_key,
-            period,
-            current_run,
-            det_info,
-            save_pdf,
-        )
-        """
-        legend_data_monitor.monitoring.qc_FT_failure_rates_from_lh5(
+        legend_data_monitor.monitoring.qc_and_evt_summary_plots(
             auto_dir_path,
             phy_mtg_data,
             output_folder,

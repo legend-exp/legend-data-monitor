@@ -3,6 +3,7 @@ import json
 import os
 import pickle
 import shelve
+from functools import partial
 import sys
 from lgdo.lh5 import read_as
 import glob
@@ -253,8 +254,14 @@ def qc_FT_failure_rates(
             shelf[f"{period}_{run}_FT_failure"] = pickle.dumps(fig)
             plt.close()
 
+def mHz_to_percent(mhz, avg_total_forced_mHz):
+    return (mhz / avg_total_forced_mHz) * 100
 
-def qc_FT_failure_rates_from_lh5(
+def percent_to_mHz(pct, avg_total_forced_mHz):
+    return (pct / 100) * avg_total_forced_mHz
+
+
+def qc_and_evt_summary_plots(
     auto_dir_path: str,
     phy_mtg_data: str,
     output_folder: str,
@@ -265,44 +272,58 @@ def qc_FT_failure_rates_from_lh5(
     save_pdf: bool,
 ):
     utils.logger.debug("...inspecting FT failure rates")
-    evt_files_phy = sorted(glob.glob(f"{auto_dir_path}/generated/tier/evt/phy/{period}/*/*.lh5"))
-    energies  = read_as("evt/geds", evt_files_phy, 'ak', field_mask=['energy'])
+    try:
+        evt_files_phy = sorted(glob.glob(f"{auto_dir_path}/generated/tier/evt/phy/{period}/{run}/*.lh5"))
+    except:
+        evt_files_phy = sorted(glob.glob(f"{auto_dir_path}/generated/tier/pet/phy/{period}/{run}/*.lh5"))
+    #energies  = read_as("evt/geds", evt_files_phy, 'ak', field_mask=['energy'])
     ged_pul   = read_as("evt/coincident", evt_files_phy, 'ak', field_mask=['geds', 'puls'])
     forced    = read_as("evt/trigger", evt_files_phy, 'ak', field_mask=['is_forced', 'timestamp'])
     is_bb     = read_as("evt/geds/quality", evt_files_phy, 'ak', field_mask=['is_bb_like', 'is_bb_like_old', 'is_good_channel'])
     is_dis    = read_as("evt/geds/quality/is_not_bb_like", evt_files_phy, 'ak', field_mask=['is_delayed_discharge'])
     is_fail   = read_as("evt/geds/quality/is_not_bb_like", evt_files_phy, 'ak', field_mask=['is_empty_bits', 'rawid'])
 
-    temp = is_fail.rawid[forced.is_forced & ~is_bb.is_bb_like & ~is_dis.is_delayed_discharge]
-    y = {ch: np.zeros(len(forced.timestamp[forced.is_forced & ~is_bb.is_bb_like & ~is_dis.is_delayed_discharge]))
+    # build dataframe for FT FAILING events
+    mask = forced.is_forced & ~is_bb.is_bb_like & ~is_dis.is_delayed_discharge
+    temp = is_fail.rawid[mask]
+    y = {ch: np.zeros(len(forced.timestamp[mask]))
          for ch in set(ak.flatten(temp))}
-
     for i in range(len(temp)):
         if len(temp[i]) == 0:
             continue
         for ch in temp[i]:
             y[ch][i] += 1
-
-    y['timestamp'] = ak.to_numpy(forced.timestamp[forced.is_forced & ~is_bb.is_bb_like & ~is_dis.is_delayed_discharge])
-
-    # --- Build DataFrame
+    y['timestamp'] = ak.to_numpy(forced.timestamp[mask])
+    
     df = pd.DataFrame(y)
     df['timestamp'] = pd.to_datetime(df['timestamp'], unit='s')
     df.set_index('timestamp', inplace=True)
     daily_cnt = df.resample('H').sum()
 
-    end_folder = os.path.join(output_folder, period, "mtg")
+    # Folders
+    end_folder = os.path.join(output_folder, period, "mtg", run)
     os.makedirs(end_folder, exist_ok=True)
-    shelve_path = os.path.join(end_folder, f"l200-{period}-phy-monitoring")
+    shelve_path = os.path.join(end_folder, f"l200-{period}-{run}-phy-monitoring")
 
     str_counts = {}
     color_cycle = itertools.cycle(plt.cm.tab20.colors)
 
+    # --- all forced triggers (denominator across all strings)
+    df_all = pd.DataFrame({
+        "timestamp": ak.to_numpy(forced.timestamp[forced.is_forced])
+    })
+    df_all["timestamp"] = pd.to_datetime(df_all["timestamp"], unit="s")
+    df_all.set_index("timestamp", inplace=True)
+    total_forced = df_all.resample("H").size()  # counts/hour, all strings
+    avg_total_forced_mHz = (total_forced.mean() / 3600) * 1000  
+    on_mass = 0
+
+    # ONE PERIOD, ALL RUNS
     with shelve.open(shelve_path, "c", protocol=pickle.HIGHEST_PROTOCOL) as shelf:
         # --- Per-string plots ---
         for string, det_list in det_info['str_chns'].items():
             fig, ax = plt.subplots(figsize=(12, 6))
-            string_sum = None  # for summing counts of this string
+            string_sum = None  
 
             for det in det_list:
                 if not det_info['detectors'][det]['processable']:
@@ -311,7 +332,11 @@ def qc_FT_failure_rates_from_lh5(
                 if ch not in daily_cnt.columns:
                     continue
 
-                hourly_rate = daily_cnt[ch] / 3600 * 1000
+                mass = det_info['detectors'][det]['mass_in_kg']
+                if det_info['detectors'][det]['usability'] == 'on': 
+                    on_mass += mass
+
+                hourly_rate = daily_cnt[ch] / 3600 * 1000 / mass
                 color = next(color_cycle)
                 hourly_rate.plot(ax=ax, drawstyle='steps-mid', label=det, color=color)
 
@@ -319,21 +344,26 @@ def qc_FT_failure_rates_from_lh5(
 
             str_counts[string] = string_sum
 
-            ax.set_ylabel('FT failure rate (mHz)')
+            m2p = partial(mHz_to_percent, avg_total_forced_mHz=avg_total_forced_mHz)
+            p2m = partial(percent_to_mHz, avg_total_forced_mHz=avg_total_forced_mHz)
+            secax = ax.secondary_yaxis('right', functions=(m2p, p2m))
+            secax.set_ylabel("FT failure fraction (%)")
+            
+            ax.set_ylabel('Normalized FT failure rate (mHz/kg)')
             ax.legend(ncol=2, fontsize='small', loc='upper left')
             ax.grid(False)
             fig.suptitle(f"{period} - {run} - string {string}")
             fig.tight_layout()
 
             if save_pdf:
-                pdf_folder = os.path.join(output_folder, f"{period}/mtg/pdf", f"st{string}") 
+                pdf_folder = os.path.join(output_folder, period, run, "mtg/pdf", f"st{string}") 
                 os.makedirs(pdf_folder, exist_ok=True)
                 plt.savefig(
-                    os.path.join(pdf_folder, f"{period}_string{string}_FT_failure.pdf"),
+                    os.path.join(pdf_folder, f"{period}_{run}_string{string}_FT_failure.pdf"),
                     bbox_inches='tight'
                 )
 
-            shelf[f"{period}_string{string}_FT_failure"] = pickle.dumps(fig)
+            shelf[f"{period}_{run}_string{string}_FT_failure"] = pickle.dumps(fig)
             plt.close(fig)
 
         # --- Combined plot of all strings ---
@@ -344,21 +374,82 @@ def qc_FT_failure_rates_from_lh5(
                 color = next(color_cycle)
                 counts.plot(ax=ax, drawstyle='steps-mid', label=f"String {string}", color=color)
 
-        ax.set_ylabel('FT failure rate (mHz)')
+        ax.set_ylabel('Normalized FT failure rate (mHz/kg)')
         ax.set_title(f"{period} - {run} - All strings")
         ax.legend(ncol=2, fontsize='small', loc='upper left')
         ax.grid(False)
         fig.tight_layout()
 
         if save_pdf:
-            pdf_folder = os.path.join(output_folder, f"{period}/mtg/pdf") 
+            pdf_folder = os.path.join(output_folder, period, run, "mtg/pdf") 
             os.makedirs(pdf_folder, exist_ok=True)
             plt.savefig(
-                os.path.join(pdf_folder, f"{period}_all_strings_FT_failure.pdf"),
+                os.path.join(pdf_folder, f"{period}_{run}_all_strings_FT_failure.pdf"),
                 bbox_inches='tight'
             )
 
-        shelf[f"{period}_all_strings_FT_failure"] = pickle.dumps(fig)
+        shelf[f"{period}_{run}_all_strings_FT_failure"] = pickle.dumps(fig)
+        plt.close(fig)
+
+        # --- FT survival fraction ---
+        mask_forced = forced.is_forced
+        mask_survived = mask_forced & is_bb.is_bb_like & ~is_dis.is_delayed_discharge
+        ts_all = pd.to_datetime(forced.timestamp[mask_forced], unit='s')
+        ts_survived = pd.to_datetime(forced.timestamp[mask_survived], unit='s')
+        df_all = pd.DataFrame({'count': 1}, index=ts_all)
+        df_survived = pd.DataFrame({'count': 1}, index=ts_survived)
+        total_forced = df_all.resample('H').sum()['count']
+        surviving = df_survived.resample('H').sum()['count']
+        surviving_frac = surviving / total_forced * 100
+        fig, ax = plt.subplots(figsize=(12, 6))
+
+        surviving_frac.plot(ax=ax, drawstyle='steps-mid', color='red')
+        ax.set_ylabel('FT surviving events (%)')
+        ax.set_title(f"{period} - All strings combined")
+        ax.grid(False)
+        fig.tight_layout()
+                
+        if save_pdf:
+            pdf_folder = os.path.join(output_folder, period, run, "mtg/pdf") 
+            os.makedirs(pdf_folder, exist_ok=True)
+            plt.savefig(
+                os.path.join(pdf_folder, f"{period}_{run}_all_strings_FT_SF.pdf"),
+                bbox_inches='tight'
+            )
+        
+        shelf[f"{period}_{run}_all_strings_FT_SF"] = pickle.dumps(fig)
+        plt.close(fig)
+        
+        # --- Event rates ---
+        fig, ax = plt.subplots(figsize=(10, 3.5))
+        
+        mask2 = ged_pul.geds & ~ged_pul.puls & ~forced.is_forced & ~is_dis.is_delayed_discharge
+        ser = pd.to_datetime(forced.timestamp[ged_pul.geds & ~ged_pul.puls & ~forced.is_forced], unit='s')
+        ser_dis = pd.to_datetime(forced.timestamp[ged_pul.geds & ~ged_pul.puls & ~forced.is_forced & is_dis.is_delayed_discharge], unit='s')
+        ser_pass = pd.to_datetime(forced.timestamp[mask2 & is_bb.is_bb_like], unit='s')
+        ser_fail = pd.to_datetime(forced.timestamp[mask2 & ~is_bb.is_bb_like], unit='s')
+
+        for s, label, color in [(ser, 'All events', 'dimgrey'),
+                                (ser_dis, 'Delayed discharges', 'darkorange'),
+                                (ser_fail, 'Failing QC', 'crimson'),
+                                (ser_pass, 'Surviving QC', 'dodgerblue')]:
+            if s.empty: continue
+            freq, bin_edges = np.histogram(s, bins=pd.date_range(start=s.min(), end=s.max(), freq='H'))
+            ax.stairs(freq / 3600 * 1000 / on_mass, bin_edges, label=label, color=color)
+        
+        ax.set_ylabel('Hourly rate normalized by ON mass (mHz/kg)')
+        ax.legend(title=f'ON mass = {on_mass:.1f} kg', loc='upper right')
+        ax.grid(False)
+        fig.tight_layout()
+        
+        if save_pdf:
+            pdf_folder = os.path.join(output_folder, period, run, "mtg/pdf") 
+            os.makedirs(pdf_folder, exist_ok=True)
+            plt.savefig(
+                os.path.join(pdf_folder, f"{period}_{run}_event_rate_qc.pdf"),
+                bbox_inches='tight'
+            )
+        shelf[f"{period}_{run}_event_rate_qc"] = pickle.dumps(fig)
         plt.close(fig)
 
     
@@ -484,6 +575,7 @@ def box_summary_plot(
     ax.set_ylabel(info['ylabel'])
     ax.set_title(f"{period} {run}")
     ax.legend(loc="upper right")
+    ax.grid(False)
 
     if info['title'] in ['baseln_stab']: ax.axhline(-5, ls="--", color="black"); ax.axhline(5, ls="--", color="black")
     if info['title'] in ['baseln_spike']: ax.axhline(50, ls="--", color="black");
