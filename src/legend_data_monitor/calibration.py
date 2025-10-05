@@ -67,6 +67,8 @@ def load_fit_pars_from_yaml(
     results = {}
 
     for file_path in pars_files_list:
+        if 'old' in file_path.split("/")[-2]: continue
+        
         run_idx = int(file_path.split("/")[-2].split("r")[-1])
         run_str = f"r{run_idx:03d}"
         if run_str not in avail_runs:
@@ -484,20 +486,26 @@ def fep_gain_variation(
         ax.hist2d(timestamps, norm_values, bins=(x_bins, y_bins), cmap="Blues")
         fig.colorbar(ax.collections[0], label="Counts")
 
-        ax.plot(stats["time"], means, "x-", color="red", label="10min mean")
+        ax.plot(stats["time"], means, "x-", color="red", label="10 min mean")
 
         ax.fill_between(
             stats["time"],
-            -stats["std"] / baseline * 2039,
-            stats["std"] / baseline * 2039,
+            (stats["mean"] - stats["std"] - baseline) / baseline * 2039,
+            (stats["mean"] + stats["std"] - baseline) / baseline * 2039,
             color="red",
             alpha=0.2,
             label="±1 std",
         )
 
-    fwhm = pars["results"]["ecal"]["cuspEmax_ctc_cal"]["eres_linear"]["Qbb_fwhm_in_kev"]
-    if not np.isnan(fwhm):
-
+    fwhm = (
+        (pars or {})
+            .get("results") or {}
+            .get("ecal") or {}
+            .get("cuspEmax_ctc_cal") or {}
+            .get("eres_linear") or {}
+            .get("Qbb_fwhm_in_kev")
+    )
+    if isinstance(fwhm, (int, float)) and not np.isnan(fwhm):
         if fwhm < 5:
             plt.ylim(-5, 5)
 
@@ -673,10 +681,11 @@ def check_calibration(
             
             # true only if both peaks are valid
             overall_valid = fep_valid and low_valid
+            overall_valid = fep_valid and low_valid
             utils.update_evaluation_in_memory(output, ged, "cal", "npeak", overall_valid)
             
-            fwhm = ecal["eres_linear"]["Qbb_fwhm_in_kev"]
-            fwhm_ok = not np.isnan(fwhm)
+            fwhm = (ecal.get("eres_linear") or {}).get("Qbb_fwhm_in_kev")
+            fwhm_ok = isinstance(fwhm, (int, float, np.integer, np.floating)) and not np.isnan(fwhm)
             utils.update_evaluation_in_memory(output, ged, "cal", "fwhm_ok", fwhm_ok)
             
             # FEP gain stability - independent from fwhm; if we use that value, than put it back in the if statement
