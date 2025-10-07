@@ -577,8 +577,13 @@ def box_summary_plot(
     ax.legend(loc="upper right")
     ax.grid(False)
 
-    if info['title'] in ['baseln_stab']: ax.axhline(-5, ls="--", color="black"); ax.axhline(5, ls="--", color="black")
-    if info['title'] in ['baseln_spike']: ax.axhline(50, ls="--", color="black");
+    if info['title'] in ['baseln_stab']: 
+        ax.axhline(-10, ls="--", color="black"); ax.axhline(10, ls="--", color="black")
+        ax.axhspan(10, 500, color="gray", alpha=0.25)
+        ax.axhspan(-10, -500, color="gray", alpha=0.25)
+    if info['title'] in ['baseln_spike']: 
+        ax.axhline(50, ls="--", color="black")
+        ax.axhspan(50, 500, color="gray", alpha=0.25)
 
     if info['title'] in ['FEP_gain','pulser_stab']: plt.ylim(-6,6)
     if info['title'] in ['baseln_stab']: plt.ylim(-20,20)
@@ -1028,7 +1033,8 @@ def extract_resolution_at_q_bb(
         return np.nan, np.nan
 
     result = pars_dict[channel]["results"][key_result].get("cuspEmax_ctc_cal", {})
-    Qbb_keys = [k for k in result.get("eres_linear", {}) if "Qbb_fwhm_in_" in k]
+    eres_linear = result.get("eres_linear") or {}
+    Qbb_keys = [k for k in eres_linear if "Qbb_fwhm_in_" in k]
     if not Qbb_keys:
         return np.nan, np.nan
 
@@ -1902,7 +1908,6 @@ def plot_time_series(
     auto_dir_path: str,
     phy_mtg_data: str,
     output_folder: str,
-    start_key: str,
     period: str,
     runs: list,
     current_run: str,
@@ -1933,8 +1938,6 @@ def plot_time_series(
         Path to generated monitoring hdf files.
     output_folder : str
         Path to output folder.
-    start_key : str
-        First timestamp of the inspected range.
     period : str
         Period to inspect.
     runs : list

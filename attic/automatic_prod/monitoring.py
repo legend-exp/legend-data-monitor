@@ -147,36 +147,11 @@ def main():
             os.path.join(auto_dir_path, "inputs"), start_key=start_key
         )
 
-        # FT failure rate plots
-        legend_data_monitor.monitoring.qc_and_evt_summary_plots(
-            auto_dir_path,
-            phy_mtg_data,
-            output_folder,
-            start_key,
-            period,
-            current_run,
-            det_info,
-            save_pdf,
-        )
-
-        # qc classifier plots
-        legend_data_monitor.monitoring.qc_distributions(
-            auto_dir_path,
-            phy_mtg_data,
-            output_folder,
-            start_key,
-            period,
-            current_run,
-            det_info,
-            save_pdf,
-        )
-
         # stability plots
         results = legend_data_monitor.monitoring.plot_time_series(
             auto_dir_path,
             phy_mtg_data,
             output_folder,
-            start_key,
             period,
             runs,
             current_run,
@@ -216,6 +191,30 @@ def main():
             "phy",
             det_info["detectors"],
             pswd_email,
+        )
+
+        # FT failure rate plots
+        legend_data_monitor.monitoring.qc_and_evt_summary_plots(
+            auto_dir_path,
+            phy_mtg_data,
+            output_folder,
+            start_key,
+            period,
+            current_run,
+            det_info,
+            save_pdf,
+        )
+
+        # qc classifier plots
+        legend_data_monitor.monitoring.qc_distributions(
+            auto_dir_path,
+            phy_mtg_data,
+            output_folder,
+            start_key,
+            period,
+            current_run,
+            det_info,
+            save_pdf,
         )
 
     elif args.command == "check_calib":
