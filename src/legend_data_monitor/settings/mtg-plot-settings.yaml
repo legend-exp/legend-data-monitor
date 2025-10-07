@@ -9,6 +9,17 @@ TrapemaxCtcCal:
     - null
     - null
 
+Trapemax:
+  ylabel: "Energy diff / keV"
+  colors:
+    - dodgerblue
+    - b
+  percentage: true
+  title: "pulser_stab"
+  limits:
+    - null
+    - null
+
 Baseline:
   ylabel: "Baseline % variations"
   colors:

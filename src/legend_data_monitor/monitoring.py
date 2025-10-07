@@ -301,7 +301,7 @@ def qc_and_evt_summary_plots(
     daily_cnt = df.resample('H').sum()
 
     # Folders
-    end_folder = os.path.join(output_folder, period, "mtg", run)
+    end_folder = os.path.join(output_folder, period, run, "mtg")
     os.makedirs(end_folder, exist_ok=True)
     shelve_path = os.path.join(end_folder, f"l200-{period}-{run}-phy-monitoring")
 
