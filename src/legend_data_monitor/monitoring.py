@@ -84,8 +84,12 @@ def qc_distributions(
         pd.HDFStore(my_file, "r") as store,
     ):
         df_energy_IsPhysics = store["/IsPhysics_TrapemaxCtcCal"]
+        avail_keys = store.keys()
             
         for par in pars_to_inspect:
+            if par not in avail_keys:
+                utils.logger.debug(f"...key {par} not available in {my_file}. Skip it!")
+                continue
             df_All = store[f"/All_{par}"]
             df_IsPulser = store[f"/IsPulser_{par}"]
             df_IsBsln = store[f"/IsBsln_{par}"]

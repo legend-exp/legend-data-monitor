@@ -1873,13 +1873,24 @@ def retrieve_json_or_yaml(base_path: str, filename: str):
     return path
 
 
-def deep_get(d, keys, default=None):
-    for k in keys:
-        if isinstance(d, dict):
-            d = d.get(k, default)
+def deep_get(d, keys, default=None, verbose=False):
+    current = d
+    for i, k in enumerate(keys):
+        if isinstance(current, dict):
+            if k in current:
+                current = current[k]
+            else:
+                if verbose:
+                    print(f"[deep_get] Missing key at step {i}: '{k}'")
+                    print(f"[deep_get] Keys tried: {keys[:i+1]}")
+                    print(f"[deep_get] Available keys here: {list(current.keys())}")
+                return default
         else:
+            if verbose:
+                print(f"[deep_get] Expected dict at step {i}, but got type {type(current).__name__}")
             return default
-    return d
+    return current
+
 
 
 def none_to_nan(data: list):

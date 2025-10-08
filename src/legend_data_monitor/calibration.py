@@ -75,7 +75,7 @@ def load_fit_pars_from_yaml(
             continue
 
         run_data = utils.read_json_or_yaml(file_path)
-        time = 0 if "par_hit" in file_path else file_path.split("-")[-2]
+        time = file_path.split("-")[-2]
 
         for idx, det in enumerate(detectors_list):
             det_key = det if det in run_data else detectors_name[idx]
@@ -127,6 +127,7 @@ def evaluate_psd_performance(
     slow_shift_failed = bool(slow_shift_fail_runs)
 
     # SUDDEN shifts
+    # to do: fix 0 as first entry for sudden shifts
     sudden_shifts = []
     for i in range(len(mean_vals) - 1):
         v1, v2, s = mean_vals[i], mean_vals[i + 1], sigma_vals[i]
@@ -290,6 +291,7 @@ def evaluate_psd_usability_and_plot(
     plt.tight_layout(rect=[0, 0.03, 1, 0.95])
 
     output_dir = os.path.join(output_dir, "mtg")
+    
     if save_pdf:
         pdf_folder = os.path.join(output_dir, "pdf", f"st{location[0]}")
         os.makedirs(pdf_folder, exist_ok=True)
@@ -360,12 +362,12 @@ def check_psd(
         return
     
     # create the folder and parents if missing - for the moment, we store it under the 'phy' folder
-    output_dir = os.path.join(output_dir, period, current_run)
-    os.makedirs(os.path.join(output_dir, "mtg"), exist_ok=True)
+    output_dir_run = os.path.join(output_dir, period, current_run)
+    os.makedirs(os.path.join(output_dir_run, "mtg"), exist_ok=True)
 
     # Load existing data once (or start empty)
     usability_map_file = os.path.join(
-        output_dir, f"l200-{period}-{current_run}-qcp_summary.yaml"
+        output_dir_run, f"l200-{period}-{current_run}-qcp_summary.yaml"
     )
 
     detectors_name = list(det_info["detectors"].keys())
@@ -399,6 +401,7 @@ def check_psd(
         return
 
     # inspect one single det: plot+saving
+    utils.logger.debug("...inspecting PSD stability in cal runs")
     for idx, det_name in enumerate(detectors_name):
         evaluate_psd_usability_and_plot(
             period,
@@ -406,7 +409,7 @@ def check_psd(
             cal_psd_info[det_name],
             det_name,
             locations_list[idx],
-            output_dir,
+            os.path.join(output_dir, period),
             psd_data,
             save_pdf,
         )
