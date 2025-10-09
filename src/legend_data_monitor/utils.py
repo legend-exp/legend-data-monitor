@@ -1638,17 +1638,18 @@ def update_runinfo(run_info: dict, period: str, run: str, data_type: str, mtg_fi
 
 def pulser_from_evt_or_mtg(my_dir, period, run, output, run_info):
     """Try to load EVT tier; if not found, attempt to update run info from monitoring path."""
-    evt_files = os.path.join(my_dir, f"l200-{period}-{run}-phy-tier_pet.lh5")
-    # load from monitoring files if the pet files were not processed
+    pattern = os.path.join(my_dir, f"l200-{period}-{run}-phy-tier_*.lh5")
+    evt_files = glob.glob(pattern)
     if not os.path.isfile(evt_files):
+        logger.info("...loading pulser info from monitoring files")
         mtg_path = os.path.join(output, f"generated/plt/phy/{period}/{run}/")
         if not os.path.isdir(mtg_path):
             return run_info
         run_info = update_runinfo(run_info, period, run, "phy", mtg_path)
-        return run_info
+    return run_info
 
 
-def build_runinfo(path: str, version: str, output: str):
+def build_runinfo(path: str, version: str, proc_folder: str, output: str | None):
     """Build dictionary with main run information (start key, phy livetime in seconds) for multiple data types (phy, cal, fft, bkg, pzc, pul)."""
     periods = []
     runs = []
@@ -1658,7 +1659,7 @@ def build_runinfo(path: str, version: str, output: str):
     run_info = None
     for subdir in possible_dirs:
         for pattern in file_patterns:
-            filepath_pattern = os.path.join(path, version, subdir, pattern)
+            filepath_pattern = os.path.join(proc_folder, version, subdir, pattern)
             files = glob.glob(filepath_pattern)
             if files:
                 filepath = files[0]
@@ -1672,12 +1673,17 @@ def build_runinfo(path: str, version: str, output: str):
             break
 
     raw_paths = [
-        os.path.join(path, "ref-raw/generated/tier/raw"),
-        os.path.join(path, "tmp-p14-raw/generated/tier/raw"),
+        os.path.join(proc_folder, "ref-raw/generated/tier/raw"),
+        os.path.join(proc_folder, "tmp-p14-raw/generated/tier/raw"),
+        os.path.join(proc_folder, "ref-raw-new/generated/tier/raw"),
     ]
 
     # collect starting and ending timestamps
     for raw_path in raw_paths:
+        if not os.path.isdir(raw_path): 
+            logger.debug(f"...folder {raw_path} does not exist, skip it")
+            continue
+            
         data_types = sorted(os.listdir(raw_path))
         data_types = sorted(data_types, key=lambda x: (x != "phy", x))
         for data_type in data_types:  # cal | fft | bkg | phy | pul | pzc
@@ -1686,8 +1692,10 @@ def build_runinfo(path: str, version: str, output: str):
                 continue
 
             for period in sorted(os.listdir(data_type_path)):  # p03 | p04 | ...
+                if "old" in period: continue
                 if period in ["p01", "p02"]:
                     continue
+                    
                 period_path = os.path.join(raw_path, data_type_path, period)
                 if not os.listdir(period_path):
                     logger.warning(
@@ -1698,6 +1706,8 @@ def build_runinfo(path: str, version: str, output: str):
 
                 period_runs = []
                 for run in sorted(os.listdir(period_path)):  # r000 | r001 | ...
+                    if "old" in run: continue
+                        
                     period_runs.append(run)
 
                     global_path = os.path.join(
@@ -1751,13 +1761,14 @@ def build_runinfo(path: str, version: str, output: str):
     data_type = "phy"
     for idx_p, period in enumerate(periods):
         if period in ["p01", "p02"]:
+            logger.debug(f"...skipping {period}")
             continue
 
         for run in runs[idx_p]:
             versions = [version] if version == "tmp-auto" else ["tmp-auto", version]
 
             for v in versions:
-                tiers, _ = get_tiers_pars_folders(os.path.join(path, v))
+                tiers, _ = get_tiers_pars_folders(os.path.join(proc_folder, v))
                 my_dir = tiers[5] if os.path.isdir(tiers[5]) else tiers[6]
                 my_dir = os.path.join(my_dir, "phy")
 
@@ -1796,7 +1807,9 @@ def build_runinfo(path: str, version: str, output: str):
                                     {"livetime_in_s": tot_livetime}
                                 )
 
-    with open(os.path.join(output, "runinfo.yaml"), "w") as fp:
+    logger.info(f"Inspected periods: {list(run_info.keys())}")
+    save_location = os.path.join(proc_folder, version, "inputs/datasets/runinfo.yaml") if output is None else os.path.join(output, "runinfo.yaml")
+    with open(save_location, "w") as fp:
         yaml.dump(run_info, fp, default_flow_style=False, sort_keys=False)
 
 
