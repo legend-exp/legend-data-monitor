@@ -174,7 +174,7 @@ def main():
                 filename = [f for f in os.listdir(cal_path) if f.endswith('.yaml') or f.endswith('.json')][0].split('.')[0]
                 break
         if not found:
-            legend_data_monitor.utils.logger.debug(f"No valid folder {cal_path} found. Exiting.")
+            legend_data_monitor.utils.logger.debug(f"No valid folder {cal_path} found. Returning.")
             return
         pars_path = legend_data_monitor.utils.retrieve_json_or_yaml(cal_path, filename)
         pars = legend_data_monitor.utils.read_json_or_yaml(pars_path)
@@ -228,17 +228,17 @@ def main():
         found = False
         for tier in ["hit", "pht"]:
             cal_path = os.path.join(auto_dir_path, "generated/par", tier, "cal", period)
-            if os.path.isdir(cal_path):
+            if os.path.isdir(os.path.join(cal_path, current_run)):
                 found = True
                 break
         if not found:
-            legend_data_monitor.utils.logger.debug(f"No valid folder {cal_path} found. Exiting.")
+            legend_data_monitor.utils.logger.debug(f"No valid folder {cal_path} found. Return.")
             return
 
         # don't run any check if there are no runs
         cal_runs = os.listdir(cal_path)
         if len(cal_runs) == 0:
-            legend_data_monitor.utils.logger.debug("No available calibration runs to inspect. Exiting.")
+            legend_data_monitor.utils.logger.debug("No available calibration runs to inspect. Returning.")
             return
         first_run = len(cal_runs) == 1
 
