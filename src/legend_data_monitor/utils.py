@@ -398,7 +398,7 @@ def dataset_validity_check(data_info: dict):
         logger.error("\033[91mProvide period!\033[0m")
         return
 
-    data_types = ["phy", "cal"]
+    data_types = ["phy", "cal", "lac", "ssc", "pzc"]
     if not data_info["type"] in data_types:
         logger.error("\033[91mInvalid data type provided!\033[0m")
         return
@@ -1353,8 +1353,8 @@ def check_cal_phy_thresholds(
     email_message = []
 
     for ged, det_data in output.items():
-        cal_dict = det_data.get(key, {})
-        failed = [k for k, v in cal_dict.items() if v is False]  # collect failed parameters
+        data_dict = det_data.get(key, {})
+        failed = [k for k, v in data_dict.items() if v is False]  # collect failed parameters
         
         if failed:
             if not email_message:
@@ -1362,7 +1362,7 @@ def check_cal_phy_thresholds(
                     f"ALERT: Data monitoring thresholds exceeded in {period}-{run}-{key}.\n"
                 )
             email_message.append(
-                f"- {ged} has {len(failed)}/{len(cal_dict)} failed entries: {', '.join(failed)}"
+                f"- {ged} has {len(failed)}/{len(data_dict)} failed entries: {', '.join(failed)}"
             )
 
     
@@ -1803,6 +1803,17 @@ def build_runinfo(path: str, version: str, output: str):
 # -------------------------------------------------------------------------
 # Helper functions
 # -------------------------------------------------------------------------
+def load_and_filter(store, key: str, mask=None):
+    """Load a given key from a HDF file and applies a mask."""
+    if key not in store.keys():
+        utils.logger.debug(f"...key {key} not available. Skip it!")
+        return pd.DataFrame()
+    df = store[key]
+    if mask is not None:
+        df = df.where(mask)
+    return df
+
+
 def load_yaml_or_default(path: str, detectors: dict) -> dict:
     """Load YAML if it exists, else return a default dict."""
 

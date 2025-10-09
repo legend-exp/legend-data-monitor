@@ -85,16 +85,20 @@ def qc_distributions(
     ):
         df_energy_IsPhysics = store["/IsPhysics_TrapemaxCtcCal"]
         avail_keys = store.keys()
+        df_energy_IsPhysics = filter_series_by_ignore_keys(df_energy_IsPhysics, utils.IGNORE_KEYS, period)
             
         for par in pars_to_inspect:
-            if par not in avail_keys:
-                utils.logger.debug(f"...key {par} not available in {my_file}. Skip it!")
-                continue
-            df_All = store[f"/All_{par}"]
-            df_IsPulser = store[f"/IsPulser_{par}"]
-            df_IsBsln = store[f"/IsBsln_{par}"]
-            df_IsPhysics = store[f"/IsPhysics_{par}"]
-            df_IsPhysics = df_IsPhysics.where(df_energy_IsPhysics > 25)
+
+            mask = df_energy_IsPhysics > 25
+            df_All = utils.load_and_filter(store, f"/All_{par}")
+            df_IsPulser = utils.load_and_filter(store, f"/IsPulser_{par}")
+            df_IsBsln = utils.load_and_filter(store, f"/IsBsln_{par}")
+            df_IsPhysics = utils.load_and_filter(store, f"/IsPhysics_{par}", mask=mask)
+            
+            df_All = filter_series_by_ignore_keys(df_All, utils.IGNORE_KEYS, period)
+            df_IsPulser = filter_series_by_ignore_keys(df_IsPulser, utils.IGNORE_KEYS, period)
+            df_IsBsln = filter_series_by_ignore_keys(df_IsBsln, utils.IGNORE_KEYS, period)
+            df_IsPhysics = filter_series_by_ignore_keys(df_IsPhysics, utils.IGNORE_KEYS, period)
 
             for string, det_list in str_chns.items():
                 # grid size
@@ -203,6 +207,8 @@ def qc_FT_failure_rates(
     ):
         df = store["/IsBsln_IsBbLike"]
         df_DD = store["/IsBsln_IsDelayedDischarge"]
+        df = filter_series_by_ignore_keys(df, utils.IGNORE_KEYS, period)
+        df_DD = filter_series_by_ignore_keys(df_DD, utils.IGNORE_KEYS, period)
         df_clean = df[~df_DD]  
         color_cycle = itertools.cycle(plt.cm.tab20.colors)
             
@@ -727,6 +733,7 @@ def qc_average(
                 continue
 
             geds_df_abs = store[key]
+            geds_df_abs = filter_series_by_ignore_keys(geds_df_abs, utils.IGNORE_KEYS, period)
 
             # time span
             time_min, time_max = geds_df_abs.index.min(), geds_df_abs.index.max()
@@ -870,13 +877,15 @@ def qc_time_series(
         shelve.open(shelve_path, "c", protocol=pickle.HIGHEST_PROTOCOL) as shelf,
         pd.HDFStore(my_file, "r") as store,
     ):
+            
         for par in pars_to_inspect:
             key = f"/IsPhysics_{par}"
             if key not in store:
-                utils.logger.debug("...skipping %s (not found in HDF)", par)
+                utils.logger.debug("...skipping %s (not found in HDF)", key)
                 continue
 
             geds_df_abs = store[key]
+            geds_df_abs = filter_series_by_ignore_keys(geds_df_abs, utils.IGNORE_KEYS, period)
 
             for string, channel_list in str_chns.items():
                 fig, ax = plt.subplots(figsize=(12, 4))
