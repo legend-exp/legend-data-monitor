@@ -43,6 +43,11 @@ def main():
         help="Path where to store the automatic results (plots and summary files).",
     )
     parser.add_argument(
+        "--data_type",
+        default='phy',
+        help="Data type to load; default: 'phy'.",
+    )
+    parser.add_argument(
         "--partition",
         default=False,
         help="False (default) if not partition data, else True",
@@ -107,6 +112,7 @@ def main():
     input_run = args.r
     save_pdf = False if args.pdf is False else True
     escale_val = args.escale
+    data_type = args.data_type
 
     auto_dir = (
         "/global/cfs/cdirs/m2676/data/lngs/l200/public/prodenv/prod-blind/"
@@ -116,7 +122,7 @@ def main():
     auto_dir_path = os.path.join(auto_dir, ref_version)
     found = False
     for tier in ["hit", "pht", "dsp", "psp", "evt", "pet"]:
-        search_directory = os.path.join(auto_dir_path, "generated/tier", tier, "phy")
+        search_directory = os.path.join(auto_dir_path, "generated/tier", tier, data_type)
         if os.path.isdir(search_directory):
             found = True
             break
@@ -157,7 +163,7 @@ def main():
             "period": period,
             "version": ref_version,
             "path": auto_dir,
-            "type": "phy",
+            "type": data_type,
             "runs": int(run.split("r")[-1]),
         },
         "saving": "overwrite",
@@ -183,7 +189,7 @@ def main():
             "period": period,
             "version": ref_version,
             "path": auto_dir,
-            "type": "phy",
+            "type": data_type,
             "runs": int(run.split("r")[-1]),
         },
         "saving": "append",
@@ -334,17 +340,17 @@ def main():
                     "event_type": "phy",
                     "qc_flags": True,
                     "qc_classifiers": False,
-                },
+                }
             }
-        },
+        }
     }
 
     # ===========================================================================================
     # Check calibration stability and create summary files
     # ===========================================================================================
 
-    phy_folder = os.path.join(output_folder, ref_version, "generated/plt/hit/phy")
-    os.makedirs(phy_folder, exist_ok=True)
+    phy_folder = os.path.join(output_folder, ref_version, "generated/plt/hit", data_type)
+    os.makedirs(os.path.join(phy_folder, period, run), exist_ok=True)
 
     if os.path.isfile(
         os.path.join(phy_folder, period, run, f"l200-{period}-{run}-qcp_summary.yaml")
@@ -492,7 +498,7 @@ def main():
         # ===========================================================================================
         # Generate Monitoring Summary Plots
         # ===========================================================================================
-        mtg_folder = os.path.join(output_folder, ref_version, "generated/plt/hit/phy")
+        mtg_folder = os.path.join(output_folder, ref_version, "generated/plt/hit", data_type)
         os.makedirs(mtg_folder, exist_ok=True)
         logger.info(f"Folder {mtg_folder} ensured")
 
