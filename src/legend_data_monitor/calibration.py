@@ -373,7 +373,7 @@ def check_psd(
     detectors_name = list(det_info["detectors"].keys())
     detectors_list = [det_info["detectors"][d]["channel_str"] for d in detectors_name]
     locations_list = [
-        (det_info["detectors"][d]["position"], det_info["detectors"][d]["string"])
+        (det_info["detectors"][d]["string"], det_info["detectors"][d]["position"])
         for d in detectors_name
     ]
 
