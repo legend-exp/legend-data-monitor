@@ -120,7 +120,7 @@ def evaluate_psd_performance(
 
     # SLOW shifts
     slow_shifts = [float((v - mean_vals[valid_idx]) / sigma_avg) for v in mean_vals]
-    
+
     slow_shift_fail_runs = []
     for i, z in enumerate(slow_shifts):
         if run_labels[i] != current_run:
@@ -136,42 +136,45 @@ def evaluate_psd_performance(
             slow_shift_fail_runs.append(run_labels[i])
     slow_shift_failed = bool(slow_shift_fail_runs)
 
-
     # SUDDEN shifts
     # Fix first entry to 0 (if present), else NaN
     if np.isnan(mean_vals[0]) or np.isnan(sigma_vals[0]) or sigma_vals[0] == 0:
         sudden_shifts = [float("nan")]
     else:
         sudden_shifts = [0.0]
-    # Backward logic 
+    # Backward logic
     for i in range(1, len(mean_vals)):
         mu_curr = mean_vals[i]
         mu_prev = mean_vals[i - 1]
         sigma_curr = sigma_vals[i]
 
-        if np.isnan(mu_curr) or np.isnan(mu_prev) or np.isnan(sigma_curr) or sigma_curr == 0:
+        if (
+            np.isnan(mu_curr)
+            or np.isnan(mu_prev)
+            or np.isnan(sigma_curr)
+            or sigma_curr == 0
+        ):
             sudden_shifts.append(float("nan"))
         else:
             val = abs(mu_curr - mu_prev) / sigma_curr
             sudden_shifts.append(float(val))
 
-
     sudden_shift_fail_runs = []
     for i, z in enumerate(sudden_shifts):
         if run_labels[i] != current_run:
             continue
-        
+
         # If fit pars from yaml are missinng -> fail
         if np.isnan(mean_vals[i]) or np.isnan(sigma_vals[i]) or sigma_vals[i] == 0:
             sudden_shift_fail_runs.append(run_labels[i])
-            continue 
+            continue
 
         # Slow shift threshold (if z is NaN here, PREVIOUS run was missing - let that PASS)
         if not np.isnan(z) and z > 0.25:
             sudden_shift_fail_runs.append(run_labels[i])
 
     sudden_shift_failed = bool(sudden_shift_fail_runs)
-    
+
     status = False
     if not slow_shift_failed and not sudden_shift_failed:
         status = True
@@ -210,7 +213,9 @@ def evaluate_psd_usability_and_plot(
     mean_vals = utils.none_to_nan([fit_results_cal[r]["mean"] for r in run_labels])
     mean_errs = utils.none_to_nan([fit_results_cal[r]["mean_err"] for r in run_labels])
     sigma_vals = utils.none_to_nan([fit_results_cal[r]["sigma"] for r in run_labels])
-    sigma_errs = utils.none_to_nan([fit_results_cal[r]["sigma_err"] for r in run_labels])
+    sigma_errs = utils.none_to_nan(
+        [fit_results_cal[r]["sigma_err"] for r in run_labels]
+    )
 
     # Evaluate performance
     eval_result = evaluate_psd_performance(
@@ -301,7 +306,7 @@ def evaluate_psd_usability_and_plot(
 
     # Sudden shifts
     y = np.array(eval_result["sudden_shifts"])
-    x = np.array(run_positions)    
+    x = np.array(run_positions)
     ax4.plot(
         x,
         y,
