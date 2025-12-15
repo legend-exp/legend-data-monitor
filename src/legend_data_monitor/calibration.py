@@ -694,7 +694,6 @@ def check_calibration(
 
             # true only if both peaks are valid
             overall_valid = fep_valid and low_valid
-            overall_valid = fep_valid and low_valid
             utils.update_evaluation_in_memory(
                 output, ged, "cal", "npeak", overall_valid
             )
@@ -805,8 +804,6 @@ def check_calibration_lac_ssc(
     pars = utils.read_json_or_yaml(files[0])
 
     # find nearest previous run
-    prev_pars = utils.read_json_or_yaml(files[0])
-
     shelve_path = os.path.join(
         output_folder,
         period,
@@ -888,8 +885,10 @@ def check_calibration_lac_ssc(
 
             # true only if both peaks are valid
             overall_valid = fep_valid and low_valid
-            overall_valid = fep_valid and low_valid
-
+            utils.update_evaluation_in_memory(
+                output, ged, data_type, "npeak", overall_valid
+            )
+            
             fwhm = (ecal.get("eres_linear") or {}).get("Qbb_fwhm_in_kev")
             fwhm_ok = isinstance(
                 fwhm, (int, float, np.integer, np.floating)
