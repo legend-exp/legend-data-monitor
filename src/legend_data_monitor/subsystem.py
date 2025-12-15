@@ -6,7 +6,7 @@ from typing import Union
 
 import numpy as np
 import pandas as pd
-from legendmeta import JsonDB
+from dbetto import TextDB
 from pygama.flow import DataLoader
 
 from . import utils
@@ -578,7 +578,7 @@ class Subsystem:
         map_file = os.path.join(
             self.path, self.version, "inputs/hardware/configuration/channelmaps"
         )
-        full_channel_map = JsonDB(map_file).on(timestamp=self.first_timestamp)
+        full_channel_map = TextDB(map_file).on(timestamp=self.first_timestamp)
 
         df_map = pd.DataFrame(columns=utils.COLUMNS_TO_LOAD)
         df_map = df_map.set_index("channel")

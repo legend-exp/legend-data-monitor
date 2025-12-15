@@ -15,7 +15,8 @@ import h5py
 import numpy as np
 import pandas as pd
 import yaml
-from legendmeta import JsonDB, LegendMetadata
+from dbetto import TextDB
+from legendmeta import LegendMetadata
 from lgdo import lh5
 from pandas import DataFrame
 
@@ -1559,13 +1560,13 @@ def get_status_map(path: str, version: str, first_timestamp: str, datatype: str)
     """Return the correct status map, either reading a .json or .yaml file."""
     try:
         map_file = os.path.join(path, version, "inputs/dataprod/config")
-        full_status_map = JsonDB(map_file).on(
+        full_status_map = TextDB(map_file).on(
             timestamp=first_timestamp, system=datatype
         )["analysis"]
     except (KeyError, TypeError):
         # fallback if "analysis" key doesn't exist and structure has changed
         map_file = os.path.join(path, version, "inputs/datasets/statuses")
-        full_status_map = JsonDB(map_file).on(
+        full_status_map = TextDB(map_file).on(
             timestamp=first_timestamp, system=datatype
         )
 

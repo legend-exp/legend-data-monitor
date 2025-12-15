@@ -6,7 +6,7 @@ import sys
 import numpy as np
 import pandas as pd
 import yaml
-from legendmeta import JsonDB
+from dbetto import TextDB
 
 # needed to know which parameters are not in DataLoader
 # but need to be calculated, such as event rate
@@ -452,7 +452,7 @@ class AnalysisData:
                 map_file = os.path.join(
                     self.path, self.version, "inputs/hardware/configuration/channelmaps"
                 )
-                full_channel_map = JsonDB(map_file).on(timestamp=first_timestamp)
+                full_channel_map = TextDB(map_file).on(timestamp=first_timestamp)
 
                 # get pulser rate
                 if "PULS01" in full_channel_map.keys():
@@ -491,7 +491,7 @@ class AnalysisData:
                     self.version,
                     "inputs/hardware/detectors/germanium/diodes",
                 )
-                dets_map = JsonDB(dets_file)
+                dets_map = TextDB(dets_file)
 
                 # add a new column "mass" to self.data containing mass values evaluated from dets_map[channel_name]["production"]["mass_in_g"], where channel_name is the value in "name" column
                 for det_name in self.data.index.unique():
@@ -820,7 +820,7 @@ def get_aux_df(
                 plot_settings["version"],
                 "inputs/hardware/configuration/channelmaps",
             )
-            chmap = JsonDB(map_file).on(timestamp=first_timestamp)
+            chmap = TextDB(map_file).on(timestamp=first_timestamp)
 
             # PULS01ANA channel
             if "PULS01ANA" in chmap.keys():
