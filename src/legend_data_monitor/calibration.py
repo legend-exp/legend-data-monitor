@@ -888,7 +888,7 @@ def check_calibration_lac_ssc(
             utils.update_evaluation_in_memory(
                 output, ged, data_type, "npeak", overall_valid
             )
-            
+
             fwhm = (ecal.get("eres_linear") or {}).get("Qbb_fwhm_in_kev")
             fwhm_ok = isinstance(
                 fwhm, (int, float, np.integer, np.floating)
