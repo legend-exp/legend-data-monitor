@@ -336,12 +336,12 @@ def qc_and_evt_summary_plots(
     evt_files_phy = sorted(
         glob.glob(f"{auto_dir_path}/generated/tier/evt/phy/{period}/{run}/*.lh5")
     )
-    
+
     if not evt_files_phy:
         evt_files_phy = sorted(
             glob.glob(f"{auto_dir_path}/generated/tier/pet/phy/{period}/{run}/*.lh5")
         )
-        
+
     # energies  = read_as("evt/geds", evt_files_phy, 'ak', field_mask=['energy'])
     ged_pul = read_as(
         "evt/coincident", evt_files_phy, "ak", field_mask=["geds", "puls"]
