@@ -796,6 +796,8 @@ def check_calibration_lac_ssc(
             os.path.join(tmp_auto_dir, "generated/tier/hit", data_type, period, run, "*")
         )
     )
+    output = utils.load_yaml_or_default(usability_map_file, detectors)
+    fep_mean_results = {}
 
     with shelve.open(shelve_path, "c", protocol=pickle.HIGHEST_PROTOCOL) as shelf:
         for ged, item in detectors.items():
