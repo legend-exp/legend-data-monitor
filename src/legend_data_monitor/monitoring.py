@@ -67,7 +67,6 @@ def qc_distributions(
     my_file = os.path.join(
         output_folder, f"{period}/{run}/l200-{period}-{run}-phy-geds.hdf"
     )
-    detectors = det_info["detectors"]
     str_chns = det_info["str_chns"]
     utils.logger.debug("...inspecting QC classifiers")
     if not os.path.exists(my_file):
@@ -92,7 +91,6 @@ def qc_distributions(
         pd.HDFStore(my_file, "r") as store,
     ):
         df_energy_IsPhysics = store["/IsPhysics_TrapemaxCtcCal"]
-        avail_keys = store.keys()
         df_energy_IsPhysics = filter_series_by_ignore_keys(
             df_energy_IsPhysics, utils.IGNORE_KEYS, period
         )
@@ -221,7 +219,7 @@ def qc_distributions(
                 plt.close()
 
 
-def qc_FT_failure_rates(
+def qc_ft_failure_rates(
     auto_dir_path: str,
     phy_mtg_data: str,
     output_folder: str,
@@ -234,7 +232,6 @@ def qc_FT_failure_rates(
     my_file = os.path.join(
         output_folder, f"{period}/{run}/l200-{period}-{run}-phy-geds.hdf"
     )
-    detectors = det_info["detectors"]
     str_chns = det_info["str_chns"]
     utils.logger.debug("...inspecting FT failure rates")
     if not os.path.exists(my_file):
@@ -267,7 +264,7 @@ def qc_FT_failure_rates(
         for string, det_list in str_chns.items():
             fig, ax = plt.subplots(figsize=(12, 6))
 
-            for i, det in enumerate(det_list):
+            for det in det_list:
                 if not det_info["detectors"][det]["processable"]:
                     continue
 
@@ -317,12 +314,12 @@ def qc_FT_failure_rates(
             plt.close()
 
 
-def mHz_to_percent(mhz, avg_total_forced_mHz):
-    return (mhz / avg_total_forced_mHz) * 100
+def mhz_to_percent(mhz, avg_total_forced_mhz):
+    return (mhz / avg_total_forced_mhz) * 100
 
 
-def percent_to_mHz(pct, avg_total_forced_mHz):
-    return (pct / 100) * avg_total_forced_mHz
+def percent_to_mhz(pct, avg_total_forced_mhz):
+    return (pct / 100) * avg_total_forced_mhz
 
 
 def qc_and_evt_summary_plots(
@@ -336,14 +333,15 @@ def qc_and_evt_summary_plots(
     save_pdf: bool,
 ):
     utils.logger.debug("...inspecting FT failure rates")
-    try:
-        evt_files_phy = sorted(
-            glob.glob(f"{auto_dir_path}/generated/tier/evt/phy/{period}/{run}/*.lh5")
-        )
-    except:
+    evt_files_phy = sorted(
+        glob.glob(f"{auto_dir_path}/generated/tier/evt/phy/{period}/{run}/*.lh5")
+    )
+    
+    if not evt_files_phy:
         evt_files_phy = sorted(
             glob.glob(f"{auto_dir_path}/generated/tier/pet/phy/{period}/{run}/*.lh5")
         )
+        
     # energies  = read_as("evt/geds", evt_files_phy, 'ak', field_mask=['energy'])
     ged_pul = read_as(
         "evt/coincident", evt_files_phy, "ak", field_mask=["geds", "puls"]
@@ -401,7 +399,7 @@ def qc_and_evt_summary_plots(
     df_all["timestamp"] = pd.to_datetime(df_all["timestamp"], unit="s")
     df_all.set_index("timestamp", inplace=True)
     total_forced = df_all.resample("H").size()  # counts/hour, all strings
-    avg_total_forced_mHz = (total_forced.mean() / 3600) * 1000
+    avg_total_forced_mhz = (total_forced.mean() / 3600) * 1000
     on_mass = 0
 
     # ONE PERIOD, ALL RUNS
@@ -432,8 +430,8 @@ def qc_and_evt_summary_plots(
 
             str_counts[string] = string_sum
 
-            m2p = partial(mHz_to_percent, avg_total_forced_mHz=avg_total_forced_mHz)
-            p2m = partial(percent_to_mHz, avg_total_forced_mHz=avg_total_forced_mHz)
+            m2p = partial(mhz_to_percent, avg_total_forced_mhz=avg_total_forced_mhz)
+            p2m = partial(percent_to_mhz, avg_total_forced_mhz=avg_total_forced_mhz)
             secax = ax.secondary_yaxis("right", functions=(m2p, p2m))
             secax.set_ylabel("FT failure fraction (%)")
 
@@ -612,7 +610,6 @@ def box_summary_plot(
         if ged not in detectors:
             continue
 
-        channel = detectors[ged]
         meta_info = detectors[ged]
 
         if item is None or len(item) == 0:
@@ -1345,7 +1342,7 @@ def get_calib_data_dict(
         apply = max(valid_entries, key=lambda e: e["valid_from"])["apply"][0]
         run_to_apply = apply.split("/")[-1].split("-")[2]
     else:
-        legend_data_monitor.utils.logger.debug(
+        utils.logger.debug(
             f"No valid calibration was found for {period}-{run}. Return."
         )
         return calib_data
@@ -2174,8 +2171,6 @@ def plot_time_series(
         f"l200-{period}-{current_run}-qcp_summary.yaml",
     )
     output = utils.load_yaml_or_default(usability_map_file, detectors)
-
-    email_message = []
 
     # skip detectors with no pulser entries
     no_puls_dets = utils.NO_PULS_DETS

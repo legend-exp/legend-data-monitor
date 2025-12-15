@@ -889,7 +889,7 @@ class Subsystem:
                 (self.channel_map["status"] == "on")
                 | (self.channel_map["status"] == "ac")
                 | (self.channel_map["status"] == "True")
-                | (self.channel_map["status"] == True)
+                | (self.channel_map["status"] is True)
             ]["channel"]
         )
         # remove off channels

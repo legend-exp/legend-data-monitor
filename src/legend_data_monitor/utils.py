@@ -1596,7 +1596,7 @@ def update_runinfo(
     data_type : str
         Data type to process (cal, phy, ...).
     mtg_files_path : str
-        Path where the monitoring HDF5 files were stored for a specifi period and run.
+        Path where the monitoring HDF5 files were stored for a specific period and run.
     """
     files = os.listdir(mtg_files_path)
     files = [
@@ -1954,7 +1954,7 @@ def deep_get(d, keys, default=None, verbose=False):
                 return default
         else:
             if verbose:
-                print(
+                logger.debug(
                     f"[deep_get] Expected dict at step {i}, but got type {type(current).__name__}"
                 )
             return default
