@@ -237,8 +237,8 @@ class AnalysisData:
                 "... keeping only physical (non-pulser & non-FCbsln & non-muon) events"
             )
             self.data = self.data[
-                (~self.data["flag_pulser"]) 
-                & (~self.data["flag_fc_bsln"]) 
+                (~self.data["flag_pulser"])
+                & (~self.data["flag_fc_bsln"])
                 & (~self.data["flag_muon"])
             ]
         elif self.evt_type == "K_events":
@@ -300,9 +300,9 @@ class AnalysisData:
                 ]
 
             try:
-                expression = evt_config["operations"]["geds___quality___is_not_bb_like___is_delayed_discharge"][
-                    "expression"
-                ]
+                expression = evt_config["operations"][
+                    "geds___quality___is_not_bb_like___is_delayed_discharge"
+                ]["expression"]
             except KeyError:
                 filepath_pattern = os.path.join(
                     path,
@@ -314,9 +314,9 @@ class AnalysisData:
                 filepath = glob.glob(filepath_pattern)[0]
                 with open(filepath) as file:
                     evt_config = yaml.load(file, Loader=yaml.CLoader)
-                expression = evt_config["operations"]["geds___quality___is_not_bb_like___is_delayed_discharge"][
-                    "expression"
-                ]
+                expression = evt_config["operations"][
+                    "geds___quality___is_not_bb_like___is_delayed_discharge"
+                ]["expression"]
 
             # extract key-value pairs like: hit.is_something == number
             pattern = r"hit\.(\w+)\s*==\s*(\d+)"

@@ -1320,7 +1320,6 @@ def send_email_alert(app_password: str, recipients: list, text_file_path: str):
         logger.info("Error: unable to send email: %s", e)
 
 
-
 def check_cal_phy_thresholds(
     output_folder: str,
     period: str,
@@ -1355,8 +1354,10 @@ def check_cal_phy_thresholds(
 
     for ged, det_data in output.items():
         data_dict = det_data.get(key, {})
-        failed = [k for k, v in data_dict.items() if v is False]  # collect failed parameters
-        
+        failed = [
+            k for k, v in data_dict.items() if v is False
+        ]  # collect failed parameters
+
         if failed:
             if not email_message:
                 email_message.append(
@@ -1370,9 +1371,7 @@ def check_cal_phy_thresholds(
         with open("message.txt", "w") as f:
             for line in email_message:
                 f.write(line + "\n")
-        send_email_alert(
-            pswd_email, ["sofia.calgaro@physik.uzh.ch"], "message.txt"
-        )
+        send_email_alert(pswd_email, ["sofia.calgaro@physik.uzh.ch"], "message.txt")
         os.remove("message.txt")
 
 
@@ -1381,7 +1380,7 @@ def update_evaluation_in_memory(
 ):
     """
     Update the key entry in memory dict, where value can be bool or nan if not available; data_type is either 'cal' or 'phy'.
-    
+
     Parameters
     ----------
     data : dict
@@ -1415,11 +1414,11 @@ def find_over_threshold(
         Epoch time (seconds) of the last check; if None/"None", no cutoff is applied.
     t0 : list of pd.Timestamp
         Start times where the first entry defines the window start.
-    threshold : list 
+    threshold : list
         Threshold bounds; either can be None.
     """
     if data_series is None or all(v is None for v in threshold):
-        return pd.Series([], dtype='bool')
+        return pd.Series([], dtype="bool")
 
     # filter by last_checked
     if last_checked not in ["None", None]:
@@ -1427,16 +1426,20 @@ def find_over_threshold(
         data_series = data_series[data_series.index > cutoff]
 
     if data_series.empty:
-        return pd.Series([], dtype='bool')
+        return pd.Series([], dtype="bool")
 
     # define time window
-    start = pd.Timestamp(t0[0]).tz_localize('UTC') if t0[0].tzinfo is None else t0[0].tz_convert('UTC')
+    start = (
+        pd.Timestamp(t0[0]).tz_localize("UTC")
+        if t0[0].tzinfo is None
+        else t0[0].tz_convert("UTC")
+    )
     end = start + pd.Timedelta(days=7)
     mask_time = (data_series.index >= start) & (data_series.index < end)
     data_series = data_series[mask_time]
 
     if data_series.empty:
-        return pd.Series([], dtype='bool')
+        return pd.Series([], dtype="bool")
 
     low, high = threshold
     mask = pd.Series(False, index=data_series.index)
@@ -1447,7 +1450,7 @@ def find_over_threshold(
 
     return data_series[mask]
 
-    
+
 def check_threshold(
     data_series: pd.Series,
     channel_name: str,
@@ -1477,17 +1480,17 @@ def check_threshold(
         Dictionary containing summary cal and phy info.
     """
     # no available FWHM to compare gain variations with
-    if parameter == "pulser_stab" and not output[channel_name]['cal']['fwhm_ok']:
+    if parameter == "pulser_stab" and not output[channel_name]["cal"]["fwhm_ok"]:
         update_evaluation_in_memory(output, channel_name, "phy", parameter, False)
-        return 
+        return
 
-    over_threshold_timestamps = find_over_threshold(data_series, last_checked, t0, threshold)
-    condition = (
-        not over_threshold_timestamps.empty 
+    over_threshold_timestamps = find_over_threshold(
+        data_series, last_checked, t0, threshold
     )
+    condition = not over_threshold_timestamps.empty
     update_evaluation_in_memory(output, channel_name, "phy", parameter, not condition)
 
-    return 
+    return
 
 
 def get_map_dict(data_analysis: DataFrame):
@@ -1576,7 +1579,9 @@ def get_status_map(path: str, version: str, first_timestamp: str, datatype: str)
 # -------------------------------------------------------------------------
 # Build runinfo file with livetime info
 # -------------------------------------------------------------------------
-def update_runinfo(run_info: dict, period: str, run: str, data_type: str, mtg_files_path: str):
+def update_runinfo(
+    run_info: dict, period: str, run: str, data_type: str, mtg_files_path: str
+):
     """
     Update run information dict, with livetime in seconds for phy data; it automatically removes cycles that are flagged as unusable via keys stored in `settings/ignore-keys.yaml`.
 
@@ -1680,10 +1685,10 @@ def build_runinfo(path: str, version: str, proc_folder: str, output: str | None)
 
     # collect starting and ending timestamps
     for raw_path in raw_paths:
-        if not os.path.isdir(raw_path): 
+        if not os.path.isdir(raw_path):
             logger.debug(f"...folder {raw_path} does not exist, skip it")
             continue
-            
+
         data_types = sorted(os.listdir(raw_path))
         data_types = sorted(data_types, key=lambda x: (x != "phy", x))
         for data_type in data_types:  # cal | fft | bkg | phy | pul | pzc
@@ -1692,10 +1697,11 @@ def build_runinfo(path: str, version: str, proc_folder: str, output: str | None)
                 continue
 
             for period in sorted(os.listdir(data_type_path)):  # p03 | p04 | ...
-                if "old" in period: continue
+                if "old" in period:
+                    continue
                 if period in ["p01", "p02"]:
                     continue
-                    
+
                 period_path = os.path.join(raw_path, data_type_path, period)
                 if not os.listdir(period_path):
                     logger.warning(
@@ -1706,8 +1712,9 @@ def build_runinfo(path: str, version: str, proc_folder: str, output: str | None)
 
                 period_runs = []
                 for run in sorted(os.listdir(period_path)):  # r000 | r001 | ...
-                    if "old" in run: continue
-                        
+                    if "old" in run:
+                        continue
+
                     period_runs.append(run)
 
                     global_path = os.path.join(
@@ -1808,33 +1815,44 @@ def build_runinfo(path: str, version: str, proc_folder: str, output: str | None)
                                 )
 
     logger.info(f"Inspected periods: {list(run_info.keys())}")
-    save_location = os.path.join(proc_folder, version, "inputs/datasets/runinfo.yaml") if output is None else os.path.join(output, "runinfo.yaml")
+    save_location = (
+        os.path.join(proc_folder, version, "inputs/datasets/runinfo.yaml")
+        if output is None
+        else os.path.join(output, "runinfo.yaml")
+    )
     with open(save_location, "w") as fp:
         yaml.dump(run_info, fp, default_flow_style=False, sort_keys=False)
 
 
 def get_start_key(auto_dir_path: str, data_type: str, period: str, current_run: str):
-    primary_path = os.path.join(auto_dir_path, "generated/tier/dsp", data_type, period, current_run)
-    fallback_path = os.path.join(auto_dir_path, "generated/tier/dsp/cal", period, current_run)
-    
+    primary_path = os.path.join(
+        auto_dir_path, "generated/tier/dsp", data_type, period, current_run
+    )
+    fallback_path = os.path.join(
+        auto_dir_path, "generated/tier/dsp/cal", period, current_run
+    )
+
     if os.path.exists(primary_path):
         run_path = primary_path
     elif os.path.exists(fallback_path):
         run_path = fallback_path
     else:
-        raise FileNotFoundError(f"Neither path exists: {primary_path} or {fallback_path}")
-    
+        raise FileNotFoundError(
+            f"Neither path exists: {primary_path} or {fallback_path}"
+        )
+
     # get files and validate
     files = os.listdir(run_path)
     if not files:
         raise ValueError(f"No files found in {run_path}")
-    
+
     first_file = sorted(files)[0]
     try:
-        start_key = first_file.split("-")[4]  
+        start_key = first_file.split("-")[4]
         return start_key
     except IndexError:
         raise ValueError(f"Filename '{first_file}' doesn't have expected format")
+
 
 # -------------------------------------------------------------------------
 # Helper functions
@@ -1930,14 +1948,17 @@ def deep_get(d, keys, default=None, verbose=False):
                 if verbose:
                     logger.debug(f"[deep_get] Missing key at step {i}: '{k}'")
                     logger.debug(f"[deep_get] Keys tried: {keys[:i+1]}")
-                    logger.debug(f"[deep_get] Available keys here: {list(current.keys())}")
+                    logger.debug(
+                        f"[deep_get] Available keys here: {list(current.keys())}"
+                    )
                 return default
         else:
             if verbose:
-                print(f"[deep_get] Expected dict at step {i}, but got type {type(current).__name__}")
+                print(
+                    f"[deep_get] Expected dict at step {i}, but got type {type(current).__name__}"
+                )
             return default
     return current
-
 
 
 def none_to_nan(data: list):
@@ -1987,7 +2008,7 @@ def build_detector_info(metadata_path, start_key=None):
         position = info["location"]["position"]
         processable = info.get("analysis", {}).get("processable", False)
         usability = info.get("analysis", {}).get("usability", None)
-        mass_in_kg = float(germanium.diodes[det].production.mass_in_g/1000)
+        mass_in_kg = float(germanium.diodes[det].production.mass_in_g / 1000)
 
         # store detector info
         detectors[det] = {

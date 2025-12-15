@@ -171,15 +171,15 @@ class Subsystem:
                 # take the first element *after* "geds/quality/"
                 key = param.split("/")[2]
                 lists.setdefault(key, []).append(param)
-            
+
             evt_params1 = lists.get("is_bb_like", [])
             evt_params2 = lists.get("is_not_bb_like", [])
-            
+
             dlconfig_evt1, dbconfig_evt1 = self.construct_dataloader_configs(
                 param_tiers, evt_params1, "evt"
             )
             dl_evt1 = DataLoader(dlconfig_evt1, dbconfig_evt1)
-            
+
             dlconfig_evt2, dbconfig_evt2 = self.construct_dataloader_configs(
                 param_tiers, evt_params2, "evt"
             )
@@ -234,7 +234,7 @@ class Subsystem:
             evt_params1 = [elems1[-1]]
             dl_evt1.set_files(query)
             dl_evt1.set_output(fmt="pd.DataFrame", columns=evt_params1)
-            
+
             elems2 = evt_params2[0].split("/")
             evt_params2 = [elems2[-1]]
             dl_evt2.set_files(query)
@@ -255,7 +255,9 @@ class Subsystem:
             evt_data1 = dl_evt1.load()
             evt_data2 = dl_evt2.load()
 
-        valid_data = [df for df in [dsp_data, hit_data, evt_data1, evt_data2] if df is not None]
+        valid_data = [
+            df for df in [dsp_data, hit_data, evt_data1, evt_data2] if df is not None
+        ]
         if not valid_data:
             utils.logger.error(
                 "\033[91mdsp_data, hit_data, evt_data are all None. Exit here.\033[0m"
@@ -326,8 +328,6 @@ class Subsystem:
             self.flag_muon_events()
         utils.logger.info("... flagge pulser | FC bsl | muon events")
 
-
-        
     def include_aux(
         self, params: Union[str, list], dataset: dict, plot: dict, aux_ch: str
     ):

@@ -239,9 +239,9 @@ def add_get_runinfo(subparsers):
     )
     parser_auto_prod.add_argument("--data_version", help="Version of processed data.")
     parser_auto_prod.add_argument(
-        "--output", 
+        "--output",
         default=None,
-        help="Path to the output folder where to save runinfo.yaml; default: None (the file will be saved under <proc_folder>/<data_version>/inputs/datasets/)."
+        help="Path to the output folder where to save runinfo.yaml; default: None (the file will be saved under <proc_folder>/<data_version>/inputs/datasets/).",
     )
     parser_auto_prod.set_defaults(func=get_runinfo_cli)
 

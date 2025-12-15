@@ -44,7 +44,7 @@ def main():
     )
     parser.add_argument(
         "--data_type",
-        default='phy',
+        default="phy",
         help="Data type to load; default: 'phy'.",
     )
     parser.add_argument(
@@ -122,7 +122,9 @@ def main():
     auto_dir_path = os.path.join(auto_dir, ref_version)
     found = False
     for tier in ["hit", "pht", "dsp", "psp", "evt", "pet", "ssc", "lac", "rdc", "bkg"]:
-        search_directory = os.path.join(auto_dir_path, "generated/tier", tier, data_type)
+        search_directory = os.path.join(
+            auto_dir_path, "generated/tier", tier, data_type
+        )
         if os.path.isdir(search_directory):
             found = True
             logger.debug(f"Valid folder: {search_directory}")
@@ -306,16 +308,18 @@ def main():
                     "event_type": "FCbsln",
                     "qc_flags": False,
                     "qc_classifiers": True,
-                }
+                },
             }
-        }
+        },
     }
 
     # ===========================================================================================
     # Check calibration stability and create summary files
     # ===========================================================================================
 
-    phy_folder = os.path.join(output_folder, ref_version, "generated/plt/hit", data_type)
+    phy_folder = os.path.join(
+        output_folder, ref_version, "generated/plt/hit", data_type
+    )
     os.makedirs(os.path.join(phy_folder, period, run), exist_ok=True)
     if os.path.isfile(
         os.path.join(phy_folder, period, run, f"l200-{period}-{run}-qcp_summary.yaml")
@@ -463,11 +467,13 @@ def main():
                 logger.error(
                     f"Unexpected error while retrieving Slow Control data: {e}"
                 )
-        
+
         # ===========================================================================================
         # Generate Monitoring Summary Plots
         # ===========================================================================================
-        mtg_folder = os.path.join(output_folder, ref_version, "generated/plt/hit", data_type)
+        mtg_folder = os.path.join(
+            output_folder, ref_version, "generated/plt/hit", data_type
+        )
         os.makedirs(mtg_folder, exist_ok=True)
         logger.info(f"Folder {mtg_folder} ensured")
 
