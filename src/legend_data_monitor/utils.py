@@ -1365,8 +1365,7 @@ def check_cal_phy_thresholds(
                 f"- {ged} has {len(failed)}/{len(data_dict)} failed entries: {', '.join(failed)}"
             )
 
-    
-    if len(email_message) > 1 and pswd_email is not None:
+    if len(email_message) > 1 and pswd_email not in [None, "None"]:
         with open("message.txt", "w") as f:
             for line in email_message:
                 f.write(line + "\n")
@@ -1813,13 +1812,36 @@ def build_runinfo(path: str, version: str, proc_folder: str, output: str | None)
         yaml.dump(run_info, fp, default_flow_style=False, sort_keys=False)
 
 
+def get_start_key(auto_dir_path: str, data_type: str, period: str, current_run: str):
+    primary_path = os.path.join(auto_dir_path, "generated/tier/dsp", data_type, period, current_run)
+    fallback_path = os.path.join(auto_dir_path, "generated/tier/dsp/cal", period, current_run)
+    
+    if os.path.exists(primary_path):
+        run_path = primary_path
+    elif os.path.exists(fallback_path):
+        run_path = fallback_path
+    else:
+        raise FileNotFoundError(f"Neither path exists: {primary_path} or {fallback_path}")
+    
+    # get files and validate
+    files = os.listdir(run_path)
+    if not files:
+        raise ValueError(f"No files found in {run_path}")
+    
+    first_file = sorted(files)[0]
+    try:
+        start_key = first_file.split("-")[4]  
+        return start_key
+    except IndexError:
+        raise ValueError(f"Filename '{first_file}' doesn't have expected format")
+
 # -------------------------------------------------------------------------
 # Helper functions
 # -------------------------------------------------------------------------
 def load_and_filter(store, key: str, mask=None):
     """Load a given key from a HDF file and applies a mask."""
     if key not in store.keys():
-        utils.logger.debug(f"...key {key} not available. Skip it!")
+        logger.debug(f"...key {key} not available. Skip it!")
         return pd.DataFrame()
     df = store[key]
     if mask is not None:
@@ -1905,9 +1927,9 @@ def deep_get(d, keys, default=None, verbose=False):
                 current = current[k]
             else:
                 if verbose:
-                    print(f"[deep_get] Missing key at step {i}: '{k}'")
-                    print(f"[deep_get] Keys tried: {keys[:i+1]}")
-                    print(f"[deep_get] Available keys here: {list(current.keys())}")
+                    logger.debug(f"[deep_get] Missing key at step {i}: '{k}'")
+                    logger.debug(f"[deep_get] Keys tried: {keys[:i+1]}")
+                    logger.debug(f"[deep_get] Available keys here: {list(current.keys())}")
                 return default
         else:
             if verbose:
@@ -1943,6 +1965,8 @@ def build_detector_info(metadata_path, start_key=None):
             - string : int
             - position : int
             - processable : bool
+            - usability : str
+            - mass_in_kg : int
         - "str_chns": mapping from string to a list of detector names
     """
     lmeta = LegendMetadata(metadata_path)

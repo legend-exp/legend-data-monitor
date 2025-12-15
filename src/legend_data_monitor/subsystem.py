@@ -290,7 +290,6 @@ class Subsystem:
         # -------------------------------------------------------------------------
         # create datetime column based on initial key and timestamp
         # -------------------------------------------------------------------------
-
         # convert UTC timestamp to datetime (unix epoch time)
         self.data["datetime"] = pd.to_datetime(
             self.data["timestamp"], origin="unix", utc=True, unit="s"
@@ -300,7 +299,6 @@ class Subsystem:
         # -------------------------------------------------------------------------
         # add detector name, location and position from map
         # -------------------------------------------------------------------------
-
         utils.logger.info("... mapping to name and string/fiber position")
         self.data = self.data.set_index("channel")
         # expand channel map index to match that of data with repeating channels
@@ -890,6 +888,8 @@ class Subsystem:
             self.channel_map[
                 (self.channel_map["status"] == "on")
                 | (self.channel_map["status"] == "ac")
+                | (self.channel_map["status"] == "True")
+                | (self.channel_map["status"] == True)
             ]["channel"]
         )
         # remove off channels
