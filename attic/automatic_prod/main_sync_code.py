@@ -121,10 +121,11 @@ def main():
     )
     auto_dir_path = os.path.join(auto_dir, ref_version)
     found = False
-    for tier in ["hit", "pht", "dsp", "psp", "evt", "pet"]:
+    for tier in ["hit", "pht", "dsp", "psp", "evt", "pet", "ssc", "lac", "rdc", "bkg"]:
         search_directory = os.path.join(auto_dir_path, "generated/tier", tier, data_type)
         if os.path.isdir(search_directory):
             found = True
+            logger.debug(f"Valid folder: {search_directory}")
             break
     if found is False:
         logger.debug(f"No valid folder {search_directory} found. Exiting.")
@@ -195,22 +196,6 @@ def main():
         "saving": "append",
         "subsystems": {
             "geds": {
-                "Event rate in pulser events": {
-                    "parameters": "event_rate",
-                    "event_type": "pulser",
-                    "plot_structure": "per string",
-                    "resampled": "only",
-                    "plot_style": "vs time",
-                    "time_window": "20S",
-                },
-                "Event rate in FCbsln events": {
-                    "parameters": "event_rate",
-                    "event_type": "FCbsln",
-                    "plot_structure": "per string",
-                    "resampled": "only",
-                    "plot_style": "vs time",
-                    "time_window": "20S",
-                },
                 "Baselines (dsp/baseline) in pulser events": {
                     "parameters": "baseline",
                     "event_type": "pulser",
@@ -218,15 +203,6 @@ def main():
                     "resampled": "only",
                     "plot_style": "vs time",
                     "AUX_ratio": True,
-                    "variation": True,
-                    "time_window": "10T",
-                },
-                "Baselines (dsp/baseline) in FCbsln events": {
-                    "parameters": "baseline",
-                    "event_type": "FCbsln",
-                    "plot_structure": "per string",
-                    "resampled": "only",
-                    "plot_style": "vs time",
                     "variation": True,
                     "time_window": "10T",
                 },
@@ -240,12 +216,13 @@ def main():
                     "variation": True,
                     "time_window": "10T",
                 },
-                "Mean baselines (dsp/bl_mean) in FCbsln events": {
-                    "parameters": "bl_mean",
-                    "event_type": "FCbsln",
+                "trapTmax gain (dsp/trapTmax) in pulser events": {
+                    "parameters": "trapTmax",
+                    "event_type": "pulser",
                     "plot_structure": "per string",
                     "resampled": "only",
                     "plot_style": "vs time",
+                    "AUX_ratio": True,
                     "variation": True,
                     "time_window": "10T",
                 },
@@ -269,28 +246,18 @@ def main():
                     "variation": True,
                     "time_window": "10T",
                 },
-                "Uncalibrated gain (dsp/trapEmax) in FCbsln events": {
-                    "parameters": "trapEmax",
-                    "event_type": "FCbsln",
+                "Calibrated gain (hit/trapEmax_ctc_cal) in physics events": {
+                    "parameters": "trapEmax_ctc_cal",
+                    "event_type": "phy",
                     "plot_structure": "per string",
                     "resampled": "only",
                     "plot_style": "vs time",
-                    "AUX_ratio": True,
                     "variation": True,
                     "time_window": "10T",
                 },
                 "Calibrated gain (hit/trapEmax_ctc_cal) in pulser events": {
                     "parameters": "trapEmax_ctc_cal",
                     "event_type": "pulser",
-                    "plot_structure": "per string",
-                    "resampled": "only",
-                    "plot_style": "vs time",
-                    "variation": True,
-                    "time_window": "10T",
-                },
-                "Calibrated gain (hit/trapEmax_ctc_cal) in FCbsln events": {
-                    "parameters": "trapEmax_ctc_cal",
-                    "event_type": "FCbsln",
                     "plot_structure": "per string",
                     "resampled": "only",
                     "plot_style": "vs time",
@@ -307,16 +274,6 @@ def main():
                     "variation": True,
                     "time_window": "10T",
                 },
-                "Noise (dsp/bl_std) in FCbsln events": {
-                    "parameters": "bl_std",
-                    "event_type": "FCbsln",
-                    "plot_structure": "per string",
-                    "resampled": "only",
-                    "plot_style": "vs time",
-                    "AUX_ratio": True,
-                    "variation": True,
-                    "time_window": "10T",
-                },
                 "A/E (from dsp) in pulser events": {
                     "parameters": "AoE_Custom",
                     "event_type": "pulser",
@@ -326,20 +283,29 @@ def main():
                     "variation": True,
                     "time_window": "10T",
                 },
-                "A/E (from dsp) in FCbsln events": {
-                    "parameters": "AoE_Custom",
-                    "event_type": "FCbsln",
-                    "plot_structure": "per string",
-                    "resampled": "only",
-                    "plot_style": "vs time",
-                    "variation": True,
-                    "time_window": "10T",
-                },
-                "Quality cuts in physics events": {
+                "Quality cuts and classifiers in physics events": {
                     "parameters": "quality_cuts",
                     "event_type": "phy",
                     "qc_flags": True,
-                    "qc_classifiers": False,
+                    "qc_classifiers": True,
+                },
+                "QC classifiers in all events": {
+                    "parameters": "quality_cuts",
+                    "event_type": "all",
+                    "qc_flags": False,
+                    "qc_classifiers": True,
+                },
+                "QC classifiers in pulser events": {
+                    "parameters": "quality_cuts",
+                    "event_type": "pulser",
+                    "qc_flags": False,
+                    "qc_classifiers": True,
+                },
+                "QC classifiers in FCbsln events": {
+                    "parameters": "quality_cuts",
+                    "event_type": "FCbsln",
+                    "qc_flags": False,
+                    "qc_classifiers": True,
                 }
             }
         }
@@ -351,16 +317,17 @@ def main():
 
     phy_folder = os.path.join(output_folder, ref_version, "generated/plt/hit", data_type)
     os.makedirs(os.path.join(phy_folder, period, run), exist_ok=True)
-
     if os.path.isfile(
         os.path.join(phy_folder, period, run, f"l200-{period}-{run}-qcp_summary.yaml")
     ):
         pass
     else:
         os.makedirs(os.path.join(phy_folder, period, run, "mtg/pdf"), exist_ok=True)
-        cal_bash_command = f"{cmd} python monitoring.py check_calib --public_data {auto_dir_path} --output {phy_folder} --period {period} --current_run {run} --pswd_email {pswd_email}"
+        cal_bash_command = f"{cmd} python monitoring.py check_calib --public_data {auto_dir_path} --output {phy_folder} --period {period} --current_run {run} --data_type {data_type} --pswd_email {pswd_email}"
         if save_pdf is True:
             cal_bash_command += " --pdf True"
+        if partition is True:
+            cal_bash_command += " --partition True"
         logger.debug(f"...running command {cal_bash_command}")
         subprocess.run(cal_bash_command, shell=True)
         logger.info("...calibration data inspected!")
@@ -387,6 +354,8 @@ def main():
     if not os.path.isdir(source_dir):
         logger.debug(f"Error: folder '{source_dir}' does not exist.")
         exit()
+    else:
+        logger.debug(f"Found folder {source_dir}")
     current_files = os.listdir(source_dir)
     new_files = []
 
@@ -469,7 +438,7 @@ def main():
         # compute resampling + info yaml
         logger.debug("Resampling outputs...")
         files_folder = os.path.join(output_folder, ref_version)
-        bash_command = f"{cmd} python monitoring.py summary_files --path {files_folder} --period {period} --run {run}"
+        bash_command = f"{cmd} python monitoring.py summary_files --path {files_folder} --period {period} --run {run} --data_type {data_type}"
         logger.debug(f"...running command {bash_command}")
         subprocess.run(bash_command, shell=True)
         logger.debug("...done!")
@@ -494,7 +463,7 @@ def main():
                 logger.error(
                     f"Unexpected error while retrieving Slow Control data: {e}"
                 )
-
+        
         # ===========================================================================================
         # Generate Monitoring Summary Plots
         # ===========================================================================================
@@ -509,14 +478,14 @@ def main():
         ]
         dataset = {period: avail_runs}
         if dataset[period] != []:
+            # per-period & per-run monitoring plots
             logger.debug("Generating monitoring plots...")
-            # get first timestamp of first run of the given period
             start_key = (
                 sorted(
                     os.listdir(os.path.join(search_directory, period, avail_runs[0]))
                 )[0]
             ).split("-")[4]
-            mtg_bash_command = f"{cmd} python monitoring.py plot --public_data {auto_dir_path} --hdf_files {mtg_folder} --output {mtg_folder} --start_key {start_key} --period {period} --avail_runs {avail_runs} --pswd_email {pswd_email} --escale {escale_val} --current_run {run} --last_checked {last_checked}"
+            mtg_bash_command = f"{cmd} python monitoring.py plot --public_data {auto_dir_path} --hdf_files {mtg_folder} --output {mtg_folder} --data_type {data_type} --start_key {start_key} --period {period} --avail_runs {avail_runs} --pswd_email {pswd_email} --escale {escale_val} --current_run {run} --last_checked {last_checked}"
             if partition is True:
                 mtg_bash_command += " --partition True"
             if save_pdf is True:

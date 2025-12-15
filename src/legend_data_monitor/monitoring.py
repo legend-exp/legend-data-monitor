@@ -12,6 +12,7 @@ import h5py
 import math
 import matplotlib
 import matplotlib.pyplot as plt
+from matplotlib.patches import Patch
 import numpy as np
 import pandas as pd
 import pytz
@@ -65,6 +66,9 @@ def qc_distributions(
     detectors = det_info["detectors"]
     str_chns = det_info["str_chns"]
     utils.logger.debug("...inspecting QC classifiers")
+    if not os.path.exists(my_file):
+        utils.logger.warning(f"...file not found: {my_file}. Return!")
+        return 
 
     end_folder = os.path.join(
         output_folder,
@@ -188,6 +192,9 @@ def qc_FT_failure_rates(
     detectors = det_info["detectors"]
     str_chns = det_info["str_chns"]
     utils.logger.debug("...inspecting FT failure rates")
+    if not os.path.exists(my_file):
+        utils.logger.warning(f"...file not found: {my_file}. Return!")
+        return 
 
     end_folder = os.path.join(
         output_folder,
@@ -473,6 +480,7 @@ def box_summary_plot(
     output_dir: str,
     data_type: str,
     save_pdf: bool,
+    run_to_apply=None,
 ):
     """
     Box plot summary for FEP gain variations for multiple detectors.
@@ -497,26 +505,31 @@ def box_summary_plot(
         Type of data, either 'cal' or 'phy'.
     save_pdf : bool
         If True, save the summary plot as a PDF.
+    run_to_apply : 
+        Run to apply (eg see ssc data).
     """
+    utils.logger.debug("...making summary box plots for %s", info['title'])
     detectors = det_info['detectors']
     plot_data = []
     for ged, item in results.items():
-        if ged not in detectors: continue
+        if ged not in detectors: 
+            continue
         
         channel = detectors[ged]
         meta_info = detectors[ged]
+        
         if item is None or len(item) == 0:
             mean = std = min_val = max_val = np.nan
         else:
-            mean = item.mean()
-            std = item.std()
-            min_val = item.min()
-            max_val = item.max()
+            mean = np.nanmean(item) 
+            std = np.nanstd(item)
+            min_val = np.nanmin(item)
+            max_val = np.nanmax(item)
         try:
             fwhm = pars[ged]["results"]["ecal"]["cuspEmax_ctc_cal"]["eres_linear"]["Qbb_fwhm_in_kev"]
         except (KeyError, TypeError):
             fwhm = np.nan
-            
+
         plot_data.append(
             {
                 "ged": ged,
@@ -527,9 +540,10 @@ def box_summary_plot(
                 "min": min_val,
                 "max": max_val,
                 "fwhm": fwhm,
+                "usability": meta_info.get("usability", None),
             }
         )
-
+        
     df_plot = pd.DataFrame(plot_data)
     # sort by string, and then position
     df = df_plot.sort_values(["string", "pos"]).reset_index(drop=True)
@@ -564,17 +578,23 @@ def box_summary_plot(
         df["mean"],
         yerr=[df["mean"] - df["min"], df["max"] - df["mean"]],
         fmt="none",
-        ecolor="red",
+        ecolor="#0266c9" if info['title'] != 'FEP_gain' else 'red',
         capsize=4,
         label="Min/Max",
     )
 
     ax.set_xticks(x)
-    ax.set_xticklabels(df["ged"], rotation=90)
+    xtick_labels = ax.set_xticklabels(df["ged"], rotation=90)
+    for i, label in enumerate(xtick_labels):
+        if df.iloc[i]["usability"] in ["off","false",False]:
+            label.set_color("red")
+        if df.iloc[i]["usability"] in ["ac"]:
+            label.set_color("darkorange")
+        
     ax.axvline(-0.5, color="gray", ls="--", alpha=0.5)
-
     ymin, ymax = ax.get_ylim()
     label_y = ymin * (ymax / ymin) ** 0.05 if ymin > 0 else -4
+    label_y = label_y if info['title'] != 'baseln_spike' else 1
     unique_strings = df["string"].unique()
     for s in unique_strings:
         idx = df.index[df["string"] == s]
@@ -584,7 +604,18 @@ def box_summary_plot(
 
     ax.set_ylabel(info['ylabel'])
     ax.set_title(f"{period} {run}")
-    ax.legend(loc="upper right")
+
+    # Create custom legend entries for usability colors
+    legend_patches = []
+    # Get the current handles and labels
+    handles, labels = ax.get_legend_handles_labels()
+    # Add custom patches for usability colors
+    legend_patches.append(Patch(color='red', label='Usability: off'))
+    legend_patches.append(Patch(color='darkorange', label='Usability: ac'))
+    # Combine existing handles with new patches
+    all_handles = handles + legend_patches
+    # Set the legend with all handles
+    ax.legend(handles=all_handles, loc="upper right")
     ax.grid(False)
 
     if info['title'] in ['baseln_stab']: 
@@ -709,6 +740,9 @@ def qc_average(
     detectors = det_info["detectors"]
     str_chns = det_info["str_chns"]
     utils.logger.debug("...inspecting QC average values")
+    if not os.path.exists(my_file):
+        utils.logger.warning(f"...file not found: {my_file}. Return!")
+        return 
 
     end_folder = os.path.join(
         output_folder,
@@ -858,6 +892,9 @@ def qc_time_series(
     detectors = det_info["detectors"]
     str_chns = det_info["str_chns"]
     utils.logger.debug("...inspecting QC time series")
+    if not os.path.exists(my_file):
+        utils.logger.warning(f"...file not found: {my_file}. Return!")
+        return 
 
     end_folder = os.path.join(
         output_folder,
@@ -1151,6 +1188,7 @@ def get_calib_data_dict(
     tier: str,
     key_result: str,
     fit: str,
+    data_type: str,
 ):
     """
     Extract calibration information for a given run and appends it to the provided dictionary.
@@ -1181,12 +1219,29 @@ def get_calib_data_dict(
         Key name used to extract the resolution results from the parsed file.
     fit : str
         Fitting method used for energy resolution, either 'linear' or 'quadratic'.
+    data_type : str
     """
     sto = lh5.LH5Store()
     channel = channel_info[0]
     channel_name = channel_info[1]
 
-    folder_par = os.path.join(pars[2 if tier == "hit" else 3], "cal", period, run)
+    validity_file = os.path.join(pars[2 if tier == "hit" else 3], "validity.yaml")
+    with open(validity_file) as f:
+        validity_dict = yaml.load(f, Loader=yaml.CLoader)
+
+    # find first key of current run
+    run_path = os.path.join(tiers[2 if tier == "hit" else 3], data_type, period, run)
+    start_key = sorted(os.listdir(run_path))[0].split("-")[4]
+    # use key to load the right yaml file
+    valid_entries = [e for e in validity_dict if e["valid_from"] <= start_key]
+    if valid_entries:
+        apply = max(valid_entries, key=lambda e: e["valid_from"])['apply'][0]
+        run_to_apply = apply.split("/")[-1].split("-")[2]
+    else:
+        legend_data_monitor.utils.logger.debug(f"No valid calibration was found for {period}-{run}. Return.")
+        return calib_data
+
+    folder_par = os.path.join(pars[2 if tier == "hit" else 3], "cal", period, run_to_apply)
     pars_dict = get_calibration_file(folder_par)
 
     if not all(k.startswith("ch") for k in pars_dict.keys()):
@@ -1205,7 +1260,7 @@ def get_calib_data_dict(
 
     # get timestamp for additional-final cal run (only for FEP gain display)
     run_start_time, run_end_time = get_run_start_end_times(
-        sto, tiers, period, run, tier
+        sto, tiers, period, run_to_apply, tier
     )
 
     calib_data["fep"].append(fep_gain)
@@ -1295,6 +1350,7 @@ def get_calib_pars(
     run_list: list,
     channel_info: list,
     partition: bool,
+    data_type: str,
     escale: float,
     fit="linear",
 ) -> dict:
@@ -1341,7 +1397,7 @@ def get_calib_pars(
 
     for run in run_list:
         calib_data = get_calib_data_dict(
-            calib_data, channel_info, tiers, pars, period, run, tier, key_result, fit
+            calib_data, channel_info, tiers, pars, period, run, tier, key_result, fit, data_type
         )
 
     for key, item in calib_data.items():
@@ -1808,7 +1864,7 @@ def get_pulser_data(
     }
 
 
-def build_new_files(generated_path: str, period: str, run: str):
+def build_new_files(generated_path: str, period: str, run: str, data_type="phy"):
     """
     Generate and store resampled HDF files for a given data run and extract summary info.
 
@@ -1828,13 +1884,16 @@ def build_new_files(generated_path: str, period: str, run: str):
         Period (e.g. 'p03') used to construct paths.
     run : str
         Run (e.g. 'r001') used to construct paths.
+    data_type : str
+        Data type to load; default: 'phy'.
     """
     data_file = os.path.join(
         generated_path,
-        "generated/plt/hit/phy",
+        "generated/plt/hit",
+        data_type,
         period,
         run,
-        f"l200-{period}-{run}-phy-geds.hdf",
+        f"l200-{period}-{run}-{data_type}-geds.hdf",
     )
 
     if not os.path.exists(data_file):
@@ -1851,10 +1910,11 @@ def build_new_files(generated_path: str, period: str, run: str):
     for idx, resample_unit in enumerate(resampling_times):
         new_file = os.path.join(
             generated_path,
-            "generated/plt/hit/phy",
+            "generated/plt/hit",
+            data_type,
             period,
             run,
-            f"l200-{period}-{run}-phy-geds-res_{resample_unit}.hdf",
+            f"l200-{period}-{run}-{data_type}-geds-res_{resample_unit}.hdf",
         )
         # remove it if already exists so we can start again to append resampled data
         if os.path.exists(new_file):
@@ -1908,10 +1968,11 @@ def build_new_files(generated_path: str, period: str, run: str):
         if idx == 0:
             json_output = os.path.join(
                 generated_path,
-                "generated/plt/hit/phy",
+                "generated/plt/hit",
+                data_type,
                 period,
                 run,
-                f"l200-{period}-{run}-phy-geds-info.yaml",
+                f"l200-{period}-{run}-{data_type}-geds-info.yaml",
             )
             with open(json_output, "w") as file:
                 json.dump(info_dict, file, indent=4)
@@ -1921,6 +1982,7 @@ def plot_time_series(
     auto_dir_path: str,
     phy_mtg_data: str,
     output_folder: str,
+    data_type: str,
     period: str,
     runs: list,
     current_run: str,
@@ -2007,7 +2069,7 @@ def plot_time_series(
             geds_df_cuspEmax_abs,
             geds_df_cuspEmax_abs_corr,
             puls_df_cuspEmax_abs,
-        ) = get_dfs(phy_mtg_data, period, run_list, "TrapemaxCtcCal")
+        ) = get_dfs(phy_mtg_data, period, run_list, "Trapemax")
         geds_df_trapTmax, geds_df_tp0est, puls_df_trapTmax, puls_df_tp0est = (
             get_traptmax_tp0est(phy_mtg_data, period, run_list)
         )
@@ -2050,225 +2112,249 @@ def plot_time_series(
         shelve_path = os.path.join(end_folder, f"l200-{period}-phy-monitoring")
         utils.logger.debug(f"...inspecting Gain over {period}")
         with shelve.open(shelve_path, "c", protocol=pickle.HIGHEST_PROTOCOL) as shelf:
-
-            for string, det_list in str_chns.items():
-                for channel_name in det_list:
-                    channel = detectors[channel_name]["channel_str"]
-                    rawid = detectors[channel_name]["daq_rawid"]
-                    pos = detectors[channel_name]["position"]
-
-                    resampling_time = "1h"  # if len(runs)>1 else "10T"
-                    if rawid not in set(dfs[0].columns):
-                        utils.logger.debug(
-                            f"{channel} is not present in the dataframe!"
+            for plot_type in ["corr", "uncorr"]:
+                for string, det_list in str_chns.items():
+                    for channel_name in det_list:
+                        channel = detectors[channel_name]["channel_str"]
+                        rawid = detectors[channel_name]["daq_rawid"]
+                        pos = detectors[channel_name]["position"]
+    
+                        resampling_time = "1h"  # if len(runs)>1 else "10T"
+                        if rawid not in set(dfs[0].columns):
+                            utils.logger.debug(
+                                f"{channel} is not present in the dataframe!"
+                            )
+                            continue
+    
+                        pulser_data = get_pulser_data(
+                            resampling_time,
+                            period,
+                            dfs,
+                            rawid,
+                            escale=escale_val,
+                            variations=True,
                         )
-                        continue
-
-                    pulser_data = get_pulser_data(
-                        resampling_time,
-                        period,
-                        dfs,
-                        rawid,
-                        escale=escale_val,
-                        variations=True,
-                    )
-
-                    fig, ax = plt.subplots(figsize=(12, 4))
-                    pars_data = get_calib_pars(
-                        auto_dir_path,
-                        period,
-                        run_list,
-                        [channel, channel_name],
-                        partition,
-                        escale=escale_val,
-                        fit=fit_flag,
-                    )
-
-                    t0 = pars_data["run_start"]
-                    if not eval(flag_expr):
-                        kevdiff = (
-                            pulser_data["ged"]["kevdiff_av"]
-                            if pulser_data["diff"]["kevdiff_av"] is None
-                            else pulser_data["diff"]["kevdiff_av"]
+    
+                        fig, ax = plt.subplots(figsize=(12, 4))
+                        pars_data = get_calib_pars(
+                            auto_dir_path,
+                            period,
+                            run_list,
+                            [channel, channel_name],
+                            partition,
+                            data_type,
+                            escale=escale_val,
+                            fit=fit_flag,
                         )
-
-                        # PULS01ANA has a signal - we can correct GEDS energies for it!
-                        if pulser_data["pul_cusp"]["kevdiff_av"] is not None:
-                            pul_cusp_av = pulser_data["pul_cusp"][
-                                "kevdiff_av"
-                            ].values.astype(float)
-                            diff_av = pulser_data["diff"]["kevdiff_av"].values.astype(
-                                float
-                            )
-                            diff_std = pulser_data["diff"]["kevdiff_std"].values.astype(
-                                float
-                            )
-                            x = pulser_data["diff"]["kevdiff_av"].index.values
-                            
-                            plt.fill_between(
-                                x,
-                                diff_av - diff_std,
-                                diff_av + diff_std,
-                                color="k",
-                                alpha=0.2,
-                                label=r"±1$\sigma$",
-                            )
-                            plt.plot(x, pul_cusp_av, "C2", label="PULS01ANA")
-                            plt.plot(x, diff_av, "C4", label="GED corrected")
-                        else:
-                            ged_av = pulser_data["ged"]["kevdiff_av"].values.astype(
-                                float
-                            )
-                            ged_std = pulser_data["ged"]["kevdiff_std"].values.astype(
-                                float
-                            )
-                            x = pulser_data["ged"]["kevdiff_av"].index.values
-
-                            plt.fill_between(
-                                x,
-                                ged_av - ged_std,
-                                ged_av + ged_std,
-                                color="k",
-                                alpha=0.2,
-                                label=r"±1$\sigma$",
-                            )
-                            plt.plot(
-                                x, ged_av, color="dodgerblue", label="GED uncorrected"
-                            )
-
-                    plt.plot(
-                        pars_data["run_start"] - pd.Timedelta(hours=5),
-                        pars_data["fep_diff"],
-                        "kx",
-                        label="FEP gain",
-                    )
-                    plt.plot(
-                        pars_data["run_start"] - pd.Timedelta(hours=5),
-                        pars_data["cal_const_diff"],
-                        "rx",
-                        label="cal. const. diff",
-                    )
-
-                    for ti in pars_data["run_start"]:
-                        plt.axvline(ti, color="dimgrey", ls="--")
-
-                    for i in range(len(t0)):
-                        if i == len(pars_data["run_start"]) - 1:
-                            plt.axhline(
-                                pars_data["res"][i] / 2, 
-                                color="b", linestyle='-',
-                            )
-                            plt.axhline(
-                                -pars_data["res"][i] / 2, 
-                                color="b", linestyle='-',
-                            )
-                            if quadratic:
-                                plt.axhline(
-                                    pars_data["res_quad"][i] / 2,
-                                    color="dodgerblue",
-                                    linestyle="-",
+    
+                        t0 = pars_data["run_start"]
+                        if not eval(flag_expr):
+                            if plot_type == 'uncorr': 
+                                kevdiff = pulser_data["ged"]["kevdiff_av"]
+                            else:
+                                kevdiff = (
+                                    pulser_data["ged"]["kevdiff_av"]
+                                    if pulser_data["diff"]["kevdiff_av"] is None
+                                    else pulser_data["diff"]["kevdiff_av"]
                                 )
-                                plt.axhline(
-                                    -pars_data["res_quad"][i] / 2,
-                                    color="dodgerblue",
-                                    linestyle="-",
+    
+                            # PULS01ANA has a signal - we can correct GEDS energies for it!
+                            if pulser_data["pul_cusp"]["kevdiff_av"] is not None and plot_type == 'corr':
+                                pul_cusp_av = pulser_data["pul_cusp"][
+                                    "kevdiff_av"
+                                ].values.astype(float)
+                                diff_av = pulser_data["diff"]["kevdiff_av"].values.astype(
+                                    float
                                 )
-                        else:
-                            plt.axhline(
-                                pars_data["res"][i] / 2, 
-                                color="b", linestyle='-',
-                            )
-                            plt.axhline(
-                                -pars_data["res"][i] / 2,
-                                color="b", linestyle='-',
-                            )
-                            if quadratic:
-                                plt.axhline(
-                                    pars_data["res_quad"][i] / 2,
-                                    color="dodgerblue",
-                                    linestyle="-",
+                                diff_std = pulser_data["diff"]["kevdiff_std"].values.astype(
+                                    float
                                 )
-                                plt.axhline(
-                                    -pars_data["res_quad"][i] / 2,
-                                    color="dodgerblue",
-                                    linestyle="-",
+                                x = pulser_data["diff"]["kevdiff_av"].index.values
+                                
+                                plt.fill_between(
+                                    x,
+                                    diff_av - diff_std,
+                                    diff_av + diff_std,
+                                    color="k",
+                                    alpha=0.2,
+                                    label=r"±1$\sigma$",
                                 )
-
-                        if str(pars_data["res"][i] / 2 * 1.1) != "nan" and i < len(
-                            pars_data["res"]
-                        ) - (xlim_idx - 1):
-                            plt.text(
-                                t0[i],
-                                pars_data["res"][i] / 2 * 1.1,
-                                "{:.2f}".format(pars_data["res"][i]),
-                                color="b",
-                            )
-
-                        if quadratic:
-                            if str(
-                                pars_data["res_quad"][i] / 2 * 1.5
-                            ) != "nan" and i < len(pars_data["res"]) - (xlim_idx - 1):
+                                plt.plot(x, pul_cusp_av, "C2", label="PULS01ANA")
+                                plt.plot(x, diff_av, "C4", label="GED corrected")
+                            else:
+                                ged_av = pulser_data["ged"]["kevdiff_av"].values.astype(
+                                    float
+                                )
+                                ged_std = pulser_data["ged"]["kevdiff_std"].values.astype(
+                                    float
+                                )
+                                x = pulser_data["ged"]["kevdiff_av"].index.values
+    
+                                plt.fill_between(
+                                    x,
+                                    ged_av - ged_std,
+                                    ged_av + ged_std,
+                                    color="k",
+                                    alpha=0.2,
+                                    label=r"±1$\sigma$",
+                                )
+                                plt.plot(
+                                    x, ged_av, color="dodgerblue", label="GED uncorrected"
+                                )
+    
+                        plt.plot(
+                            pars_data["run_start"] - pd.Timedelta(hours=5),
+                            pars_data["fep_diff"],
+                            "kx",
+                            label="FEP gain",
+                        )
+                        plt.plot(
+                            pars_data["run_start"] - pd.Timedelta(hours=5),
+                            pars_data["cal_const_diff"],
+                            "rx",
+                            label="cal. const. diff",
+                        )
+    
+                        for ti in pars_data["run_start"]:
+                            plt.axvline(ti, color="dimgrey", ls="--")
+    
+                        for i in range(len(t0)):
+                            if i == len(pars_data["run_start"]) - 1:
+                                plt.plot(
+                                    [t0[i], t0[i] + pd.Timedelta(days=7)],
+                                    [pars_data["res"][i] / 2, pars_data["res"][i] / 2],
+                                    "b-",
+                                )
+                                plt.plot(
+                                    [t0[i], t0[i] + pd.Timedelta(days=7)],
+                                    [-pars_data["res"][i] / 2, -pars_data["res"][i] / 2],
+                                    "b-",
+                                )
+                                if quadratic:
+                                    plt.plot(
+                                        [t0[i], t0[i] + pd.Timedelta(days=7)],
+                                        [
+                                            pars_data["res_quad"][i] / 2,
+                                            pars_data["res_quad"][i] / 2,
+                                        ],
+                                        color="dodgerblue",
+                                        linestyle="-",
+                                    )
+                                    plt.plot(
+                                        [t0[i], t0[i] + pd.Timedelta(days=7)],
+                                        [
+                                            -pars_data["res_quad"][i] / 2,
+                                            -pars_data["res_quad"][i] / 2,
+                                        ],
+                                        color="dodgerblue",
+                                        linestyle="-",
+                                    )
+                            else:
+                                plt.plot(
+                                    [t0[i], t0[i + 1]],
+                                    [pars_data["res"][i] / 2, pars_data["res"][i] / 2],
+                                    "b-",
+                                )
+                                plt.plot(
+                                    [t0[i], t0[i + 1]],
+                                    [-pars_data["res"][i] / 2, -pars_data["res"][i] / 2],
+                                    "b-",
+                                )
+                                if quadratic:
+                                    plt.plot(
+                                        [t0[i], t0[i + 1]],
+                                        [
+                                            pars_data["res_quad"][i] / 2,
+                                            pars_data["res_quad"][i] / 2,
+                                        ],
+                                        color="dodgerblue",
+                                        linestyle="-",
+                                    )
+                                    plt.plot(
+                                        [t0[i], t0[i + 1]],
+                                        [
+                                            -pars_data["res_quad"][i] / 2,
+                                            -pars_data["res_quad"][i] / 2,
+                                        ],
+                                        color="dodgerblue",
+                                        linestyle="-",
+                                    )
+    
+                            if str(pars_data["res"][i] / 2 * 1.1) != "nan" and i < len(
+                                pars_data["res"]
+                            ) - (xlim_idx - 1):
                                 plt.text(
                                     t0[i],
-                                    pars_data["res_quad"][i] / 2 * 1.5,
-                                    "{:.2f}".format(pars_data["res_quad"][i]),
-                                    color="dodgerblue",
+                                    pars_data["res"][i] / 2 * 1.1,
+                                    "{:.2f}".format(pars_data["res"][i]),
+                                    color="b",
                                 )
-
-                    fig.suptitle(
-                        f"period: {period} - string: {string} - position: {pos} - ged: {channel_name}"
-                    )
-                    plt.ylabel(r"Energy diff / keV")
-                    plt.plot([0, 1], [0, 1], "b", label="Qbb FWHM keV lin.")
-                    if quadratic:
-                        plt.plot(
-                            [1, 2], [1, 2], "dodgerblue", label="Qbb FWHM keV quadr."
-                        )
-
-                    if zoom:
-                        if flag_expr:
-                            plt.ylim(-3, 3)
-                        else:
-                            bound = np.average(pulser_data["ged"]["cusp_av"].dropna())
-                            plt.ylim(-2.5 * bound, 2.5 * bound)
-                    max_date = pulser_data["ged"]["kevdiff_av"].index.max()
-                    time_difference = max_date.tz_localize(None) - t0[
-                        -xlim_idx
-                    ].tz_localize(None)
-                    plt.xlim(
-                        t0[0] - pd.Timedelta(hours=8),
-                        t0[-xlim_idx] + time_difference * 1.5,
-                    )  # pd.Timedelta(days=7))# --> change me to resize the width of the last run
-                    plt.legend(loc="lower left")
-                    plt.tight_layout()
-
-                    if save_pdf:
-                        mgt_folder = os.path.join(end_folder, "pdf", f"st{string}")
-                        os.makedirs(mgt_folder, exist_ok=True)
-
-                        pdf_name = os.path.join(
-                            mgt_folder,
-                            f"{period}_string{string}_pos{pos}_{channel_name}_gain_shift.pdf",
-                        )
-                        plt.savefig(pdf_name)
-
-                    # serialize+save the plot
-                    serialized_plot = pickle.dumps(plt.gcf())
-                    shelf[
-                        f"{period}_string{string}_pos{pos}_{channel_name}_gain_shift"
-                    ] = serialized_plot
-                    plt.close(fig)
-
-                    # structure of pickle files:
-                    #  - p08_string1_pos1_V02160A_param
-                    #  - p08_string1_pos2_V02160B_param
-                    #  - ...
     
+                            if quadratic:
+                                if str(
+                                    pars_data["res_quad"][i] / 2 * 1.5
+                                ) != "nan" and i < len(pars_data["res"]) - (xlim_idx - 1):
+                                    plt.text(
+                                        t0[i],
+                                        pars_data["res_quad"][i] / 2 * 1.5,
+                                        "{:.2f}".format(pars_data["res_quad"][i]),
+                                        color="dodgerblue",
+                                    )
+    
+                        fig.suptitle(
+                            f"period: {period} - string: {string} - position: {pos} - ged: {channel_name}"
+                        )
+                        plt.ylabel(r"Energy diff / keV")
+                        plt.plot([0, 1], [0, 1], "b", label="Qbb FWHM keV lin.")
+                        if quadratic:
+                            plt.plot(
+                                [1, 2], [1, 2], "dodgerblue", label="Qbb FWHM keV quadr."
+                            )
+    
+                        if zoom:
+                            if flag_expr:
+                                plt.ylim(-3, 3)
+                            else:
+                                bound = np.average(pulser_data["ged"]["cusp_av"].dropna())
+                                plt.ylim(-2.5 * bound, 2.5 * bound)
+                        max_date = pulser_data["ged"]["kevdiff_av"].index.max()
+                        time_difference = max_date.tz_localize(None) - t0[
+                            -xlim_idx
+                        ].tz_localize(None)
+                        plt.xlim(
+                            t0[0] - pd.Timedelta(hours=8),
+                            t0[-xlim_idx] + time_difference * 1.5,
+                        )  # pd.Timedelta(days=7))# --> change me to resize the width of the last run
+                        plt.legend(loc="lower left")
+                        plt.tight_layout()
+    
+                        if save_pdf:
+                            mgt_folder = os.path.join(end_folder, "pdf", f"st{string}")
+                            os.makedirs(mgt_folder, exist_ok=True)
+    
+                            pdf_name = os.path.join(
+                                mgt_folder,
+                                f"{period}_string{string}_pos{pos}_{channel_name}_{plot_type}_gain_shift.pdf",
+                            )
+                            plt.savefig(pdf_name)
+    
+                        # serialize+save the plot
+                        serialized_plot = pickle.dumps(plt.gcf())
+                        shelf[
+                            f"{period}_string{string}_pos{pos}_{channel_name}_{plot_type}_gain_shift"
+                        ] = serialized_plot
+                        plt.close(fig)
+    
+                        # structure of pickle files:
+                        #  - p08_string1_pos1_V02160A_param
+                        #  - p08_string1_pos2_V02160B_param
+                        #  - ...
+
     # parameters (bsln, gain, ...) variations over run
     info = utils.MTG_PLOT_INFO
     results = {}
     
-    for inspected_parameter in ["Baseline", "TrapemaxCtcCal", "BlStd"]:
+    for inspected_parameter in ["Baseline", "Trapemax", "TrapemaxCtcCal", "BlStd"]:
         escale_par = escale_val if inspected_parameter == "TrapemaxCtcCal" else 1
         results.update({ inspected_parameter: {} })
         
@@ -2353,6 +2439,7 @@ def plot_time_series(
                             [current_run],
                             [channel, channel_name],
                             partition,
+                            data_type,
                             escale=escale_par,
                             fit=fit_flag,
                         )
@@ -2534,6 +2621,7 @@ def plot_time_series(
                             f"{period}_{current_run}_string{string}_pos{pos}_{channel_name}_{inspected_parameter}"
                         ] = serialized_plot
                         plt.close(fig)
+
 
     with open(usability_map_file, "w") as f:
         yaml.dump(output, f)
