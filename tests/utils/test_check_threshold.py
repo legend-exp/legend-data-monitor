@@ -3,143 +3,120 @@ import pandas as pd
 from legend_data_monitor.utils import check_threshold
 
 
-def test_check_threshold_early_exit():
-    # should return the original email_message due to None entries
-    email_msg = []
-    result = check_threshold(
-        data_series=None,
-        pswd_email=None,
+def make_series(values, start="2023-01-01", freq="D"):
+    # fake datetime-indexed series
+    idx = pd.date_range(start=start, periods=len(values), freq=freq, tz="UTC")
+    return pd.Series(values, index=idx)
+
+
+def test_check_threshold_within_limits():
+    series = make_series([0.5, 0.6, 0.7])
+    output = {"ch1": {"cal": {"fwhm_ok": True}, "phy": {}}}
+
+    check_threshold(
+        data_series=series,
+        channel_name="ch1",
         last_checked=None,
-        t0=[],
-        pars_data={},
-        threshold=[0, 1],
-        period="P03",
-        current_run="r001",
-        channel_name="ch1",
-        string="s01",
-        email_message=email_msg,
-        parameter="gain",
+        t0=[pd.Timestamp("2023-01-01")],
+        threshold=[0.0, 1.0],
+        parameter="gain_stab",
+        output=output,
     )
-    assert result == email_msg
 
-    email_msg = []
-    result = check_threshold(
-        data_series=None,
-        pswd_email="abc",
+    assert output["ch1"]["phy"]["gain_stab"] is True
+
+
+def test_check_threshold_out_of_bounds():
+    series = make_series([2.5, 0.6, -1.0])
+    output = {"ch1": {"cal": {"fwhm_ok": True}, "phy": {}}}
+
+    check_threshold(
+        data_series=series,
+        channel_name="ch1",
         last_checked=None,
-        t0=[],
-        pars_data={},
-        threshold=[0, 1],
-        period="P03",
-        current_run="r001",
-        channel_name="ch1",
-        string="s01",
-        email_message=email_msg,
-        parameter="gain",
+        t0=[pd.Timestamp("2023-01-01")],
+        threshold=[-0.5, 2.0],
+        parameter="gain_stab",
+        output=output,
     )
-    assert result == email_msg
 
-    email_msg = []
-    result = check_threshold(
-        data_series=None,
-        pswd_email="abc",
-        last_checked="0123",
-        t0=[],
-        pars_data={},
-        threshold=[0, 1],
-        period="P03",
-        current_run="r001",
-        channel_name="ch1",
-        string="s01",
-        email_message=email_msg,
-        parameter="gain",
-    )
-    assert result == email_msg
-
-    email_msg = []
-    result = check_threshold(
-        data_series="data",
-        pswd_email="abc",
-        last_checked="None",
-        t0=[],
-        pars_data={},
-        threshold=[0, 1],
-        period="P03",
-        current_run="r001",
-        channel_name="ch1",
-        string="s01",
-        email_message=email_msg,
-        parameter="gain",
-    )
-    assert result == email_msg
+    assert output["ch1"]["phy"]["gain_stab"] is False
 
 
-def test_check_threshold_no_points_over_threshold():
-    now = pd.Timestamp.utcnow()
-    index = pd.date_range(now, periods=5, freq="D")
-    series = pd.Series([0.5, 0.6, 0.7, 0.8, 0.9], index=index)
+def test_check_threshold_pulser_stab_fwhm_fail():
+    series = make_series([0.1, 0.2, 0.3])
+    output = {"ch1": {"cal": {"fwhm_ok": False}, "phy": {}}}
 
-    email_msg = []
-    t0 = [now - pd.Timedelta(days=1)]
-
-    result = check_threshold(
+    check_threshold(
         data_series=series,
-        pswd_email="dummy",
-        last_checked=(now - pd.Timedelta(days=2)).timestamp(),
-        t0=t0,
-        pars_data={},
-        threshold=[-1, 2],  # no point outside
-        period="P03",
-        current_run="r001",
         channel_name="ch1",
-        string="s01",
-        email_message=email_msg,
-        parameter="gain",
+        last_checked=None,
+        t0=[pd.Timestamp("2023-01-01")],
+        threshold=[0.0, 1.0],
+        parameter="pulser_stab",
+        output=output,
     )
-    assert result == email_msg
 
-    email_msg = []
-    t0 = [now - pd.Timedelta(days=1)]
+    assert output["ch1"]["phy"]["pulser_stab"] is False
 
-    result = check_threshold(
+
+def test_check_one_none_threshold():
+    series = make_series([0.1, 0.2, 0.3])
+    output = {"ch1": {"cal": {"fwhm_ok": True}, "phy": {}}}
+
+    check_threshold(
         data_series=series,
-        pswd_email="dummy",
-        last_checked=(now - pd.Timedelta(days=2)).timestamp(),
-        t0=t0,
-        pars_data={},
-        threshold=[None, None],  # no threshold
-        period="P03",
-        current_run="r001",
         channel_name="ch1",
-        string="s01",
-        email_message=email_msg,
-        parameter="gain",
+        last_checked=None,
+        t0=[pd.Timestamp("2023-01-01")],
+        threshold=[None, 1.0],
+        parameter="pulser_stab",
+        output=output,
     )
-    assert result == email_msg
 
+    assert output["ch1"]["phy"]["pulser_stab"] is True
 
-def test_check_threshold_points_over_threshold():
-    now = pd.Timestamp.utcnow()
-    index = pd.date_range(now, periods=5, freq="D")
-    series = pd.Series([0.5, 1.5, 0.7, 2.0, 0.9], index=index)
+    series = make_series([0.1, 0.2, 1.3])
 
-    email_msg = []
-    t0 = [now - pd.Timedelta(days=1)]
-
-    result = check_threshold(
+    check_threshold(
         data_series=series,
-        pswd_email="dummy",
-        last_checked=(now - pd.Timedelta(days=2)).timestamp(),
-        t0=t0,
-        pars_data={},
-        threshold=[None, 1],  # points >1
-        period="P03",
-        current_run="r001",
         channel_name="ch1",
-        string="s01",
-        email_message=email_msg,
-        parameter="gain",
+        last_checked=None,
+        t0=[pd.Timestamp("2023-01-01")],
+        threshold=[None, 1.0],
+        parameter="pulser_stab",
+        output=output,
     )
-    # email_message should be updated
-    assert len(result) > 0
-    assert "ALERT" in result[0] or "gain over threshold" in result[1]
+
+    assert output["ch1"]["phy"]["pulser_stab"] is False
+
+
+def test_check_two_none_threshold():
+    series = make_series([0.1, 0.2, 0.3])
+    output = {"ch1": {"cal": {"fwhm_ok": True}, "phy": {}}}
+
+    check_threshold(
+        data_series=series,
+        channel_name="ch1",
+        last_checked=None,
+        t0=[pd.Timestamp("2023-01-01")],
+        threshold=[None, None],
+        parameter="pulser_stab",
+        output=output,
+    )
+
+    assert output["ch1"]["phy"]["pulser_stab"] is True
+
+    series = make_series([0.1, 0.2, 1.3])
+
+    check_threshold(
+        data_series=series,
+        channel_name="ch1",
+        last_checked=None,
+        t0=[pd.Timestamp("2023-01-01")],
+        threshold=[None, None],
+        parameter="pulser_stab",
+        output=output,
+    )
+
+    assert output["ch1"]["phy"]["pulser_stab"] is True

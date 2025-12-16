@@ -15,7 +15,8 @@ import h5py
 import numpy as np
 import pandas as pd
 import yaml
-from legendmeta import JsonDB, LegendMetadata
+from dbetto import TextDB
+from legendmeta import LegendMetadata
 from lgdo import lh5
 from pandas import DataFrame
 
@@ -42,6 +43,10 @@ pkg = importlib.resources.files("legend_data_monitor")
 # load dictionary with plot info (= units, thresholds, label, ...)
 with open(pkg / "settings" / "par-settings.yaml") as f:
     PLOT_INFO = yaml.load(f, Loader=yaml.CLoader)
+
+# load dictionary with plot info for Dashboard plots
+with open(pkg / "settings" / "mtg-plot-settings.yaml") as f:
+    MTG_PLOT_INFO = yaml.load(f, Loader=yaml.CLoader)
 
 # which parameter belongs to which tier
 with open(pkg / "settings" / "parameter-tiers.yaml") as f:
@@ -394,7 +399,7 @@ def dataset_validity_check(data_info: dict):
         logger.error("\033[91mProvide period!\033[0m")
         return
 
-    data_types = ["phy", "cal"]
+    data_types = ["phy", "cal", "lac", "ssc", "pzc"]
     if not data_info["type"] in data_types:
         logger.error("\033[91mInvalid data type provided!\033[0m")
         return
@@ -1315,19 +1320,145 @@ def send_email_alert(app_password: str, recipients: list, text_file_path: str):
         logger.info("Error: unable to send email: %s", e)
 
 
-def check_threshold(
-    data_series: pd.Series,
+def check_cal_phy_thresholds(
+    output_folder: str,
+    period: str,
+    run: str,
+    key: str,
+    detectors: list,
     pswd_email: str | None,
+):
+    """
+    Check detector calibration/physics thresholds for a given run and optionally send an alert mail.
+
+    Parameters
+    ----------
+    output_folder : str
+        Path to output folder where the output summary YAML and plots will be stored.
+    period : str
+        Period to inspect.
+    run : str
+        Run to inspect.
+    key : str
+        Data type key to inspect, either 'cal' or 'phy'.
+    detectors : list
+        List of detector names.
+    pswd_email : str or None
+        Password for the email account used to send alerts; if None, no email is sent.
+    """
+    usability_map_file = os.path.join(
+        output_folder, period, run, f"l200-{period}-{run}-qcp_summary.yaml"
+    )
+    output = load_yaml_or_default(usability_map_file, detectors)
+    email_message = []
+
+    for ged, det_data in output.items():
+        data_dict = det_data.get(key, {})
+        failed = [
+            k for k, v in data_dict.items() if v is False
+        ]  # collect failed parameters
+
+        if failed:
+            if not email_message:
+                email_message.append(
+                    f"ALERT: Data monitoring thresholds exceeded in {period}-{run}-{key}.\n"
+                )
+            email_message.append(
+                f"- {ged} has {len(failed)}/{len(data_dict)} failed entries: {', '.join(failed)}"
+            )
+
+    if len(email_message) > 1 and pswd_email not in [None, "None"]:
+        with open("message.txt", "w") as f:
+            for line in email_message:
+                f.write(line + "\n")
+        send_email_alert(pswd_email, ["sofia.calgaro@physik.uzh.ch"], "message.txt")
+        os.remove("message.txt")
+
+
+def update_evaluation_in_memory(
+    data: dict, det_name: str, data_type: str, key: str, value: bool | float
+):
+    """
+    Update the key entry in memory dict, where value can be bool or nan if not available; data_type is either 'cal' or 'phy'.
+
+    Parameters
+    ----------
+    data : dict
+        Dictionary storing summary monitoring results, structured as data[det_name][data_type][key] = False/True/null.
+    det_name : str
+        Detector name.
+    data_type : str
+        Data type, either 'cal' or 'phy'.
+    key : str
+        Parameter's key name, eg 'fwhm_ok' or 'pulser_stab'.
+    value : bool or float
+        Value to assign: False/True/null.
+    """
+    data.setdefault(det_name, {}).setdefault(data_type, {})[key] = value
+
+
+def find_over_threshold(
+    data_series: pd.Series,
     last_checked: float | None | str,
     t0: list,
-    pars_data: dict,
     threshold: list,
-    period: str,
-    current_run: str | int,
+) -> pd.Series:
+    """
+    Return timestamps where values exceed the given thresholds.
+
+    Parameters
+    ----------
+    data_series : pd.Series
+        Series of values indexed by datetime.
+    last_checked : float | None | str
+        Epoch time (seconds) of the last check; if None/"None", no cutoff is applied.
+    t0 : list of pd.Timestamp
+        Start times where the first entry defines the window start.
+    threshold : list
+        Threshold bounds; either can be None.
+    """
+    if data_series is None or all(v is None for v in threshold):
+        return pd.Series([], dtype="bool")
+
+    # filter by last_checked
+    if last_checked not in ["None", None]:
+        cutoff = pd.to_datetime(float(last_checked), unit="s", utc=True)
+        data_series = data_series[data_series.index > cutoff]
+
+    if data_series.empty:
+        return pd.Series([], dtype="bool")
+
+    # define time window
+    start = (
+        pd.Timestamp(t0[0]).tz_localize("UTC")
+        if t0[0].tzinfo is None
+        else t0[0].tz_convert("UTC")
+    )
+    end = start + pd.Timedelta(days=7)
+    mask_time = (data_series.index >= start) & (data_series.index < end)
+    data_series = data_series[mask_time]
+
+    if data_series.empty:
+        return pd.Series([], dtype="bool")
+
+    low, high = threshold
+    mask = pd.Series(False, index=data_series.index)
+    if low is not None:
+        mask |= data_series < low
+    if high is not None:
+        mask |= data_series > high
+
+    return data_series[mask]
+
+
+def check_threshold(
+    data_series: pd.Series,
     channel_name: str,
-    string: str | int,
-    email_message: list,
+    last_checked: float | None | str,
+    t0: list,
+    threshold: list,
     parameter: str,
+    output: dict,
 ):
     """Check if a given parameter is over threshold and update the email message list.
 
@@ -1335,84 +1466,31 @@ def check_threshold(
     ----------
     data_series : pd.Series
         Series of gain differences indexed by timestamp.
-    pswd_email : str or None
-        Email password to trigger alert (used as a flag).
     last_checked : float
         Timestamp (in seconds since epoch) of last check.
     t0 : list of pd.Timestamp
         List of start times for time windows.
-    pars_data : dict
-        Dictionary containing parameters including 'res' for thresholds.
     threshold: list
         Threshold (int or float).
-    period : str
-        Period string (e.g., "P03").
-    current_run : str or int
-        Identifier of the current run.
     channel_name : str
         Name of the channel.
-    string : str or int
-        String identifier for the channel.
-    email_message : list
-        List of messages to be sent via email.
     parameter : str
         Parameter name under inspection.
+    output: dict
+        Dictionary containing summary cal and phy info.
     """
-    if (
-        data_series is None
-        or pswd_email is None
-        or last_checked == "None"
-        or (threshold[0] is None and threshold[1] is None)
-    ):
-        return email_message
+    # no available FWHM to compare gain variations with
+    if parameter == "pulser_stab" and not output[channel_name]["cal"]["fwhm_ok"]:
+        update_evaluation_in_memory(output, channel_name, "phy", parameter, False)
+        return
 
-    timestamps = data_series.index
-    cutoff = pd.to_datetime(float(last_checked), unit="s", utc=True)
-    filtered_series = data_series[data_series.index > cutoff]
+    over_threshold_timestamps = find_over_threshold(
+        data_series, last_checked, t0, threshold
+    )
+    condition = not over_threshold_timestamps.empty
+    update_evaluation_in_memory(output, channel_name, "phy", parameter, not condition)
 
-    if filtered_series.empty:
-        return email_message
-
-    time_range_start = pd.Timestamp(t0[0])
-    time_range_end = time_range_start + pd.Timedelta(days=7)
-
-    # ensure UTC awareness
-    if time_range_start.tzinfo is None:
-        time_range_start = time_range_start.tz_localize("UTC")
-    else:
-        time_range_start = time_range_start.tz_convert("UTC")
-
-    if time_range_end.tzinfo is None:
-        time_range_end = time_range_end.tz_localize("UTC")
-    else:
-        time_range_end = time_range_end.tz_convert("UTC")
-
-    # filter by time range
-    mask_time_range = (timestamps >= time_range_start) & (timestamps < time_range_end)
-    filtered_timestamps = timestamps[mask_time_range]
-    data_series_in_range = data_series[mask_time_range]
-
-    low, high = threshold  # threshold = [low, high]
-    mask = pd.Series(True, index=data_series_in_range.index)  # start with all True
-
-    if low is not None:
-        mask &= data_series_in_range < low
-    if high is not None:
-        mask &= data_series_in_range > high
-
-    over_threshold_timestamps = filtered_timestamps[mask]
-
-    if not over_threshold_timestamps.empty:
-        if len(email_message) == 0:
-            email_message = [
-                f"ALERT: Data monitoring threshold exceeded in {period}-{current_run}.\n"
-            ]
-        email_message.append(
-            f"- {parameter} over threshold for {channel_name} (string {string}) "
-            f"for {len(over_threshold_timestamps)} times"
-        )
-
-    return email_message
+    return
 
 
 def get_map_dict(data_analysis: DataFrame):
@@ -1485,13 +1563,13 @@ def get_status_map(path: str, version: str, first_timestamp: str, datatype: str)
     """Return the correct status map, either reading a .json or .yaml file."""
     try:
         map_file = os.path.join(path, version, "inputs/dataprod/config")
-        full_status_map = JsonDB(map_file).on(
+        full_status_map = TextDB(map_file).on(
             timestamp=first_timestamp, system=datatype
         )["analysis"]
     except (KeyError, TypeError):
         # fallback if "analysis" key doesn't exist and structure has changed
         map_file = os.path.join(path, version, "inputs/datasets/statuses")
-        full_status_map = JsonDB(map_file).on(
+        full_status_map = TextDB(map_file).on(
             timestamp=first_timestamp, system=datatype
         )
 
@@ -1501,10 +1579,28 @@ def get_status_map(path: str, version: str, first_timestamp: str, datatype: str)
 # -------------------------------------------------------------------------
 # Build runinfo file with livetime info
 # -------------------------------------------------------------------------
-def update_runinfo(run_info, period, run, data_type, my_global_path):
-    files = os.listdir(my_global_path)
+def update_runinfo(
+    run_info: dict, period: str, run: str, data_type: str, mtg_files_path: str
+):
+    """
+    Update run information dict, with livetime in seconds for phy data; it automatically removes cycles that are flagged as unusable via keys stored in `settings/ignore-keys.yaml`.
+
+    Parameters
+    ----------
+    run_info : dict
+        Dictionary containing metadata for runs, separated by period, run, and data type (cal, phy, ...).
+    period : str
+        Period under inspection.
+    run : str
+        Run under inspection.
+    data_type : str
+        Data type to process (cal, phy, ...).
+    mtg_files_path : str
+        Path where the monitoring HDF5 files were stored for a specific period and run.
+    """
+    files = os.listdir(mtg_files_path)
     files = [
-        os.path.join(my_global_path, f) for f in files if f"{data_type}-geds.hdf" in f
+        os.path.join(mtg_files_path, f) for f in files if f"{data_type}-geds.hdf" in f
     ]
 
     with open("settings/ignore-keys.yaml") as f:
@@ -1547,17 +1643,18 @@ def update_runinfo(run_info, period, run, data_type, my_global_path):
 
 def pulser_from_evt_or_mtg(my_dir, period, run, output, run_info):
     """Try to load EVT tier; if not found, attempt to update run info from monitoring path."""
-    evt_files = os.path.join(my_dir, f"l200-{period}-{run}-phy-tier_pet.lh5")
-    # load from monitoring files if the pet files were not processed
+    pattern = os.path.join(my_dir, f"l200-{period}-{run}-phy-tier_*.lh5")
+    evt_files = glob.glob(pattern)
     if not os.path.isfile(evt_files):
+        logger.info("...loading pulser info from monitoring files")
         mtg_path = os.path.join(output, f"generated/plt/phy/{period}/{run}/")
         if not os.path.isdir(mtg_path):
             return run_info
         run_info = update_runinfo(run_info, period, run, "phy", mtg_path)
-        return run_info
+    return run_info
 
 
-def build_runinfo(path: str, version: str, output: str):
+def build_runinfo(path: str, version: str, proc_folder: str, output: str | None):
     """Build dictionary with main run information (start key, phy livetime in seconds) for multiple data types (phy, cal, fft, bkg, pzc, pul)."""
     periods = []
     runs = []
@@ -1567,7 +1664,7 @@ def build_runinfo(path: str, version: str, output: str):
     run_info = None
     for subdir in possible_dirs:
         for pattern in file_patterns:
-            filepath_pattern = os.path.join(path, version, subdir, pattern)
+            filepath_pattern = os.path.join(proc_folder, version, subdir, pattern)
             files = glob.glob(filepath_pattern)
             if files:
                 filepath = files[0]
@@ -1581,12 +1678,17 @@ def build_runinfo(path: str, version: str, output: str):
             break
 
     raw_paths = [
-        os.path.join(path, "ref-raw/generated/tier/raw"),
-        os.path.join(path, "tmp-p14-raw/generated/tier/raw"),
+        os.path.join(proc_folder, "ref-raw/generated/tier/raw"),
+        os.path.join(proc_folder, "tmp-p14-raw/generated/tier/raw"),
+        os.path.join(proc_folder, "ref-raw-new/generated/tier/raw"),
     ]
 
     # collect starting and ending timestamps
     for raw_path in raw_paths:
+        if not os.path.isdir(raw_path):
+            logger.debug(f"...folder {raw_path} does not exist, skip it")
+            continue
+
         data_types = sorted(os.listdir(raw_path))
         data_types = sorted(data_types, key=lambda x: (x != "phy", x))
         for data_type in data_types:  # cal | fft | bkg | phy | pul | pzc
@@ -1595,8 +1697,11 @@ def build_runinfo(path: str, version: str, output: str):
                 continue
 
             for period in sorted(os.listdir(data_type_path)):  # p03 | p04 | ...
+                if "old" in period:
+                    continue
                 if period in ["p01", "p02"]:
                     continue
+
                 period_path = os.path.join(raw_path, data_type_path, period)
                 if not os.listdir(period_path):
                     logger.warning(
@@ -1607,6 +1712,9 @@ def build_runinfo(path: str, version: str, output: str):
 
                 period_runs = []
                 for run in sorted(os.listdir(period_path)):  # r000 | r001 | ...
+                    if "old" in run:
+                        continue
+
                     period_runs.append(run)
 
                     global_path = os.path.join(
@@ -1660,13 +1768,14 @@ def build_runinfo(path: str, version: str, output: str):
     data_type = "phy"
     for idx_p, period in enumerate(periods):
         if period in ["p01", "p02"]:
+            logger.debug(f"...skipping {period}")
             continue
 
         for run in runs[idx_p]:
             versions = [version] if version == "tmp-auto" else ["tmp-auto", version]
 
             for v in versions:
-                tiers, _ = get_tiers_pars_folders(os.path.join(path, v))
+                tiers, _ = get_tiers_pars_folders(os.path.join(proc_folder, v))
                 my_dir = tiers[5] if os.path.isdir(tiers[5]) else tiers[6]
                 my_dir = os.path.join(my_dir, "phy")
 
@@ -1705,13 +1814,60 @@ def build_runinfo(path: str, version: str, output: str):
                                     {"livetime_in_s": tot_livetime}
                                 )
 
-    with open(os.path.join(output, "runinfo.yaml"), "w") as fp:
+    logger.info(f"Inspected periods: {list(run_info.keys())}")
+    save_location = (
+        os.path.join(proc_folder, version, "inputs/datasets/runinfo.yaml")
+        if output is None
+        else os.path.join(output, "runinfo.yaml")
+    )
+    with open(save_location, "w") as fp:
         yaml.dump(run_info, fp, default_flow_style=False, sort_keys=False)
+
+
+def get_start_key(auto_dir_path: str, data_type: str, period: str, current_run: str):
+    primary_path = os.path.join(
+        auto_dir_path, "generated/tier/dsp", data_type, period, current_run
+    )
+    fallback_path = os.path.join(
+        auto_dir_path, "generated/tier/dsp/cal", period, current_run
+    )
+
+    if os.path.exists(primary_path):
+        run_path = primary_path
+    elif os.path.exists(fallback_path):
+        run_path = fallback_path
+    else:
+        raise FileNotFoundError(
+            f"Neither path exists: {primary_path} or {fallback_path}"
+        )
+
+    # get files and validate
+    files = os.listdir(run_path)
+    if not files:
+        raise ValueError(f"No files found in {run_path}")
+
+    first_file = sorted(files)[0]
+    try:
+        start_key = first_file.split("-")[4]
+        return start_key
+    except IndexError:
+        raise ValueError(f"Filename '{first_file}' doesn't have expected format")
 
 
 # -------------------------------------------------------------------------
 # Helper functions
 # -------------------------------------------------------------------------
+def load_and_filter(store, key: str, mask=None):
+    """Load a given key from a HDF file and applies a mask."""
+    if key not in store.keys():
+        logger.debug(f"...key {key} not available. Skip it!")
+        return pd.DataFrame()
+    df = store[key]
+    if mask is not None:
+        df = df.where(mask)
+    return df
+
+
 def load_yaml_or_default(path: str, detectors: dict) -> dict:
     """Load YAML if it exists, else return a default dict."""
 
@@ -1782,13 +1938,27 @@ def retrieve_json_or_yaml(base_path: str, filename: str):
     return path
 
 
-def deep_get(d, keys, default=None):
-    for k in keys:
-        if isinstance(d, dict):
-            d = d.get(k, default)
+def deep_get(d, keys, default=None, verbose=False):
+    current = d
+    for i, k in enumerate(keys):
+        if isinstance(current, dict):
+            if k in current:
+                current = current[k]
+            else:
+                if verbose:
+                    logger.debug(f"[deep_get] Missing key at step {i}: '{k}'")
+                    logger.debug(f"[deep_get] Keys tried: {keys[:i+1]}")
+                    logger.debug(
+                        f"[deep_get] Available keys here: {list(current.keys())}"
+                    )
+                return default
         else:
+            if verbose:
+                logger.debug(
+                    f"[deep_get] Expected dict at step {i}, but got type {type(current).__name__}"
+                )
             return default
-    return d
+    return current
 
 
 def none_to_nan(data: list):
@@ -1817,10 +1987,13 @@ def build_detector_info(metadata_path, start_key=None):
             - string : int
             - position : int
             - processable : bool
+            - usability : str
+            - mass_in_kg : int
         - "str_chns": mapping from string to a list of detector names
     """
     lmeta = LegendMetadata(metadata_path)
     chmap = lmeta.channelmap(start_key) if start_key else lmeta.channelmap()
+    germanium = lmeta.hardware.detectors.germanium
 
     detectors = {}
     str_chns = defaultdict(list)
@@ -1834,6 +2007,8 @@ def build_detector_info(metadata_path, start_key=None):
         string = int(info["location"]["string"])
         position = info["location"]["position"]
         processable = info.get("analysis", {}).get("processable", False)
+        usability = info.get("analysis", {}).get("usability", None)
+        mass_in_kg = float(germanium.diodes[det].production.mass_in_g / 1000)
 
         # store detector info
         detectors[det] = {
@@ -1843,6 +2018,8 @@ def build_detector_info(metadata_path, start_key=None):
             "string": string,
             "position": position,
             "processable": processable,
+            "usability": usability,
+            "mass_in_kg": mass_in_kg,
         }
 
         # fill string
