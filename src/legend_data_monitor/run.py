@@ -235,16 +235,22 @@ def add_get_runinfo(subparsers):
     )
     parser_auto_prod.add_argument("--path", help="Path to the processed data.")
     parser_auto_prod.add_argument(
-        "--output", help="Path to the output folder with loaded data."
+        "--proc_folder", help="Path to the processed folder with data."
     )
     parser_auto_prod.add_argument("--data_version", help="Version of processed data.")
+    parser_auto_prod.add_argument(
+        "--output",
+        default=None,
+        help="Path to the output folder where to save runinfo.yaml; default: None (the file will be saved under <proc_folder>/<data_version>/inputs/datasets/).",
+    )
     parser_auto_prod.set_defaults(func=get_runinfo_cli)
 
 
 def get_runinfo_cli(args):
     """Pass command line arguments to :func:`.core.retrieve_runinfo`."""
     path = args.path
-    output = args.output
+    proc_folder = args.proc_folder
     data_version = args.data_version
+    output = args.output
 
-    legend_data_monitor.utils.build_runinfo(path, data_version, output)
+    legend_data_monitor.utils.build_runinfo(path, data_version, proc_folder, output)

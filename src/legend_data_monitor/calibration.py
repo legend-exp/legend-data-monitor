@@ -10,7 +10,7 @@ import pandas as pd
 import yaml
 from lgdo import lh5
 
-from . import utils
+from . import monitoring, utils
 
 # -------------------------------------------------------------------------
 
@@ -67,13 +67,16 @@ def load_fit_pars_from_yaml(
     results = {}
 
     for file_path in pars_files_list:
+        if "old" in file_path.split("/")[-2]:
+            continue
+
         run_idx = int(file_path.split("/")[-2].split("r")[-1])
         run_str = f"r{run_idx:03d}"
         if run_str not in avail_runs:
             continue
 
         run_data = utils.read_json_or_yaml(file_path)
-        time = 0 if "par_hit" in file_path else file_path.split("-")[-2]
+        time = file_path.split("-")[-2]
 
         for idx, det in enumerate(detectors_list):
             det_key = det if det in run_data else detectors_name[idx]
@@ -186,13 +189,6 @@ def evaluate_psd_performance(
     results["sudden_shifts"] = sudden_shifts
 
     return results
-
-
-def update_psd_evaluation_in_memory(
-    data: dict, det_name: str, data_type: str, key: str, value: bool | float
-):
-    """Update the key entry in memory dict, where value can be bool or nan if not available; data_type is either 'cal' or 'phy'."""
-    data.setdefault(det_name, {}).setdefault(data_type, {})[key] = value
 
 
 def evaluate_psd_usability_and_plot(
@@ -331,6 +327,7 @@ def evaluate_psd_usability_and_plot(
     plt.tight_layout(rect=[0, 0.03, 1, 0.95])
 
     output_dir = os.path.join(output_dir, "mtg")
+
     if save_pdf:
         pdf_folder = os.path.join(output_dir, "pdf", f"st{location[0]}")
         os.makedirs(pdf_folder, exist_ok=True)
@@ -359,7 +356,7 @@ def evaluate_psd_usability_and_plot(
     plt.close()
 
     # supdate psd status
-    update_psd_evaluation_in_memory(
+    utils.update_evaluation_in_memory(
         psd_data, det_name, "cal", "PSD", eval_result["status"]
     )
 
@@ -396,10 +393,15 @@ def check_psd(
     save_pdf : bool
         True if you want to save pdf files too; default: False.
     """
+    if not any(current_run in file for file in pars_files_list):
+        utils.logger.debug(
+            f"...no calibration files found for run {current_run}. Exiting."
+        )
+        return
+
     # create the folder and parents if missing - for the moment, we store it under the 'phy' folder
-    output_dir = os.path.join(output_dir, period)
-    output_dir_run = os.path.join(output_dir, current_run, "mtg")
-    os.makedirs(output_dir_run, exist_ok=True)
+    output_dir_run = os.path.join(output_dir, period, current_run)
+    os.makedirs(os.path.join(output_dir_run, "mtg"), exist_ok=True)
 
     # Load existing data once (or start empty)
     usability_map_file = os.path.join(
@@ -409,7 +411,7 @@ def check_psd(
     detectors_name = list(det_info["detectors"].keys())
     detectors_list = [det_info["detectors"][d]["channel_str"] for d in detectors_name]
     locations_list = [
-        (det_info["detectors"][d]["position"], det_info["detectors"][d]["string"])
+        (det_info["detectors"][d]["string"], det_info["detectors"][d]["position"])
         for d in detectors_name
     ]
 
@@ -421,7 +423,7 @@ def check_psd(
             "Only one available calibration run. Save all entries as None and exit."
         )
         for det_name in detectors_name:
-            update_psd_evaluation_in_memory(psd_data, det_name, "cal", "PSD", None)
+            utils.update_evaluation_in_memory(psd_data, det_name, "cal", "PSD", None)
 
         with open(usability_map_file, "w") as f:
             yaml.dump(psd_data, f, sort_keys=False)
@@ -437,6 +439,7 @@ def check_psd(
         return
 
     # inspect one single det: plot+saving
+    utils.logger.debug("...inspecting PSD stability in cal runs")
     for idx, det_name in enumerate(detectors_name):
         evaluate_psd_usability_and_plot(
             period,
@@ -444,7 +447,7 @@ def check_psd(
             cal_psd_info[det_name],
             det_name,
             locations_list[idx],
-            output_dir,
+            os.path.join(output_dir, period),
             psd_data,
             save_pdf,
         )
@@ -502,7 +505,7 @@ def fep_gain_variation(
     stats = df.groupby("bin")["value"].agg(["mean", "std", "count"]).reset_index()
     stats["time"] = bins[stats["bin"]] + bin_size / 2
 
-    min_counts = 20
+    min_counts = 5
     stats.loc[stats["count"] < min_counts, ["mean", "std"]] = np.nan
 
     fig, ax = plt.subplots(figsize=(10, 5))
@@ -524,29 +527,35 @@ def fep_gain_variation(
         ax.hist2d(timestamps, norm_values, bins=(x_bins, y_bins), cmap="Blues")
         fig.colorbar(ax.collections[0], label="Counts")
 
-        ax.plot(stats["time"], means, "x-", color="red", label="10min mean")
+        ax.plot(stats["time"], means, "x-", color="red", label="10 min mean")
 
         ax.fill_between(
             stats["time"],
-            -stats["std"] / baseline * 2039,
-            stats["std"] / baseline * 2039,
+            (stats["mean"] - stats["std"] - baseline) / baseline * 2039,
+            (stats["mean"] + stats["std"] - baseline) / baseline * 2039,
             color="red",
             alpha=0.2,
             label="±1 std",
         )
 
-    fwhm = pars["results"]["ecal"]["cuspEmax_ctc_cal"]["eres_linear"]["Qbb_fwhm_in_kev"]
-    if not np.isnan(fwhm):
-
+    fwhm = (
+        (pars or {}).get("results")
+        or {}.get("ecal")
+        or {}.get("cuspEmax_ctc_cal")
+        or {}.get("eres_linear")
+        or {}.get("Qbb_fwhm_in_kev")
+    )
+    if isinstance(fwhm, (int, float)) and not np.isnan(fwhm):
         if fwhm < 5:
             plt.ylim(-5, 5)
 
         plt.axhline(0, ls="--", color="black")
         plt.axhline(-fwhm / 2, ls="-", color="blue")
-        plt.axhline(fwhm / 2, ls="-", color="blue", label="±FWHM/2")
-        plt.text(0, fwhm / 2 + 0.5, f"+FWHM/2 = {fwhm/2:.2f} keV", color="k")
+        plt.axhline(
+            fwhm / 2, ls="-", color="blue", label=f"±FWHM/2 = ±{fwhm/2:.2f} keV"
+        )
 
-    plt.legend(loc="lower left")
+    plt.legend(loc="lower left", title=f"Min. counts = {min_counts}")
     plt.xlabel("time [s]")
     plt.ylabel("FEP gain variation [keV]")
     plt.title(f"{period} {run} string {string} position {position} {ged}")
@@ -558,7 +567,7 @@ def fep_gain_variation(
         plt.savefig(
             os.path.join(
                 pdf_folder,
-                f"{period}_{run}_str{string}_pos{position}_{ged}_FEP_gain_variation.pdf",
+                f"{period}_{run}_string{string}_pos{position}_{ged}_FEP_gain_variation.pdf",
             ),
             bbox_inches="tight",
         )
@@ -576,155 +585,6 @@ def fep_gain_variation(
     return means
 
 
-def fep_gain_variation_summary(
-    period: str,
-    run: str,
-    pars: dict,
-    detectors: dict,
-    results: dict,
-    output_dir: str,
-    save_pdf: bool,
-):
-    """
-    Box plot summary for FEP gain variations for multiple detectors.
-
-    Parameters
-    ----------
-    period : str
-        Period to inspect.
-    run : str
-        Run to inspect.
-    pars : dict
-        Calibration results for each detector.
-    detectors : dict
-        Detector info, with detector names as keys.
-    results : dict
-        FEP gain variation arrays per detector; None if invalid.
-    output_dir : str
-        Output folder for saving plots and shelve data.
-    save_pdf : bool
-        If True, save the summary plot as a PDF.
-    """
-    plot_data = []
-    for ged, item in results.items():
-        meta_info = detectors[ged]
-        if item is None or len(item) == 0:
-            mean = std = min_val = max_val = np.nan
-        else:
-            mean = item.mean()
-            std = item.std()
-            min_val = item.min()
-            max_val = item.max()
-        fwhm = pars[ged]["results"]["ecal"]["cuspEmax_ctc_cal"]["eres_linear"][
-            "Qbb_fwhm_in_kev"
-        ]
-        plot_data.append(
-            {
-                "ged": ged,
-                "string": meta_info["string"],
-                "pos": meta_info["position"],
-                "mean": mean,
-                "std": std,
-                "min": min_val,
-                "max": max_val,
-                "fwhm": fwhm,
-            }
-        )
-
-    df_plot = pd.DataFrame(plot_data)
-
-    # Sort by string then position
-    df = df_plot.sort_values(["string", "pos"]).reset_index(drop=True)
-
-    # Assuming df is already built and sorted
-    fig, ax = plt.subplots(figsize=(12, 6))
-
-    x = np.arange(len(df))
-
-    # Plot bars for std around the mean
-    ax.bar(
-        x,
-        2 * df["std"],  # total height = 2σ
-        bottom=df["mean"] - df["std"],  # center bar on mean
-        width=0.6,
-        color="skyblue",
-        alpha=0.7,
-        label="±1σ",
-    )
-
-    ax.bar(
-        x,
-        df["fwhm"],
-        bottom=-df["fwhm"] / 2,
-        width=0.4,
-        color="orange",
-        alpha=0.2,
-        label="FWHM",
-    )
-
-    # Overlay mean as a point
-    ax.scatter(x, df["mean"], color="black", zorder=3, label="Mean")
-
-    # Overlay min/max as error bars
-    ax.errorbar(
-        x,
-        df["mean"],
-        yerr=[df["mean"] - df["min"], df["max"] - df["mean"]],
-        fmt="none",
-        ecolor="red",
-        capsize=4,
-        label="Min/Max",
-    )
-
-    # X-axis formatting
-    ax.set_xticks(x)
-    ax.set_xticklabels(df["ged"], rotation=90)
-    ax.axvline(-0.5, color="gray", ls="--", alpha=0.5)
-
-    unique_strings = df["string"].unique()
-    for s in unique_strings:
-        idx = df.index[df["string"] == s]
-        left, right = idx.min(), idx.max()
-        ax.axvline(right + 0.5, color="gray", ls="--", alpha=0.5)
-        ax.text(left, -3.5, f"String {s}", rotation=90)
-
-    ax.set_ylabel("FEP gain variation [keV]")
-    ax.set_title(f"{period} {run}")
-    ax.legend(loc="upper right")
-
-    ax.axhline(0, ls="--", color="black")
-
-    plt.ylim(-5, 5)
-    plt.tight_layout()
-
-    if save_pdf:
-        pdf_folder = os.path.join(output_dir, f"{period}/{run}/mtg/pdf")
-        os.makedirs(pdf_folder, exist_ok=True)
-        plt.savefig(
-            os.path.join(
-                pdf_folder,
-                f"{period}_{run}_FEP_gain_variation_summary.pdf",
-            ),
-            bbox_inches="tight",
-        )
-
-    # serialize+plot in a shelve object
-    serialized_plot = pickle.dumps(fig)
-    with shelve.open(
-        os.path.join(
-            output_dir,
-            period,
-            run,
-            f"mtg/l200-{period}-{run}-cal-monitoring",
-        ),
-        "c",
-        protocol=pickle.HIGHEST_PROTOCOL,
-    ) as shelf:
-        shelf[f"{period}_{run}_FEP_gain_variation_summary"] = serialized_plot
-
-    plt.close()
-
-
 def check_calibration(
     tmp_auto_dir: str,
     output_folder: str,
@@ -734,29 +594,64 @@ def check_calibration(
     det_info: dict,
     save_pdf=False,
 ):
-    hit_files = sorted(
-        glob.glob(
-            os.path.join(tmp_auto_dir, "generated/tier/hit/cal", period, run, "*")
-        )
-    )
-    directory = os.path.join(tmp_auto_dir, "generated/par/hit/cal", period, run)
-    file = glob.glob(os.path.join(directory, "*par_hit.yaml"))[0]
-    pars = utils.read_json_or_yaml(file)
+    """
+    Check calibration stability for a given run and update monitoring summary YAML file.
 
-    if not first_run:
-        prev_run = f"r{int(run[1:])-1:03d}"
-        directory = os.path.join(
-            tmp_auto_dir, "generated/par/hit/cal", period, prev_run
-        )
-        file = glob.glob(os.path.join(directory, "*par_hit.yaml"))[0]
-        prev_pars = utils.read_json_or_yaml(file)
-
+    Parameters
+    ----------
+    tmp_auto_dir : str
+        Path to tmp-auto public data files (eg /data2/public/prodenv/prod-blind/tmp-auto).
+    output_folder : str
+        Path to output folder where the output summary YAML and plots will be stored.
+    period : str
+        Period to inspect.
+    run : str
+        Run to inspect.
+    first_run : bool
+        Flag indicating whether this is the first run of the period.
+    det_info : dict
+        Dictionary containing detector metadata.
+    save_pdf : bool
+        True if you want to save pdf files too; default: False.
+    """
     detectors = det_info["detectors"]
     usability_map_file = os.path.join(
         output_folder, period, run, f"l200-{period}-{run}-qcp_summary.yaml"
     )
     output = utils.load_yaml_or_default(usability_map_file, detectors)
     fep_mean_results = {}
+
+    directory = os.path.join(tmp_auto_dir, "generated/par/hit/cal", period, run)
+    files = sorted(glob.glob(os.path.join(directory, "*par_hit.yaml")))
+    if not files:
+        utils.logger.debug(f"...no calibration files found for run {run}. Exiting.")
+        return
+    pars = utils.read_json_or_yaml(files[0])
+
+    # avoid case where multiple cal runs were processed but we are still requiring to inspect the first run
+    if run in files:
+        first_run = True
+
+    # find nearest previous run
+    prev_pars = None
+    if not first_run:
+        run_number = int(run[1:])
+        for offset in range(1, run_number + 1):  # check run-1, run-2, ...
+            prev_run = f"r{run_number - offset:03d}"
+            directory = os.path.join(
+                tmp_auto_dir, "generated/par/hit/cal", period, prev_run
+            )
+            files = sorted(glob.glob(os.path.join(directory, "*par_hit.yaml")))
+            if files:
+                utils.logger.debug(f"...using previous calibration from {prev_run}")
+                prev_pars = utils.read_json_or_yaml(files[0])
+                break
+
+        if prev_pars is None:
+            utils.logger.debug(
+                f"No previous calibration files found for {run}, treat as first run"
+            )
+            first_run = True
 
     shelve_path = os.path.join(
         output_folder,
@@ -765,10 +660,21 @@ def check_calibration(
         f"mtg/l200-{period}-{run}-cal-monitoring",
     )
     os.makedirs(os.path.dirname(shelve_path), exist_ok=True)
+    utils.logger.debug("...inspecting FEP, calib peaks, stability in calibrations")
+
+    hit_files = sorted(
+        glob.glob(
+            os.path.join(tmp_auto_dir, "generated/tier/hit/cal", period, run, "*")
+        )
+    )
 
     with shelve.open(shelve_path, "c", protocol=pickle.HIGHEST_PROTOCOL) as shelf:
         for ged, item in detectors.items():
             if not item["processable"]:
+                continue
+
+            # avoid cases where the detector is not present in the output files
+            if item["channel_str"] not in lh5.ls(hit_files[0], ""):
                 continue
 
             hit_files_data = lh5.read_as(
@@ -802,47 +708,252 @@ def check_calibration(
             )
 
             # build summary in memory
-            ecal = pars[ged]["results"]["ecal"]["cuspEmax_ctc_cal"]
-            valid_peak = ecal["pk_fits"][2614.511]["validity"]
-            update_psd_evaluation_in_memory(output, ged, "cal", "npeak", valid_peak)
+            ecal_results = pars[ged]["results"]["ecal"]
+            ecal = monitoring.get_energy_key(
+                ecal_results
+            )  # check for cuspEmax_ctc_runcal or cuspEmax_ctc_cal
+            pk_fits = monitoring.get_energy_key(ecal_results).get("pk_fits", {})
 
-            fwhm = ecal["eres_linear"]["Qbb_fwhm_in_kev"]
-            fwhm_ok = not np.isnan(fwhm)
-            update_psd_evaluation_in_memory(output, ged, "cal", "fwhm_ok", fwhm_ok)
+            # find FEP and low-E peaks (keys digits changed in the past, so let's be generic)
+            fep_peaks = [p for p in pk_fits if 2613 < p < 2616]
+            low_peaks = [p for p in pk_fits if 580 < p < 586]
+
+            fep_valid = False
+            low_valid = False
+            if fep_peaks:
+                fep_energy = fep_peaks[0]
+                fep_valid = ecal["pk_fits"][fep_energy].get("validity", False)
+            if low_peaks:
+                low_energy = low_peaks[0]
+                low_valid = ecal["pk_fits"][low_energy].get("validity", False)
+
+            # true only if both peaks are valid
+            overall_valid = fep_valid and low_valid
+            utils.update_evaluation_in_memory(
+                output, ged, "cal", "npeak", overall_valid
+            )
+
+            fwhm = (ecal.get("eres_linear") or {}).get("Qbb_fwhm_in_kev")
+            fwhm_ok = isinstance(
+                fwhm, (int, float, np.integer, np.floating)
+            ) and not np.isnan(fwhm)
+            utils.update_evaluation_in_memory(output, ged, "cal", "fwhm_ok", fwhm_ok)
+
+            # FEP gain stability - independent from fwhm; if we use that value, than put it back in the if statement
+            if fep_mean_results[ged] is not None:
+                # remove nan (gaps) or it will return False
+                arr = np.array(fep_mean_results[ged], dtype=float)
+                stable = bool(np.all(np.abs(arr[~np.isnan(arr)]) <= 2))
+            else:
+                stable = False
+            utils.update_evaluation_in_memory(
+                output, ged, "cal", "FEP_gain_stab", stable
+            )
 
             if fwhm_ok:
-                # FEP gain stability
-                if fep_mean_results[ged] is not None:
-                    stable = np.all(np.abs(fep_mean_results[ged]) <= 2)
-                else:
-                    stable = False
-                update_psd_evaluation_in_memory(
-                    output, ged, "cal", "FEP_gain_stab", stable
-                )
-
                 # bsln stability (only if not first run)
                 if not first_run:
-                    gain = ecal["eres_linear"]["parameters"]["a"]
-                    prev_gain = prev_pars[ged]["results"]["ecal"]["cuspEmax_ctc_cal"][
-                        "eres_linear"
-                    ]["parameters"]["a"]
-                    gain_dev = abs(gain - prev_gain) / prev_gain * 2039
-                    update_psd_evaluation_in_memory(
-                        output, ged, "cal", "baseln_stab", gain_dev <= 2
-                    )
+                    # channel might not be present in the previous run, leave it None if so
+                    if ged in prev_pars:
+                        gain = ecal["eres_linear"]["parameters"]["a"]
+                        prev_gain = monitoring.get_energy_key(
+                            prev_pars[ged]["results"]["ecal"]
+                        )["eres_linear"]["parameters"]["a"]
+                        gain_dev = abs(gain - prev_gain) / prev_gain * 2039
+                        utils.update_evaluation_in_memory(
+                            output, ged, "cal", "const_stab", gain_dev <= 2
+                        )
 
             else:
-                update_psd_evaluation_in_memory(
-                    output, ged, "cal", "FEP_gain_stab", False
-                )
                 if not first_run:
-                    update_psd_evaluation_in_memory(
+                    utils.update_evaluation_in_memory(
                         output, ged, "cal", "const_stab", False
                     )
 
     # plot
-    fep_gain_variation_summary(
-        period, run, pars, detectors, fep_mean_results, output_folder, save_pdf
+    monitoring.box_summary_plot(
+        period,
+        run,
+        pars,
+        det_info,
+        fep_mean_results,
+        utils.MTG_PLOT_INFO["FEP_variation"],
+        output_folder,
+        "cal",
+        save_pdf,
+    )
+
+    with open(usability_map_file, "w") as f:
+        yaml.dump(output, f)
+
+
+def check_calibration_lac_ssc(
+    tmp_auto_dir: str,
+    output_folder: str,
+    period: str,
+    run: str,
+    run_to_apply: str,
+    first_run: bool,
+    det_info: dict,
+    data_type="cal",
+    save_pdf=False,
+):
+    """
+    Check calibration stability for a given run and update monitoring summary YAML file in special LAC or SSC data.
+
+    Parameters
+    ----------
+    tmp_auto_dir : str
+        Path to tmp-auto public data files (eg /data2/public/prodenv/prod-blind/tmp-auto).
+    output_folder : str
+        Path to output folder where the output summary YAML and plots will be stored.
+    period : str
+        Period to inspect.
+    run : str
+        Run to inspect.
+    run_to_apply : str
+        Calibration run to apply to these data.
+    first_run : bool
+        Flag indicating whether this is the first run of the period.
+    det_info : dict
+        Dictionary containing detector metadata.
+    save_pdf : bool
+        True if you want to save pdf files too; default: False.
+    """
+    detectors = det_info["detectors"]
+    usability_map_file = os.path.join(
+        output_folder, period, run, f"l200-{period}-{run}-qcp_summary.yaml"
+    )
+    output = utils.load_yaml_or_default(usability_map_file, detectors)
+    fep_mean_results = {}
+
+    directory = os.path.join(
+        tmp_auto_dir, "generated/par/hit/cal", period, run_to_apply
+    )
+    files = sorted(glob.glob(os.path.join(directory, "*par_hit.yaml")))
+    if not files:
+        utils.logger.debug(
+            f"...no calibration files found for run {run_to_apply}. Exiting."
+        )
+        return
+    pars = utils.read_json_or_yaml(files[0])
+
+    # find nearest previous run
+    shelve_path = os.path.join(
+        output_folder,
+        period,
+        run,
+        f"mtg/l200-{period}-{run}-{data_type}-monitoring",
+    )
+    os.makedirs(os.path.dirname(shelve_path), exist_ok=True)
+    utils.logger.debug("...inspecting FEP, calib peaks, stability in calibrations")
+
+    # load ssc/lac data
+    hit_files = sorted(
+        glob.glob(
+            os.path.join(
+                tmp_auto_dir, "generated/tier/hit", data_type, period, run, "*"
+            )
+        )
+    )
+    output = utils.load_yaml_or_default(usability_map_file, detectors)
+    fep_mean_results = {}
+
+    with shelve.open(shelve_path, "c", protocol=pickle.HIGHEST_PROTOCOL) as shelf:
+        for ged, item in detectors.items():
+            if not item["processable"]:
+                continue
+
+            # avoid cases where the detector is not present in the output files
+            if item["channel_str"] not in lh5.ls(hit_files[0], ""):
+                continue
+
+            hit_files_data = lh5.read_as(
+                item["channel_str"] + "/hit/",
+                hit_files,
+                library="ak",
+                field_mask=["cuspEmax_ctc_cal", "timestamp", "is_valid_cal"],
+            )
+
+            mask = (
+                hit_files_data.is_valid_cal
+                & (hit_files_data.cuspEmax_ctc_cal > 2600)
+                & (hit_files_data.cuspEmax_ctc_cal < 2630)
+            )
+            timestamps = hit_files_data[mask].timestamp.to_numpy()
+            if timestamps.size == 0:
+                continue
+            timestamps -= timestamps[0]
+            energies = hit_files_data[mask].cuspEmax_ctc_cal.to_numpy()
+
+            fep_mean_results[ged] = fep_gain_variation(
+                period,
+                run,
+                pars=pars[ged],
+                chmap=item,
+                timestamps=timestamps,
+                values=energies,
+                output_dir=output_folder,
+                save_pdf=save_pdf,
+                shelf=shelf,
+            )
+
+            # build summary in memory
+            ecal_results = pars[ged]["results"]["ecal"]
+            ecal = monitoring.get_energy_key(
+                ecal_results
+            )  # check for cuspEmax_ctc_runcal or cuspEmax_ctc_cal
+            pk_fits = monitoring.get_energy_key(ecal_results).get("pk_fits", {})
+
+            # find FEP and low-E peaks (keys digits changed in the past, so let's be generic)
+            fep_peaks = [p for p in pk_fits if 2613 < p < 2616]
+            low_peaks = [p for p in pk_fits if 580 < p < 586]
+
+            fep_valid = False
+            low_valid = False
+            if fep_peaks:
+                fep_energy = fep_peaks[0]
+                fep_valid = ecal["pk_fits"][fep_energy].get("validity", False)
+            if low_peaks:
+                low_energy = low_peaks[0]
+                low_valid = ecal["pk_fits"][low_energy].get("validity", False)
+
+            # true only if both peaks are valid
+            overall_valid = fep_valid and low_valid
+            utils.update_evaluation_in_memory(
+                output, ged, data_type, "npeak", overall_valid
+            )
+
+            fwhm = (ecal.get("eres_linear") or {}).get("Qbb_fwhm_in_kev")
+            fwhm_ok = isinstance(
+                fwhm, (int, float, np.integer, np.floating)
+            ) and not np.isnan(fwhm)
+            utils.update_evaluation_in_memory(
+                output, ged, data_type, "fwhm_ok", fwhm_ok
+            )
+
+            # FEP gain stability - independent from fwhm; if we use that value, than put it back in the if statement
+            if fep_mean_results[ged] is not None:
+                # remove nan (gaps) or it will return False
+                arr = np.array(fep_mean_results[ged], dtype=float)
+                stable = bool(np.all(np.abs(arr[~np.isnan(arr)]) <= 2))
+            else:
+                stable = False
+            utils.update_evaluation_in_memory(
+                output, ged, data_type, "FEP_gain_stab", stable
+            )
+
+    # plot
+    monitoring.box_summary_plot(
+        period,
+        run,
+        pars,
+        det_info,
+        fep_mean_results,
+        utils.MTG_PLOT_INFO["FEP_variation"],
+        output_folder,
+        data_type,
+        save_pdf,
     )
 
     with open(usability_map_file, "w") as f:

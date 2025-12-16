@@ -82,4 +82,4 @@ multi_line_output = 3
 extend-ignore = "E203, E501, D10, N806"
 
 [tool.codespell]
-ignore-words-list = "crate, nd, unparseable, compiletime, puls, livetime, whis"
+ignore-words-list = "crate, nd, unparseable, compiletime, puls, ser, livetime, whis"

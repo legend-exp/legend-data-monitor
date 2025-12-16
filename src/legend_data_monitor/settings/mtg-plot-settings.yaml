@@ -1,0 +1,54 @@
+TrapemaxCtcCal:
+  ylabel: "Energy diff / keV"
+  colors:
+    - dodgerblue
+    - b
+  percentage: true
+  title: "pulser_stab"
+  limits:
+    - null
+    - null
+
+Trapemax:
+  ylabel: "Energy diff / keV"
+  colors:
+    - dodgerblue
+    - b
+  percentage: true
+  title: "pulser_stab"
+  limits:
+    - null
+    - null
+
+Baseline:
+  ylabel: "Baseline % variations"
+  colors:
+    - r
+    - firebrick
+  percentage: true
+  title: "baseln_stab"
+  limits:
+    - -10
+    - 10
+
+BlStd:
+  ylabel: "Baseline std [ADC]"
+  colors:
+    - peru
+    - saddlebrown
+  percentage: false
+  title: "baseln_spike"
+  limits:
+    - null
+    - 50
+
+FEP_variation:
+  ylabel: "FEP gain variation [keV]"
+  colors:
+    - peru
+    - saddlebrown
+  percentage: false
+  title: "FEP_gain"
+  limits:
+    - null
+    - null

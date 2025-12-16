@@ -6,7 +6,7 @@ import sys
 import numpy as np
 import pandas as pd
 import yaml
-from legendmeta import JsonDB
+from dbetto import TextDB
 
 # needed to know which parameters are not in DataLoader
 # but need to be calculated, such as event rate
@@ -238,8 +238,8 @@ class AnalysisData:
             )
             self.data = self.data[
                 (~self.data["flag_pulser"])
-                | (~self.data["flag_fc_bsln"])
-                | (~self.data["flag_muon"])
+                & (~self.data["flag_fc_bsln"])
+                & (~self.data["flag_muon"])
             ]
         elif self.evt_type == "K_events":
             utils.logger.info("... selecting K lines in physical (non-pulser) events")
@@ -298,6 +298,25 @@ class AnalysisData:
                 expression = evt_config["operations"]["geds___quality___is_bb_like"][
                     "expression"
                 ]
+
+            try:
+                expression = evt_config["operations"][
+                    "geds___quality___is_not_bb_like___is_delayed_discharge"
+                ]["expression"]
+            except KeyError:
+                filepath_pattern = os.path.join(
+                    path,
+                    version,
+                    "inputs/dataprod/config",
+                    subdir,
+                    "*-geds_qc-evt_config.yaml",
+                )
+                filepath = glob.glob(filepath_pattern)[0]
+                with open(filepath) as file:
+                    evt_config = yaml.load(file, Loader=yaml.CLoader)
+                expression = evt_config["operations"][
+                    "geds___quality___is_not_bb_like___is_delayed_discharge"
+                ]["expression"]
 
             # extract key-value pairs like: hit.is_something == number
             pattern = r"hit\.(\w+)\s*==\s*(\d+)"
@@ -433,7 +452,7 @@ class AnalysisData:
                 map_file = os.path.join(
                     self.path, self.version, "inputs/hardware/configuration/channelmaps"
                 )
-                full_channel_map = JsonDB(map_file).on(timestamp=first_timestamp)
+                full_channel_map = TextDB(map_file).on(timestamp=first_timestamp)
 
                 # get pulser rate
                 if "PULS01" in full_channel_map.keys():
@@ -472,7 +491,7 @@ class AnalysisData:
                     self.version,
                     "inputs/hardware/detectors/germanium/diodes",
                 )
-                dets_map = JsonDB(dets_file)
+                dets_map = TextDB(dets_file)
 
                 # add a new column "mass" to self.data containing mass values evaluated from dets_map[channel_name]["production"]["mass_in_g"], where channel_name is the value in "name" column
                 for det_name in self.data.index.unique():
@@ -801,7 +820,7 @@ def get_aux_df(
                 plot_settings["version"],
                 "inputs/hardware/configuration/channelmaps",
             )
-            chmap = JsonDB(map_file).on(timestamp=first_timestamp)
+            chmap = TextDB(map_file).on(timestamp=first_timestamp)
 
             # PULS01ANA channel
             if "PULS01ANA" in chmap.keys():
