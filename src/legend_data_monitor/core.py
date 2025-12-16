@@ -4,7 +4,7 @@ import subprocess
 import sys
 
 import yaml
-from legendmeta import JsonDB
+from dbetto import TextDB
 
 from . import analysis_data, plotting, slow_control, subsystem, utils
 
@@ -37,7 +37,7 @@ def retrieve_exposure(
         map_file = os.path.join(
             path, version, "inputs/hardware/configuration/channelmaps"
         )
-        full_channel_map = JsonDB(map_file).on(timestamp=first_timestamp)
+        full_channel_map = TextDB(map_file).on(timestamp=first_timestamp)
 
         for hpge in full_channel_map.group("system").geds.map("name").keys():
             diode_path = utils.retrieve_json_or_yaml(
