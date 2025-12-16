@@ -1,4 +1,4 @@
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, patch, mock_open
 
 import numpy as np
 import pandas as pd
@@ -21,11 +21,38 @@ def calib_data_empty():
     }
 
 
+FAKE_VALIDITY = [
+    {
+        "valid_from": "0000",
+        "apply": ["some/path/cal-p01-r001-extra"],
+    }
+]
+
+
+@pytest.fixture(autouse=True)
+def patch_common_io():
+    with (
+        patch("lgdo.lh5.LH5Store", return_value=MagicMock()),
+        patch(
+            "legend_data_monitor.monitoring.open",
+            mock_open(read_data="dummy"),
+        ),
+        patch(
+            "legend_data_monitor.monitoring.yaml.load",
+            return_value=FAKE_VALIDITY,
+        ),
+        patch(
+            "legend_data_monitor.monitoring.os.listdir",
+            return_value=["a-b-c-d-0001-extra.lh5"],
+        ),
+    ):
+        yield
+
+
 def test_get_calib_data_dict(calib_data_empty):
     fake_pars_dict = {"ch1": {"dummy": "data"}}
 
     with (
-        patch("lgdo.lh5.LH5Store", return_value=MagicMock()),
         patch(
             "legend_data_monitor.monitoring.get_calibration_file",
             return_value=fake_pars_dict,
@@ -39,24 +66,28 @@ def test_get_calib_data_dict(calib_data_empty):
             return_value=(2.5, 3.5),
         ),
         patch(
-            "legend_data_monitor.monitoring.evaluate_fep_cal", return_value=(100.0, 1.0)
+            "legend_data_monitor.monitoring.evaluate_fep_cal",
+            return_value=(100.0, 1.0),
         ),
         patch(
             "legend_data_monitor.monitoring.get_run_start_end_times",
-            return_value=(pd.Timestamp("2020-01-01"), pd.Timestamp("2020-01-02")),
+            return_value=(
+                pd.Timestamp("2020-01-01"),
+                pd.Timestamp("2020-01-02"),
+            ),
         ),
     ):
-
         calib_data = get_calib_data_dict(
             calib_data_empty,
             channel_info=["ch1", "Channel1"],
-            tiers=["tier_hit", "tier_phy"],
+            tiers=["t0", "t1", "tier_hit", "tier_phy"],
             pars=["p0", "p1", "p2", "p3"],
             period="p01",
             run="r001",
             tier="hit",
             key_result="energy_res",
             fit="linear",
+            data_type="phy",
         )
 
     assert calib_data["fep"] == [0.5]
@@ -73,7 +104,6 @@ def test_channel_name_used_if_not_ch_key(calib_data_empty):
     fake_pars_dict = {"not_ch_key": {"dummy": "data"}}
 
     with (
-        patch("lgdo.lh5.LH5Store", return_value=MagicMock()),
         patch(
             "legend_data_monitor.monitoring.get_calibration_file",
             return_value=fake_pars_dict,
@@ -92,22 +122,24 @@ def test_channel_name_used_if_not_ch_key(calib_data_empty):
         ),
         patch(
             "legend_data_monitor.monitoring.get_run_start_end_times",
-            return_value=(pd.Timestamp("2020-01-01"), pd.Timestamp("2020-01-01")),
+            return_value=(
+                pd.Timestamp("2020-01-01"),
+                pd.Timestamp("2020-01-01"),
+            ),
         ),
     ):
-
         calib_data = get_calib_data_dict(
             calib_data_empty,
             channel_info=["ch1", "Channel1"],
-            tiers=["tier_hit", "tier_phy"],
+            tiers=["t0", "t1", "tier_hit", "tier_phy"],
             pars=["p0", "p1", "p2", "p3"],
             period="p01",
             run="r001",
             tier="hit",
             key_result="energy_res",
             fit="linear",
+            data_type="phy",
         )
 
-    # still append nan values
     assert len(calib_data["fep"]) == 1
     assert np.isnan(calib_data["fep"][0])

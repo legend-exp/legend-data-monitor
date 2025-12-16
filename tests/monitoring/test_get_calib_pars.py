@@ -22,7 +22,7 @@ def mock_helpers():
         mock_get_tiers.return_value = (["tier1", "tier2"], ["pars1", "pars2"])
 
         def dummy_get_calib_data(
-            calib_data, channel_info, tiers, pars, period, run, tier, key_result, fit
+            calib_data, channel_info, tiers, pars, period, run, tier, data_type, key_result, fit
         ):
             calib_data["fep"].append(2614 + run)
             calib_data["fep_err"].append(0.1)
@@ -52,6 +52,7 @@ def test_get_calib_pars(mock_helpers):
         run_list=run_list,
         channel_info=channel_info,
         partition=partition,
+        data_type="phy",
         escale=escale,
         fit="linear",
     )

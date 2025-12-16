@@ -2,7 +2,6 @@ import pytest
 
 from legend_data_monitor.utils import build_detector_info
 
-# mock channelmap
 mock_chmap = {
     "D1": {
         "system": "geds",
@@ -27,9 +26,37 @@ mock_chmap = {
 }
 
 
+class MockProduction:
+    def __init__(self, mass_in_g):
+        self.mass_in_g = mass_in_g
+
+
+class MockDiode:
+    def __init__(self, mass_in_g):
+        self.production = MockProduction(mass_in_g)
+
+
+class MockGermanium:
+    def __init__(self):
+        self.diodes = {
+            "D1": MockDiode(2000),  # 2 kg
+            "D2": MockDiode(1800),  # 1.8 kg
+        }
+
+
+class MockDetectors:
+    def __init__(self):
+        self.germanium = MockGermanium()
+
+
+class MockHardware:
+    def __init__(self):
+        self.detectors = MockDetectors()
+
+
 class MockLegendMetadata:
     def __init__(self, path):
-        pass
+        self.hardware = MockHardware()
 
     def channelmap(self, start_key=None):
         return mock_chmap
@@ -37,35 +64,34 @@ class MockLegendMetadata:
 
 @pytest.fixture(autouse=True)
 def patch_legendmetadata(monkeypatch):
-    # patch LegendMetadata inside legend_data_monitor.utils
-    monkeypatch.setattr("legend_data_monitor.utils.LegendMetadata", MockLegendMetadata)
-
+    monkeypatch.setattr(
+        "legend_data_monitor.utils.LegendMetadata",
+        MockLegendMetadata,
+    )
 
 def test_build_detector_info():
     result = build_detector_info("dummy_path")
 
-    # check top level keys
     assert "detectors" in result
     assert "str_chns" in result
 
     detectors = result["detectors"]
     str_chns = result["str_chns"]
 
-    # check detectors dict
-    assert "D1" in detectors
-    assert "D2" in detectors
-    assert "D3" not in detectors
+    # existing detectors
+    assert set(detectors) == {"D1", "D2"}
 
-    # fields
     d1 = detectors["D1"]
     assert d1["daq_rawid"] == 123
     assert d1["channel_str"] == "ch123"
     assert d1["string"] == 1
     assert d1["position"] == 10
     assert d1["processable"] is True
+    assert d1["mass_in_kg"] == 2.0
 
     d2 = detectors["D2"]
     assert d2["processable"] is False
+    assert d2["mass_in_kg"] == 1.8
 
     # only processable detectors are kept in str_chns
     assert str_chns == {1: ["D1"]}
