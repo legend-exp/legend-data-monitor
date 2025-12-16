@@ -102,6 +102,9 @@ def evaluate_psd_performance(
     results = {}
 
     # check prerequisites
+    if not (len(mean_vals) == len(sigma_vals) == len(run_labels)):
+        results["status"] = None
+        return results
     valid_idx = next((i for i, v in enumerate(mean_vals) if not np.isnan(v)), None)
 
     # handle case where all sigma_vals are NaN
@@ -119,29 +122,60 @@ def evaluate_psd_performance(
         return results
 
     # SLOW shifts
-    slow_shifts = [(v - mean_vals[valid_idx]) / sigma_avg for v in mean_vals]
-    slow_shift_fail_runs = [
-        run_labels[i]
-        for i, z in enumerate(slow_shifts)
-        if abs(z) > 0.5 and run_labels[i] == current_run
-    ]
+    slow_shifts = [float((v - mean_vals[valid_idx]) / sigma_avg) for v in mean_vals]
+
+    slow_shift_fail_runs = []
+    for i, z in enumerate(slow_shifts):
+        if run_labels[i] != current_run:
+            continue
+
+        # If fit pars from yaml are missinng -> fail
+        if np.isnan(mean_vals[i]) or np.isnan(sigma_vals[i]) or sigma_vals[i] == 0:
+            slow_shift_fail_runs.append(run_labels[i])
+            continue
+
+        # Slow shift threshold
+        if abs(z) > 0.5:
+            slow_shift_fail_runs.append(run_labels[i])
     slow_shift_failed = bool(slow_shift_fail_runs)
 
     # SUDDEN shifts
-    # to do: fix 0 as first entry for sudden shifts
-    sudden_shifts = []
-    for i in range(len(mean_vals) - 1):
-        v1, v2, s = mean_vals[i], mean_vals[i + 1], sigma_vals[i]
-        if np.isnan(v1) or np.isnan(v2) or np.isnan(s) or s == 0:
-            sudden_shifts.append(np.nan)
-        else:
-            sudden_shifts.append(abs(v2 - v1) / s)
+    # Fix first entry to 0 (if present), else NaN
+    if np.isnan(mean_vals[0]) or np.isnan(sigma_vals[0]) or sigma_vals[0] == 0:
+        sudden_shifts = [float("nan")]
+    else:
+        sudden_shifts = [0.0]
+    # Backward logic
+    for i in range(1, len(mean_vals)):
+        mu_curr = mean_vals[i]
+        mu_prev = mean_vals[i - 1]
+        sigma_curr = sigma_vals[i]
 
-    sudden_shift_fail_runs = [
-        f"{run_labels[i]}TO{run_labels[i+1]}"
-        for i, z in enumerate(sudden_shifts)
-        if not np.isnan(z) and z > 0.25 and run_labels[i + 1] == current_run
-    ]
+        if (
+            np.isnan(mu_curr)
+            or np.isnan(mu_prev)
+            or np.isnan(sigma_curr)
+            or sigma_curr == 0
+        ):
+            sudden_shifts.append(float("nan"))
+        else:
+            val = abs(mu_curr - mu_prev) / sigma_curr
+            sudden_shifts.append(float(val))
+
+    sudden_shift_fail_runs = []
+    for i, z in enumerate(sudden_shifts):
+        if run_labels[i] != current_run:
+            continue
+
+        # If fit pars from yaml are missinng -> fail
+        if np.isnan(mean_vals[i]) or np.isnan(sigma_vals[i]) or sigma_vals[i] == 0:
+            sudden_shift_fail_runs.append(run_labels[i])
+            continue
+
+        # Slow shift threshold (if z is NaN here, PREVIOUS run was missing - let that PASS)
+        if not np.isnan(z) and z > 0.25:
+            sudden_shift_fail_runs.append(run_labels[i])
+
     sudden_shift_failed = bool(sudden_shift_fail_runs)
 
     status = False
@@ -190,7 +224,7 @@ def evaluate_psd_usability_and_plot(
     fig, axs = plt.subplots(2, 2, figsize=(15, 9), sharex=True)
     (ax1, ax3), (ax2, ax4) = axs
 
-    # mean stability
+    # Mean stability
     mean_avg, mean_std = np.nanmean(mean_vals), np.nanstd(mean_vals)
     ax1.errorbar(
         run_positions,
@@ -249,11 +283,12 @@ def evaluate_psd_usability_and_plot(
     ax2.grid(True, alpha=0.3)
     ax2.legend(fontsize=12)
 
-    # slow shifts
+    # Slow shifts
     ax3.plot(
         run_positions,
         eval_result["slow_shifts"],
         marker="^",
+        markersize=10,
         linestyle="-",
         color="darkorchid",
         label="Slow shifts",
@@ -265,21 +300,21 @@ def evaluate_psd_usability_and_plot(
     ax3.grid(True, alpha=0.3)
     ax3.legend(loc="upper left", bbox_to_anchor=(0, 0.95), fontsize=12)
 
-    # sudden shifts
-    x = np.arange(len(eval_result["sudden_shifts"]))
+    # Sudden shifts
     y = np.array(eval_result["sudden_shifts"])
-    mask = ~np.isnan(y)
+    x = np.array(run_positions)
     ax4.plot(
-        x[mask] + 1,
-        y[mask],
+        x,
+        y,
         marker="^",
+        markersize=10,
         linestyle="-",
         color="green",
         label="Sudden shifts",
     )
     ax4.axhline(0, color="black", linestyle="--")
     ax4.axhline(0.25, color="crimson", linestyle="--")
-    ax4.set_ylabel(r"$|(\mu_{i+1}-\mu_i)/\sigma_i|$")
+    ax4.set_ylabel(r"$|(\mu_{i}-\mu_{i-1})/\sigma_i|$")
     ax4.set_xlabel("Run")
     ax4.grid(True, alpha=0.3)
     ax4.legend(loc="upper left", bbox_to_anchor=(0, 0.95), fontsize=12)

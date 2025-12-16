@@ -42,7 +42,7 @@ def test_sudden_shift_failure():
 
     result = evaluate_psd_performance(mean_vals, sigma_vals, run_labels, "r002", "DET1")
     assert result["status"] is False
-    assert "r001TOr002" in result["sudden_shift_fail_runs"]
+    assert "r002" in result["sudden_shift_fail_runs"]
 
 
 def test_sudden_shift_nan_branch():
@@ -52,5 +52,14 @@ def test_sudden_shift_nan_branch():
 
     result = evaluate_psd_performance(mean_vals, sigma_vals, run_labels, "r002", "DET1")
 
-    assert np.isnan(result["sudden_shifts"][0])
-    assert result["sudden_shift_fail_runs"] == []
+    assert np.isnan(result["sudden_shifts"][1])
+    assert result["sudden_shift_fail_runs"] == ["r002"]
+
+    mean_vals = [1.0, 1.0]
+    sigma_vals = [0.1, np.nan]
+    run_labels = ["r001", "r002"]
+
+    result = evaluate_psd_performance(mean_vals, sigma_vals, run_labels, "r002", "DET1")
+
+    assert np.isnan(result["sudden_shifts"][1])
+    assert result["sudden_shift_fail_runs"] == ["r002"]
