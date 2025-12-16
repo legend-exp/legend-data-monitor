@@ -69,6 +69,7 @@ def patch_legendmetadata(monkeypatch):
         MockLegendMetadata,
     )
 
+
 def test_build_detector_info():
     result = build_detector_info("dummy_path")
 
