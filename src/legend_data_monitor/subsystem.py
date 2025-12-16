@@ -6,7 +6,7 @@ from typing import Union
 
 import numpy as np
 import pandas as pd
-from legendmeta import JsonDB
+from dbetto import TextDB
 from pygama.flow import DataLoader
 
 from . import utils
@@ -152,7 +152,8 @@ class Subsystem:
 
         dl_dsp = None
         dl_hit = None
-        dl_evt = None
+        dl_evt1 = None
+        dl_evt2 = None
         if dsp_params != []:
             dlconfig_dsp, dbconfig_dsp = self.construct_dataloader_configs(
                 param_tiers, dsp_params, "dsp"
@@ -164,10 +165,25 @@ class Subsystem:
             )
             dl_hit = DataLoader(dlconfig_hit, dbconfig_hit)
         if evt_params != []:
-            dlconfig_evt, dbconfig_evt = self.construct_dataloader_configs(
-                param_tiers, evt_params, "evt"
+            # separate params with different paths
+            lists = {}
+            for param in evt_params:
+                # take the first element *after* "geds/quality/"
+                key = param.split("/")[2]
+                lists.setdefault(key, []).append(param)
+
+            evt_params1 = lists.get("is_bb_like", [])
+            evt_params2 = lists.get("is_not_bb_like", [])
+
+            dlconfig_evt1, dbconfig_evt1 = self.construct_dataloader_configs(
+                param_tiers, evt_params1, "evt"
             )
-            dl_evt = DataLoader(dlconfig_evt, dbconfig_evt)
+            dl_evt1 = DataLoader(dlconfig_evt1, dbconfig_evt1)
+
+            dlconfig_evt2, dbconfig_evt2 = self.construct_dataloader_configs(
+                param_tiers, evt_params2, "evt"
+            )
+            dl_evt2 = DataLoader(dlconfig_evt2, dbconfig_evt2)
 
         # -------------------------------------------------------------------------
         # Set up query
@@ -214,26 +230,34 @@ class Subsystem:
             dl_hit.set_output(fmt="pd.DataFrame", columns=hit_params)
         if evt_params != []:
             # from "geds/quality/is_X" to "is_X"
-            elems = evt_params[0].split("/")
-            evt_params = [elems[-1]]
+            elems1 = evt_params1[0].split("/")
+            evt_params1 = [elems1[-1]]
+            dl_evt1.set_files(query)
+            dl_evt1.set_output(fmt="pd.DataFrame", columns=evt_params1)
 
-            dl_evt.set_files(query)
-            dl_evt.set_output(fmt="pd.DataFrame", columns=evt_params)
+            elems2 = evt_params2[0].split("/")
+            evt_params2 = [elems2[-1]]
+            dl_evt2.set_files(query)
+            dl_evt2.set_output(fmt="pd.DataFrame", columns=evt_params2)
 
         now = datetime.now()
 
         # --- create self.data object
         dsp_data = None
         hit_data = None
-        evt_data = None
+        evt_data1 = None
+        evt_data2 = None
         if dsp_params != []:
             dsp_data = dl_dsp.load()
         if hit_params != []:
             hit_data = dl_hit.load()
         if evt_params != []:
-            evt_data = dl_evt.load()
+            evt_data1 = dl_evt1.load()
+            evt_data2 = dl_evt2.load()
 
-        valid_data = [df for df in [dsp_data, hit_data, evt_data] if df is not None]
+        valid_data = [
+            df for df in [dsp_data, hit_data, evt_data1, evt_data2] if df is not None
+        ]
         if not valid_data:
             utils.logger.error(
                 "\033[91mdsp_data, hit_data, evt_data are all None. Exit here.\033[0m"
@@ -268,7 +292,6 @@ class Subsystem:
         # -------------------------------------------------------------------------
         # create datetime column based on initial key and timestamp
         # -------------------------------------------------------------------------
-
         # convert UTC timestamp to datetime (unix epoch time)
         self.data["datetime"] = pd.to_datetime(
             self.data["timestamp"], origin="unix", utc=True, unit="s"
@@ -278,7 +301,6 @@ class Subsystem:
         # -------------------------------------------------------------------------
         # add detector name, location and position from map
         # -------------------------------------------------------------------------
-
         utils.logger.info("... mapping to name and string/fiber position")
         self.data = self.data.set_index("channel")
         # expand channel map index to match that of data with repeating channels
@@ -556,7 +578,7 @@ class Subsystem:
         map_file = os.path.join(
             self.path, self.version, "inputs/hardware/configuration/channelmaps"
         )
-        full_channel_map = JsonDB(map_file).on(timestamp=self.first_timestamp)
+        full_channel_map = TextDB(map_file).on(timestamp=self.first_timestamp)
 
         df_map = pd.DataFrame(columns=utils.COLUMNS_TO_LOAD)
         df_map = df_map.set_index("channel")
@@ -866,6 +888,8 @@ class Subsystem:
             self.channel_map[
                 (self.channel_map["status"] == "on")
                 | (self.channel_map["status"] == "ac")
+                | (self.channel_map["status"] == "True")
+                | (self.channel_map["status"] is True)
             ]["channel"]
         )
         # remove off channels
