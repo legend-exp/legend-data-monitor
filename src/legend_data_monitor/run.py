@@ -38,6 +38,7 @@ def main():
     add_user_bunch_parser(subparsers)
     add_user_rsync_parser(subparsers)
     add_auto_prod_parser(subparsers)
+    add_auto_run_parser(subparsers)
     add_get_exposure(subparsers)
     add_get_runinfo(subparsers)
 
@@ -132,7 +133,7 @@ def user_bunch_cli(args):
 
 
 def add_user_rsync_parser(subparsers):
-    """Configure :func:`.core.control_rsync_plots` command line interface."""
+    """Configure :func:`.core.auto_control_plots` command line interface."""
     parser_auto_prod = subparsers.add_parser(
         "user_rsync_prod",
         description="""Inspect LEGEND HDF5 (LH5) processed data by giving a full config file with parameters/subsystems info to plot, syncing with new produced data.""",
@@ -149,7 +150,7 @@ def add_user_rsync_parser(subparsers):
 
 
 def user_rsync_cli(args):
-    """Pass command line arguments to :func:`.core.control_rsync_plots`."""
+    """Pass command line arguments to :func:`.core.auto_control_plots`."""
     config_file = args.config
     keys_file = args.keys
 
@@ -173,7 +174,7 @@ def add_auto_prod_parser(subparsers):
     parser_auto_prod.add_argument(
         "--prod_path",
         help="""Path to production environment (e.g. \"/data1/shared/l200/l200-prodenv/prod-ref/vXX.YY/\").\nHere, you should find \"config.yaml\" containing input/output folders info.""",
-    )  # what if the file is not there?
+    ) 
     parser_auto_prod.set_defaults(func=auto_prod_cli)
 
 
@@ -197,8 +198,122 @@ def auto_prod_cli(args):
     )
 
 
+def add_auto_run_parser(subparsers):
+    """Configure :func:`.core.auto_run` command line interface."""
+    parser_auto_run = subparsers.add_parser(
+        "auto_run",
+        description="""Inspect LEGEND HDF5 (LH5) processed data (and Slow Control data from lngs-login cluster) for a specific period and run (if specified; otherwise the latest being processed are used); plots and summary files are saved; automatic alert emails are sent.""",
+    )
+    parser_auto_run.add_argument(
+        "--cluster",
+        default='lngs',
+        help="Name of the cluster where you are working; pick among 'lngs' (default) or 'nersc'.",
+    )
+    parser_auto_run.add_argument(
+        "--ref_version",
+        help="Version of processed data to inspect (eg. tmp-auto or ref-v2.1.0).",
+    )
+    parser_auto_run.add_argument(
+        "--output_folder",
+        help="Path where to store the automatic results (plots and summary files).",
+    )
+    parser_auto_run.add_argument(
+        "--data_type",
+        default="phy",
+        help="Data type to load. Default: 'phy' (alternatives: 'lac', 'ssc', 'rdc').",
+    )
+    parser_auto_run.add_argument(
+        "--partition",
+        default=False,
+        help="False (default) if not partition data, else True",
+    )
+    parser_auto_run.add_argument(
+        "--pswd",
+        help="Password to access the Slow Control database (NOT available on NERSC).",
+    )
+    parser_auto_run.add_argument(
+        "--sc",
+        default=False,
+        help="Boolean for retrieving Slow Control data (default: False).",
+    )
+    parser_auto_run.add_argument(
+        "--port",
+        default=8282,
+        help="Port necessary to retrieve the Slow Control database (default: 8282).",
+    )
+    parser_auto_run.add_argument(
+        "--pswd_email",
+        default=None,
+        help="Password to access the legend.data.monitoring@gmail.com account for sending alert messages. Optional; if not specified, no automatic alerts will be sent.",
+    )
+    parser_auto_run.add_argument(
+        "--chunk_size",
+        default=20,
+        type=int,
+        help="Maximum integer number of files to read at each loop in order to avoid the process to be killed; default: 20 files.",
+    )
+    parser_auto_run.add_argument(
+        "--p",
+        default=None,
+        help="Period to inspect. Optional; if not specified, the latest period processed for the given prodenv ref version is used.",
+    )
+    parser_auto_run.add_argument(
+        "--r",
+        default=None,
+        help="Run to inspect. Optional; if not specified, the latest run processed for the given period is used.",
+    )
+    parser_auto_run.add_argument(
+        "--escale",
+        default=2039.0,
+        type=float,
+        help="Energy scale at which evaluating the gain differences; default: 2039 keV (76Ge Qbb).",
+    )
+    parser_auto_run.add_argument(
+        "--pdf",
+        default=False,
+        help="True if you want to save pdf files too; default: False",
+    )
+
+    parser_auto_run.set_defaults(func=auto_run_cli)
+
+
+def auto_run_cli(args):
+    """Pass command line arguments to :func:`.core.auto_run`."""
+    cluster = args.cluster
+    ref_version = args.ref_version
+    output_folder = args.output_folder
+    partition = False if args.partition is False else True
+    pswd = args.pswd
+    get_sc = False if args.sc is False else True
+    port = args.port
+    pswd_email = args.pswd_email
+    chunk_size = args.chunk_size
+    input_period = args.p
+    input_run = args.r
+    save_pdf = False if args.pdf is False else True
+    escale_val = args.escale
+    data_type = args.data_type
+
+    legend_data_monitor.automatic_run.auto_run(
+        cluster,
+        ref_version,
+        output_folder,
+        partition,
+        pswd,
+        get_sc,
+        port,
+        pswd_email,
+        chunk_size,
+        input_period,
+        input_run,
+        save_pdf,
+        escale_val,
+        data_type,
+    )
+
+
 def add_get_exposure(subparsers):
-    """Configure :func:`.core.control_rsync_plots` command line interface."""
+    """Configure :func:`.core.retrieve_exposure` command line interface."""
     parser_auto_prod = subparsers.add_parser(
         "get_exposure",
         description="""Retrieve exposure for active detectors, with or without valid PSD flag.""",
@@ -228,7 +343,7 @@ def get_exposure_cli(args):
 
 
 def add_get_runinfo(subparsers):
-    """Configure :func:`.core.control_rsync_plots` command line interface."""
+    """Configure :func:`.core.build_runinfo` command line interface."""
     parser_auto_prod = subparsers.add_parser(
         "get_runinfo",
         description="""Build runinfo.yaml summary file.""",
@@ -247,7 +362,7 @@ def add_get_runinfo(subparsers):
 
 
 def get_runinfo_cli(args):
-    """Pass command line arguments to :func:`.core.retrieve_runinfo`."""
+    """Pass command line arguments to :func:`.core.build_runinfo`."""
     path = args.path
     proc_folder = args.proc_folder
     data_version = args.data_version
