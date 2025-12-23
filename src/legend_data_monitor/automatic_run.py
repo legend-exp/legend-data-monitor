@@ -1,11 +1,6 @@
-import argparse
 import glob
-import json
-import logging
 import os
 import re
-import shlex
-import subprocess
 from pathlib import Path
 
 import yaml
@@ -29,7 +24,7 @@ def auto_run(
     escale_val,
     data_type,
 ):
-    """Function that Inspect LEGEND HDF5 (LH5) processed data (and Slow Control data from lngs-login cluster) for a specific period and run (if specified; otherwise the latest being processed are used); plots and summary files are saved; automatic alert emails are sent."""
+    """Inspect LEGEND HDF5 (LH5) processed data (and Slow Control data from lngs-login cluster) for a specific period and run (if specified; otherwise the latest being processed are used); plots and summary files are saved; automatic alert emails are sent."""
     auto_dir = (
         "/global/cfs/cdirs/m2676/data/lngs/l200/public/prodenv/prod-blind/"
         if cluster == "nersc"
@@ -298,7 +293,6 @@ def auto_run(
 
     # If new files are found, run the shell command
     if new_files:
-        """
         # Replace this command with your desired shell command
         command = "echo New files found: \033[91m{}\033[0m".format(" ".join(new_files))
         subprocess.run(command, shell=True)
@@ -366,7 +360,6 @@ def auto_run(
                 utils.logger.error(
                     f"Unexpected error while retrieving Slow Control data: {e}"
                 )
-        """
 
         # ===========================================================================================
         # Generate Monitoring Summary Plots
@@ -498,7 +491,6 @@ def summary_plots(
     )
 
     # stability plots
-    """
     results = monitoring.plot_time_series(
         auto_dir_path,
         phy_mtg_data,
@@ -515,7 +507,6 @@ def summary_plots(
         quadratic,
         zoom,
     )
-    """
 
     # load proper calibration (eg for lac/ssc/rdc data or back-dated calibs)
     tier = "pht" if partition is True else "hit"
@@ -543,7 +534,6 @@ def summary_plots(
     if len(cal_runs) == 0:
         utils.logger.debug("No available calibration runs to inspect. Returning.")
         return
-    first_run = len(cal_runs) == 1
 
     cal_path = os.path.join(auto_dir_path, "generated/par", tier, "cal", period)
     pars_files_list = sorted(glob.glob(f"{cal_path}/*/*.yaml"))
@@ -556,7 +546,6 @@ def summary_plots(
     pars_path = [p for p in pars_files_list if run_to_apply in p][0]
     pars = utils.read_json_or_yaml(pars_path)
     # phy box summary plots
-    """
     for k in results.keys():
         pars_dict = pars if k in ["TrapemaxCtcCal"] else None
         monitoring.box_summary_plot(
@@ -567,7 +556,7 @@ def summary_plots(
             results[k],
             utils.MTG_PLOT_INFO[k],
             output_folder,
-            data_type,~
+            data_type,
             save_pdf,
             run_to_apply=run_to_apply,
         )
@@ -580,7 +569,6 @@ def summary_plots(
         det_info["detectors"],
         pswd_email,
     )
-    """
 
     # FT failure rate plots
     if data_type not in ["ssc", "lac", "rdc"]:
