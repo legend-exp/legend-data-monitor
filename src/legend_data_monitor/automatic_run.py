@@ -329,7 +329,9 @@ def auto_run(
                 utils.logger.debug(
                     f"[{idx}/{total_parts}] Created file: {output_file} with {len(chunk)} lines."
                 )
-                utils.logger.debug("...running command for generating hdf monitoring files")
+                utils.logger.debug(
+                    "...running command for generating hdf monitoring files"
+                )
                 core.auto_control_plots(my_config, output_file, "", {})
         else:
             utils.logger.debug(f"... file has {num_lines} lines. No need to split.")
@@ -341,9 +343,7 @@ def auto_run(
         # compute resampling + info yaml
         utils.logger.debug("Resampling outputs...")
         files_folder = os.path.join(output_folder, ref_version)
-        monitoring.build_new_files(
-                files_folder, period, run, data_type=data_type
-            )
+        monitoring.build_new_files(files_folder, period, run, data_type=data_type)
         utils.logger.debug("...done!")
 
         # ===========================================================================================
