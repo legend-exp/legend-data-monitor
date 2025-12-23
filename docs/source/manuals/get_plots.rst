@@ -32,11 +32,27 @@ when loading lots of files), you can use
 
 where ``N`` specifies how many files you want to inspect together at each iteration e.g. ``N=40``.
 
+You can also run a full cal/phy inspection for a given period and run and produce some output plots via the following line:
+
+.. code-block:: bash
+
+$ usage: legend-data-monitor auto_run [-h] [--cluster CLUSTER] [--ref_version REF_VERSION] [--output_folder OUTPUT_FOLDER] [--data_type DATA_TYPE]
+                                    [--partition PARTITION] [--pswd PSWD] [--sc SC] [--port PORT] [--pswd_email PSWD_EMAIL] [--chunk_size CHUNK_SIZE]
+                                    [--p P] [--r R] [--escale ESCALE] [--pdf PDF]
+
+All options can be inspected via ``$ legend-data-monitor auto_run --h``.
 
 .. warning::
 
-  Use the ``user_prod`` command line interface for generating your own plots.
-  ``auto_prod`` and ``user_rsync_prod`` were designed to be used during automatic data production, for generating monitoring plots on the fly for new processed data. For the moment, no documentation will be provided.
+  All available subcommands can be listed with:
+
+   .. code-block:: bash
+
+      $ legend-data-monitor --h
+      
+      usage: legend-data-monitor [-h] [--version] 
+             {user_scdb,user_prod,user_bunch,user_rsync_prod,
+              auto_prod,auto_run,get_exposure,get_runinfo} ...
 
 
 Configuration file
@@ -235,11 +251,11 @@ To do this, you can configure the config file to adjust a parameter by subtracti
 
 .. math::
 
-   \text{param\_ratio} = \frac{\text{param}_\text{geds}}{\text{param}_\text{AUX}}
+   \mathrm{param\_ratio} = \frac{\mathrm{param}_{\mathrm{geds}}}{\mathrm{param}_{\mathrm{AUX}}}
 
 .. math::
 
-   \text{param\_diff} = \text{param}_\text{geds} - \text{param}_\text{AUX}
+   \mathrm{param\_diff} = \mathrm{param}_{\mathrm{geds}} - \mathrm{param}_{\mathrm{AUX}}
 
 In the config file, you just need to set either the key ``AUX_ratio`` or ``AUX_diff" to true (note: it's not possible to select both options at the same time):
 
@@ -325,7 +341,7 @@ To plot the relative difference between ``wf_max`` and ``baseline``, use
 
 Event rate
 ~~~~~~~~~~
-To plot the event rate, by sampling over a period of time equal to ``<time_window>`` (``T``=minutes, ``H``=hours, ``D``=days), use:
+To plot the event rate, by sampling over a period of time equal to ``<time_window>`` (T=minutes, H=hours, D=days), use:
 
 .. code-block:: yaml
 

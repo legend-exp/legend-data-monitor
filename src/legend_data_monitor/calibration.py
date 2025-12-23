@@ -786,6 +786,8 @@ def check_calibration(
     with open(usability_map_file, "w") as f:
         yaml.dump(output, f)
 
+    with open(usability_map_file, "w") as f:
+        yaml.dump(output, f)
 
 def check_calibration_lac_ssc(
     tmp_auto_dir: str,
