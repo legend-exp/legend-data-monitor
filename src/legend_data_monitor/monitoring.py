@@ -124,11 +124,17 @@ def qc_distributions(
                 axes = axes.flatten()
 
                 for i, det in enumerate(det_list):
+                    if det not in det_info["detectors"]:
+                        continue
                     if not det_info["detectors"][det]["processable"]:
                         continue
 
                     ax = axes[i]
                     ch = det_info["detectors"][det]["daq_rawid"]
+                    # not processed detectors
+                    if ch not in df_All.keys(): 
+                        continue
+                        
                     vals_all = df_All[ch].values
                     vals_pulser = df_IsPulser[ch].values
                     vals_bsln = df_IsBsln[ch].values
