@@ -49,8 +49,8 @@ All options can be inspected via ``$ legend-data-monitor auto_run --h``.
    .. code-block:: bash
 
       $ legend-data-monitor --h
-      
-      usage: legend-data-monitor [-h] [--version] 
+
+      usage: legend-data-monitor [-h] [--version]
              {user_scdb,user_prod,user_bunch,user_rsync_prod,
               auto_prod,auto_run,get_exposure,get_runinfo} ...
 

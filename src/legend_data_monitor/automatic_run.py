@@ -7,25 +7,27 @@ import re
 import shlex
 import subprocess
 from pathlib import Path
+
 import yaml
 
-from . import core, utils, monitoring, calibration
+from . import calibration, core, monitoring, utils
+
 
 def auto_run(
-        cluster,
-        ref_version,
-        output_folder,
-        partition,
-        pswd,
-        get_sc,
-        port,
-        pswd_email,
-        chunk_size,
-        input_period,
-        input_run,
-        save_pdf,
-        escale_val,
-        data_type,
+    cluster,
+    ref_version,
+    output_folder,
+    partition,
+    pswd,
+    get_sc,
+    port,
+    pswd_email,
+    chunk_size,
+    input_period,
+    input_run,
+    save_pdf,
+    escale_val,
+    data_type,
 ):
     """Function that Inspect LEGEND HDF5 (LH5) processed data (and Slow Control data from lngs-login cluster) for a specific period and run (if specified; otherwise the latest being processed are used); plots and summary files are saved; automatic alert emails are sent."""
     auto_dir = (
@@ -235,16 +237,16 @@ def auto_run(
         pass
     else:
         os.makedirs(os.path.join(phy_folder, period, run, "mtg/pdf"), exist_ok=True)
-        utils.logger.info("...inspecting calibration data!")     
+        utils.logger.info("...inspecting calibration data!")
         check_calib(
-            auto_dir_path = auto_dir_path,
-            output_folder = phy_folder,
-            period = period,
-            current_run = run,
-            pswd_email = pswd_email,
-            data_type = data_type,
-            partition = partition,
-            save_pdf = save_pdf,
+            auto_dir_path=auto_dir_path,
+            output_folder=phy_folder,
+            period=period,
+            current_run=run,
+            pswd_email=pswd_email,
+            data_type=data_type,
+            partition=partition,
+            save_pdf=save_pdf,
         )
         utils.logger.info("...done!")
 
@@ -339,7 +341,7 @@ def auto_run(
             utils.logger.debug(f"... file has {num_lines} lines. No need to split.")
             utils.logger.debug("...running command for generating hdf monitoring files")
             core.auto_control_plots(my_config, keys_file, "", {})
-            
+
         utils.logger.debug("...done!")
 
         # compute resampling + info yaml
@@ -409,16 +411,15 @@ def auto_run(
             )
             utils.logger.info("...done!")
 
-
             # QC - average + time series
             utils.logger.info("...inspecting quality cuts")
             qc_avg_series(
-                auto_dir_path = auto_dir_path,
-                output_folder = mtg_folder,
-                start_key = start_key,
-                period = period,
-                current_run = run,
-                save_pdf = save_pdf
+                auto_dir_path=auto_dir_path,
+                output_folder=mtg_folder,
+                start_key=start_key,
+                period=period,
+                current_run=run,
+                save_pdf=save_pdf,
             )
             utils.logger.info("...done!")
 
@@ -458,7 +459,7 @@ def summary_plots(
 ):
     """
     Run function for creating summary plots.
-    
+
     Parameters:
     -----------
     auto_dir_path : str
@@ -518,16 +519,12 @@ def summary_plots(
 
     # load proper calibration (eg for lac/ssc/rdc data or back-dated calibs)
     tier = "pht" if partition is True else "hit"
-    validity_file = os.path.join(
-        auto_dir_path, "generated/par", tier, "validity.yaml"
-    )
+    validity_file = os.path.join(auto_dir_path, "generated/par", tier, "validity.yaml")
     with open(validity_file) as f:
         validity_dict = yaml.load(f, Loader=yaml.CLoader)
 
     # find first key of current run
-    start_key = utils.get_start_key(
-        auto_dir_path, data_type, period, current_run
-    )
+    start_key = utils.get_start_key(auto_dir_path, data_type, period, current_run)
     # use key to load the right yaml file
     valid_entries = [e for e in validity_dict if e["valid_from"] <= start_key]
     if valid_entries:
@@ -544,9 +541,7 @@ def summary_plots(
     cal_path = os.path.join(auto_dir_path, "generated/par", tier, "cal", period)
     cal_runs = os.listdir(cal_path)
     if len(cal_runs) == 0:
-        utils.logger.debug(
-            "No available calibration runs to inspect. Returning."
-        )
+        utils.logger.debug("No available calibration runs to inspect. Returning.")
         return
     first_run = len(cal_runs) == 1
 
@@ -613,6 +608,7 @@ def summary_plots(
             save_pdf,
         )
 
+
 def check_calib(
     auto_dir_path: str,
     output_folder: str,
@@ -625,7 +621,7 @@ def check_calib(
 ):
     """
     Check calibration stability in calibration runs and create monitoring summary file.
-    
+
     Parameters:
     -----------
     auto_dir_path : str
@@ -646,16 +642,12 @@ def check_calib(
         True if you want to save pdf files too; default: False.
     """
     tier = "pht" if partition is True else "hit"
-    validity_file = os.path.join(
-        auto_dir_path, "generated/par", tier, "validity.yaml"
-    )
+    validity_file = os.path.join(auto_dir_path, "generated/par", tier, "validity.yaml")
     with open(validity_file) as f:
         validity_dict = yaml.load(f, Loader=yaml.CLoader)
 
     # find first key of current run
-    start_key = utils.get_start_key(
-        auto_dir_path, data_type, period, current_run
-    )
+    start_key = utils.get_start_key(auto_dir_path, data_type, period, current_run)
     # use key to load the right yaml file
     valid_entries = [e for e in validity_dict if e["valid_from"] <= start_key]
     if valid_entries:
@@ -672,9 +664,7 @@ def check_calib(
     cal_path = os.path.join(auto_dir_path, "generated/par", tier, "cal", period)
     cal_runs = os.listdir(cal_path)
     if len(cal_runs) == 0:
-        utils.logger.debug(
-            "No available calibration runs to inspect. Returning."
-        )
+        utils.logger.debug("No available calibration runs to inspect. Returning.")
         return
     first_run = len(cal_runs) == 1
 
@@ -688,9 +678,7 @@ def check_calib(
 
     if data_type not in ["lac", "ssc", "rdc"]:
         current_run = run_to_apply
-        utils.logger.debug(
-            f"...valid run for {current_run} is {run_to_apply}"
-        )
+        utils.logger.debug(f"...valid run for {current_run} is {run_to_apply}")
 
         calibration.check_calibration(
             auto_dir_path,
@@ -738,16 +726,17 @@ def check_calib(
         pswd_email,
     )
 
+
 def qc_avg_series(
     auto_dir_path: str,
     output_folder: str,
     start_key: str,
     period: str,
     current_run: str,
-    save_pdf: bool = False
+    save_pdf: bool = False,
 ):
     """Plot quality cuts average values across the array and trends in time.
-    
+
     Parameters:
     -----------
     auto_dir_path : str
@@ -773,4 +762,3 @@ def qc_avg_series(
     monitoring.qc_time_series(
         auto_dir_path, output_folder, det_info, period, current_run, save_pdf
     )
-
