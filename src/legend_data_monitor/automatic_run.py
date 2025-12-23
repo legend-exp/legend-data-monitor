@@ -289,11 +289,8 @@ def auto_run(
         new_files = correct_files
     new_files = sorted(new_files)
 
-    # If new files are found, run the shell command
     if new_files:
-        # Replace this command with your desired shell command
-        command = "echo New files found: \033[91m{}\033[0m".format(" ".join(new_files))
-        subprocess.run(command, shell=True)
+        utils.logger.info(f"New files found: {' '.join(new_files)}")
 
         # create the file containing the keys with correct format to be later used by legend-data-monitor (it must be created every time with the new keys; NOT APPEND)
         utils.logger.debug("Creating the file containing the keys to inspect...")
@@ -352,11 +349,9 @@ def auto_run(
                 utils.logger.debug("Retrieving Slow Control data...")
                 core.retrieve_scdb(scdb, port, pswd)
                 utils.logger.debug("...SC done!")
-            except subprocess.CalledProcessError as e:
-                utils.logger.error(f"Slow Control command failed: {e}")
             except Exception as e:
                 utils.logger.error(
-                    f"Unexpected error while retrieving Slow Control data: {e}"
+                    f"Failed to retrieve Slow Control data: {e}"
                 )
 
         # ===========================================================================================
@@ -452,8 +447,8 @@ def summary_plots(
     """
     Run function for creating summary plots.
     
-    Parameters:
-    -----------
+    Parameters
+    ----------
     auto_dir_path : str
         Path to tmp-auto public data files (eg /data2/public/prodenv/prod-blind/tmp-auto).
     phy_mtg_data : str
@@ -614,8 +609,8 @@ def check_calib(
     """
     Check calibration stability in calibration runs and create monitoring summary file.
     
-    Parameters:
-    -----------
+    Parameters
+    ----------
     auto_dir_path : str
         Path to tmp-auto public data files (eg /data2/public/prodenv/prod-blind/tmp-auto).
     output_folder : str
@@ -734,10 +729,11 @@ def qc_avg_series(
     current_run: str,
     save_pdf: bool = False
 ):
-    """Plot quality cuts average values across the array and trends in time.
+    """
+    Plot quality cuts average values across the array and trends in time.
     
-    Parameters:
-    -----------
+    Parameters
+    ----------
     auto_dir_path : str
         Path to tmp-auto public data files (eg /data2/public/prodenv/prod-blind/tmp-auto).
     output_folder : str
