@@ -132,9 +132,9 @@ def qc_distributions(
                     ax = axes[i]
                     ch = det_info["detectors"][det]["daq_rawid"]
                     # not processed detectors
-                    if ch not in df_All.keys(): 
+                    if ch not in df_All.keys():
                         continue
-                        
+
                     vals_all = df_All[ch].values
                     vals_pulser = df_IsPulser[ch].values
                     vals_bsln = df_IsBsln[ch].values

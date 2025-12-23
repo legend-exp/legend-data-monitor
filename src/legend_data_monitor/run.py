@@ -174,7 +174,7 @@ def add_auto_prod_parser(subparsers):
     parser_auto_prod.add_argument(
         "--prod_path",
         help="""Path to production environment (e.g. \"/data1/shared/l200/l200-prodenv/prod-ref/vXX.YY/\").\nHere, you should find \"config.yaml\" containing input/output folders info.""",
-    ) 
+    )
     parser_auto_prod.set_defaults(func=auto_prod_cli)
 
 
@@ -206,7 +206,7 @@ def add_auto_run_parser(subparsers):
     )
     parser_auto_run.add_argument(
         "--cluster",
-        default='lngs',
+        default="lngs",
         help="Name of the cluster where you are working; pick among 'lngs' (default) or 'nersc'.",
     )
     parser_auto_run.add_argument(
