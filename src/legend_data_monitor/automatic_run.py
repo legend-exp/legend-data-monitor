@@ -352,9 +352,7 @@ def auto_run(
                 core.retrieve_scdb(scdb, port, pswd)
                 utils.logger.debug("...SC done!")
             except Exception as e:
-                utils.logger.error(
-                    f"Failed to retrieve Slow Control data: {e}"
-                )
+                utils.logger.error(f"Failed to retrieve Slow Control data: {e}")
 
         # ===========================================================================================
         # Generate Monitoring Summary Plots
@@ -447,7 +445,7 @@ def summary_plots(
 ):
     """
     Run function for creating summary plots.
-    
+
     Parameters
     ----------
     auto_dir_path : str
@@ -604,7 +602,7 @@ def check_calib(
 ):
     """
     Check calibration stability in calibration runs and create monitoring summary file.
-    
+
     Parameters
     ----------
     auto_dir_path : str
@@ -720,7 +718,7 @@ def qc_avg_series(
 ):
     """
     Plot quality cuts average values across the array and trends in time.
-    
+
     Parameters
     ----------
     auto_dir_path : str
