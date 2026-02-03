@@ -69,7 +69,7 @@ def add_user_scdb(subparsers):
     )
     parser_auto_prod.add_argument(
         "--port",
-        help="""Local port.""",
+        help="""Local port (set any number within 1024 and 65535). By default, <port> is set on 5432 (avoid using this value!). If a user attempts to bind a local port that is already in use, they will receive an error indicating that the port is already taken. A safer option is that every user sets their personal port number different from the default one. """,
     )
     parser_auto_prod.add_argument(
         "--pswd",

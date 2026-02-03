@@ -59,7 +59,10 @@ class SlowControl:
         self.sc_parameters = utils.SC_PARAMETERS
         self.data = pd.DataFrame()
         self.scdb = LegendSlowControlDB()
-        self.scdb.connect(port=port, password=pswd)
+
+        # different db names for different configurations
+        db_name_spec = utils.PERIOD_TO_DB.get(self.period, "scdb")
+        self.scdb.connect(port=port, password=pswd, db_name=db_name_spec)
 
         # check if parameter is within the one listed in settings/SC-params.yaml
         if parameter not in self.sc_parameters["SC_DB_params"].keys():
