@@ -1847,7 +1847,10 @@ def resample_series(series: pd.Series, resampling_time: str, mask: pd.Series):
         mask = mask.tz_localize("UTC")
 
     # set to nan when the mask is False
-    mean[~mask] = std[~mask] = np.nan
+    #mean[~mask] = std[~mask] = np.nan
+    mask = mask.reindex(mean.index, fill_value=False)
+    mean[~mask] = np.nan
+    std[~mask] = np.nan
 
     return mean, std
 
@@ -1921,6 +1924,7 @@ def get_pulser_data(
     ged_cusp_hr_av, ged_cusp_hr_std = resample_series(
         ser_ged_cuspdiff_kev, resampling_time, mask
     )
+    ged_index = ged_cusp_hr_av.index
 
     # pulser series
     ser_pul_cusp = ser_pul_cuspdiff = ser_pul_cuspdiff_kev = pul_cusp_hr_av = (
@@ -1953,6 +1957,8 @@ def get_pulser_data(
             pul_cusp_hr_av, pul_cusp_hr_std = resample_series(
                 ser_pul_cuspdiff_kev, resampling_time, mask
             )
+            pul_cusp_hr_av  = pul_cusp_hr_av.reindex(ged_index)
+            pul_cusp_hr_std = pul_cusp_hr_std.reindex(ged_index)
 
             # corrected GED
             common_index = ser_ged_cuspdiff.index.intersection(ser_pul_cuspdiff.index)
@@ -1963,6 +1969,8 @@ def get_pulser_data(
             ged_cusp_cor_hr_av, ged_cusp_cor_hr_std = resample_series(
                 ged_cusp_corr_kev, resampling_time, mask
             )
+            ged_cusp_cor_hr_av  = ged_cusp_cor_hr_av.reindex(ged_index)
+            ged_cusp_cor_hr_std = ged_cusp_cor_hr_std.reindex(ged_index)
 
     return {
         "ged": {
@@ -2246,6 +2254,8 @@ def plot_time_series(
                         pos = detectors[channel_name]["position"]
 
                         resampling_time = "1h"  # if len(runs)>1 else "10T"
+
+                        rawid = np.int64(rawid)
                         if rawid not in set(dfs[0].columns):
                             utils.logger.debug(
                                 f"{channel} is not present in the dataframe!"
@@ -2498,6 +2508,7 @@ def plot_time_series(
     # parameters (bsln, gain, ...) variations over run
     info = utils.MTG_PLOT_INFO
     results = {}
+    last_checked = None
 
     for inspected_parameter in ["Baseline", "Trapemax", "TrapemaxCtcCal", "BlStd"]:
         escale_par = escale_val if inspected_parameter == "TrapemaxCtcCal" else 1
@@ -2565,6 +2576,7 @@ def plot_time_series(
                         pos = detectors[channel_name]["position"]
 
                         resampling_time = "1h"
+                        rawid = np.int64(rawid)
                         if rawid not in set(dfs[0].columns):
                             utils.logger.debug(
                                 f"{channel} is not present in the dataframe!"
@@ -2592,8 +2604,8 @@ def plot_time_series(
                             fit=fit_flag,
                         )
                         threshold = (
-                            [pars_data["res"][0], pars_data["res"][0]]
-                            if inspected_parameter == "TrapemaxCtcCal"
+                            [-pars_data["res"][0]/2, pars_data["res"][0]/2]
+                            if "Trapemax" in inspected_parameter 
                             else info[inspected_parameter]["limits"]
                         )
 
@@ -2605,16 +2617,26 @@ def plot_time_series(
                                 else pulser_data["diff"]["kevdiff_av"]
                             )
 
-                            # check threshold and update YAML summary file
-                            utils.check_threshold(
-                                kevdiff,
-                                channel_name,
-                                last_checked,
-                                t0,
-                                threshold,
-                                info[inspected_parameter]["title"],
-                                output,
-                            )
+                            check_kevdiff = None
+                            if (
+                                info[inspected_parameter]["percentage"] is True
+                                and float(escale_par) == 1.0
+                            ):
+                                check_kevdiff = pulser_data["ged"]["kevdiff_av"]*100 
+                            else:
+                                check_kevdiff = pulser_data["ged"]["kevdiff_av"]
+                            # check threshold and update YAML summary file 
+                            # (for energy, do it only for TrapemaxCtcCal and not Trapemax at the moment)
+                            if inspected_parameter != "Trapemax":
+                                utils.check_threshold(
+                                    check_kevdiff,
+                                    channel_name,
+                                    last_checked,
+                                    t0,
+                                    threshold,
+                                    info[inspected_parameter]["title"],
+                                    output,
+                                )
 
                             # PULS01ANA has a signal - we can correct GEDS energies for it!
                             # only in the case of energy parameters

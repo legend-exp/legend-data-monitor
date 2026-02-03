@@ -15,7 +15,7 @@ Trapemax:
     - dodgerblue
     - b
   percentage: true
-  title: "pulser_stab"
+  title: "pulser_stab_uncalib"
   limits:
     - null
     - null

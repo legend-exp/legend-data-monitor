@@ -1442,13 +1442,15 @@ def find_over_threshold(
         return pd.Series([], dtype="bool")
 
     low, high = threshold
-    mask = pd.Series(False, index=data_series.index)
-    if low is not None:
-        mask |= data_series < low
-    if high is not None:
-        mask |= data_series > high
+    over_threshold = False
+    if low is not None and high is not None:
+        over_threshold = ((data_series > high) | (data_series < low)).any()
+    elif low is not None:
+        over_threshold = (data_series < low).any()
+    elif high is not None:
+        over_threshold = (data_series > high).any()
 
-    return data_series[mask]
+    return over_threshold
 
 
 def check_threshold(
@@ -1484,10 +1486,12 @@ def check_threshold(
         update_evaluation_in_memory(output, channel_name, "phy", parameter, False)
         return
 
-    over_threshold_timestamps = find_over_threshold(
+    # if available FWHM we can compare gain (or any other inspected parameter)
+    condition = find_over_threshold(
         data_series, last_checked, t0, threshold
     )
-    condition = not over_threshold_timestamps.empty
+    # condition = true -> some values over threshold, mark it as 'false' in the YAML
+    # condition = false -> no values over threshold, mark it as 'true' in the YAML
     update_evaluation_in_memory(output, channel_name, "phy", parameter, not condition)
 
     return
