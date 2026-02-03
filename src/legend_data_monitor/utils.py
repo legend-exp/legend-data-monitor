@@ -99,6 +99,12 @@ COLUMNS_TO_LOAD = [
 # map position/location for special systems
 SPECIAL_SYSTEMS = {"pulser": 0, "pulser01ana": -1, "FCbsln": -2, "muon": -3}
 
+# periods division for SC database access
+PERIOD_TO_DB = {
+    "p01": "scdbL60",
+    **{f"p{str(i).zfill(2)}": "scdbL140" for i in range(2, 14)},
+}
+
 # dictionary with timestamps to remove for specific channels
 with open(pkg / "settings" / "remove-keys.yaml") as f:
     REMOVE_KEYS = yaml.load(f, Loader=yaml.CLoader)["remove-keys"]
