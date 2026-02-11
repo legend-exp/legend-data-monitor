@@ -714,7 +714,7 @@ def check_calibration(
             )  # check for cuspEmax_ctc_runcal or cuspEmax_ctc_cal
             pk_fits = monitoring.get_energy_key(ecal_results).get("pk_fits", {})
 
-            operations = pars[ged]['operations']
+            operations = pars[ged]["operations"]
             operations_ecal = monitoring.get_energy_key(
                 operations
             )  # check for cuspEmax_ctc_runcal or cuspEmax_ctc_cal
