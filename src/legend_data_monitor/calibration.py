@@ -714,6 +714,11 @@ def check_calibration(
             )  # check for cuspEmax_ctc_runcal or cuspEmax_ctc_cal
             pk_fits = monitoring.get_energy_key(ecal_results).get("pk_fits", {})
 
+            operations = pars[ged]['operations']
+            operations_ecal = monitoring.get_energy_key(
+                operations
+            )  # check for cuspEmax_ctc_runcal or cuspEmax_ctc_cal
+
             # find FEP and low-E peaks (keys digits changed in the past, so let's be generic)
             fep_peaks = [p for p in pk_fits if 2613 < p < 2616]
             low_peaks = [p for p in pk_fits if 580 < p < 586]
@@ -755,10 +760,10 @@ def check_calibration(
                 if not first_run:
                     # channel might not be present in the previous run, leave it None if so
                     if ged in prev_pars:
-                        gain = ecal["eres_linear"]["parameters"]["a"]
+                        gain = operations_ecal["parameters"]["a"]
                         prev_gain = monitoring.get_energy_key(
-                            prev_pars[ged]["results"]["ecal"]
-                        )["eres_linear"]["parameters"]["a"]
+                            prev_pars[ged]["operations"]
+                        )["parameters"]["a"]
                         gain_dev = abs(gain - prev_gain) / prev_gain * 2039
                         utils.update_evaluation_in_memory(
                             output, ged, "cal", "const_stab", gain_dev <= 2
