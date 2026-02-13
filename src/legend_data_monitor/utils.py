@@ -99,6 +99,12 @@ COLUMNS_TO_LOAD = [
 # map position/location for special systems
 SPECIAL_SYSTEMS = {"pulser": 0, "pulser01ana": -1, "FCbsln": -2, "muon": -3}
 
+# periods division for SC database access
+PERIOD_TO_DB = {
+    "p01": "scdbL60",
+    **{f"p{str(i).zfill(2)}": "scdbL140" for i in range(2, 14)},
+}
+
 # dictionary with timestamps to remove for specific channels
 with open(pkg / "settings" / "remove-keys.yaml") as f:
     REMOVE_KEYS = yaml.load(f, Loader=yaml.CLoader)["remove-keys"]
@@ -1402,7 +1408,7 @@ def find_over_threshold(
     last_checked: float | None | str,
     t0: list,
     threshold: list,
-) -> pd.Series:
+) -> bool:
     """
     Return timestamps where values exceed the given thresholds.
 
@@ -1418,7 +1424,7 @@ def find_over_threshold(
         Threshold bounds; either can be None.
     """
     if data_series is None or all(v is None for v in threshold):
-        return pd.Series([], dtype="bool")
+        return False
 
     # filter by last_checked
     if last_checked not in ["None", None]:
@@ -1426,7 +1432,7 @@ def find_over_threshold(
         data_series = data_series[data_series.index > cutoff]
 
     if data_series.empty:
-        return pd.Series([], dtype="bool")
+        return False
 
     # define time window
     start = (
@@ -1439,16 +1445,18 @@ def find_over_threshold(
     data_series = data_series[mask_time]
 
     if data_series.empty:
-        return pd.Series([], dtype="bool")
+        return False
 
     low, high = threshold
-    mask = pd.Series(False, index=data_series.index)
-    if low is not None:
-        mask |= data_series < low
-    if high is not None:
-        mask |= data_series > high
+    over_threshold = False
+    if low is not None and high is not None:
+        over_threshold = ((data_series > high) | (data_series < low)).any()
+    elif low is not None:
+        over_threshold = (data_series < low).any()
+    elif high is not None:
+        over_threshold = (data_series > high).any()
 
-    return data_series[mask]
+    return over_threshold
 
 
 def check_threshold(
@@ -1484,10 +1492,10 @@ def check_threshold(
         update_evaluation_in_memory(output, channel_name, "phy", parameter, False)
         return
 
-    over_threshold_timestamps = find_over_threshold(
-        data_series, last_checked, t0, threshold
-    )
-    condition = not over_threshold_timestamps.empty
+    # if available FWHM we can compare gain (or any other inspected parameter)
+    condition = find_over_threshold(data_series, last_checked, t0, threshold)
+    # condition = true -> some values over threshold, mark it as 'false' in the YAML
+    # condition = false -> no values over threshold, mark it as 'true' in the YAML
     update_evaluation_in_memory(output, channel_name, "phy", parameter, not condition)
 
     return
@@ -1678,9 +1686,12 @@ def build_runinfo(path: str, version: str, proc_folder: str, output: str | None)
             break
 
     raw_paths = [
-        os.path.join(proc_folder, "ref-raw/generated/tier/raw"),
+        os.path.join(proc_folder, "ref/raw/ref-raw/generated/tier/raw"),
         os.path.join(proc_folder, "tmp-p14-raw/generated/tier/raw"),
         os.path.join(proc_folder, "ref-raw-new/generated/tier/raw"),
+        os.path.join(proc_folder, "ref/v0.1.0/generated/tier/raw"),
+        os.path.join(proc_folder, "ref/v3.0.0/generated/tier/raw"),
+        os.path.join(proc_folder, "ref/v3.0.1/generated/tier/raw"),
     ]
 
     # collect starting and ending timestamps
@@ -1772,19 +1783,21 @@ def build_runinfo(path: str, version: str, proc_folder: str, output: str | None)
             continue
 
         for run in runs[idx_p]:
-            versions = [version] if version == "tmp-auto" else ["tmp-auto", version]
+            versions = (
+                [version] if version == "auto/latest" else ["auto/latest", version]
+            )
 
             for v in versions:
                 tiers, _ = get_tiers_pars_folders(os.path.join(proc_folder, v))
                 my_dir = tiers[5] if os.path.isdir(tiers[5]) else tiers[6]
                 my_dir = os.path.join(my_dir, "phy")
 
-                if v != "tmp-auto":
+                if v != "auto/latest":
                     run_info = pulser_from_evt_or_mtg(
                         my_dir, period, run, output, run_info
                     )
 
-                if v == "tmp-auto":
+                if v == "auto/latest":
                     evt_path = os.path.join(my_dir, period, run)
                     if not os.path.isdir(evt_path):
                         continue

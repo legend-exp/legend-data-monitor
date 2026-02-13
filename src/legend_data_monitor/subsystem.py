@@ -889,9 +889,10 @@ class Subsystem:
                 (self.channel_map["status"] == "on")
                 | (self.channel_map["status"] == "ac")
                 | (self.channel_map["status"] == "True")
-                | (self.channel_map["status"] is True)
+                | (self.channel_map["status"] == True)  # noqa: E712
             ]["channel"]
         )
+
         # remove off channels
         removed_chs = list(
             self.channel_map[self.channel_map["status"] == "off"]["name"]

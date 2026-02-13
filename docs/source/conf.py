@@ -3,13 +3,22 @@
 import sys
 from pathlib import Path
 
-from pkg_resources import get_distribution
-
 sys.path.insert(0, Path("../../src").resolve().as_posix())
+
+try:
+    from importlib.metadata import version as get_version  # python 3.8+
+except ImportError:
+    from importlib_metadata import version as get_version
+
+try:
+    release = get_version("legend_data_monitor")
+except Exception:
+    release = "0.0.0"
+
+version = release
 
 project = "legend-data-monitor"
 copyright = "Copyright Holder"
-version = get_distribution("legend_data_monitor").version
 
 extensions = [
     "sphinx.ext.githubpages",
