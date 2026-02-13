@@ -96,4 +96,4 @@ We store SC data in the following way:
 
 .. note::
 
-  The accessible Slow Control database is ``scdb``. For databases with previous deployment data, you should use ``scdbL140`` or ``scdbL60`` (not implemented).
+  The accessible Slow Control database is ``scdb``. For databases with previous deployment data, ``scdbL140`` or ``scdbL60`` with data from the 142 kg or 60 kg campaign, respectively, will be automatically retrieved based on the period you want to inspect.

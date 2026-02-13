@@ -1,12 +1,21 @@
 Potpourri
 =========
 
-Flowchart of the analysis
--------------------------
+Subsystem Channel Map
+---------------------
 
-.. image:: images/flow.png
-   :alt: Flowchart of modules under legend-data-monitor/src (left) and attic/automatic_prod (right). On the right, the logic behind automatic production of tables and plots is briefly outlined. For more details, check the README.md under attic/automatic_prod
-   :width: 600px
+You can quickly retrieve any subsystem (geds, spms, PULS01/PULS01ANA/BSLN01/MUON01 aux channels) channel map in the following way:
+
+.. code-block:: python
+
+    import legend_data_monitor as ldm
+
+    geds = ldm.Subsystem('geds', experiment='L200', period='p18', runs=0, type='phy', path='/global/cfs/cdirs/m2676/data/lngs/l200/public/prodenv/prod-blind/', version='auto/latest')
+
+    geds.channel_map
+
+
+
 
 
 How to build runinfo.yaml
