@@ -405,7 +405,7 @@ def dataset_validity_check(data_info: dict):
         logger.error("\033[91mProvide period!\033[0m")
         return
 
-    data_types = ["phy", "cal", "lac", "ssc", "pzc"]
+    data_types = ["phy", "cal", "lac", "ssc", "pzc", "bkg", "tst"]
     if not data_info["type"] in data_types:
         logger.error("\033[91mInvalid data type provided!\033[0m")
         return

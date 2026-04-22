@@ -32,7 +32,19 @@ def auto_run(
     )
     auto_dir_path = os.path.join(auto_dir, ref_version)
     found = False
-    for tier in ["hit", "pht", "dsp", "psp", "evt", "pet", "ssc", "lac", "rdc", "bkg"]:
+    for tier in [
+        "hit",
+        "pht",
+        "dsp",
+        "psp",
+        "evt",
+        "pet",
+        "ssc",
+        "lac",
+        "rdc",
+        "bkg",
+        "tst",
+    ]:
         search_directory = os.path.join(
             auto_dir_path, "generated/tier", tier, data_type
         )
