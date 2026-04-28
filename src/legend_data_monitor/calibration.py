@@ -646,7 +646,7 @@ def check_calibration(
                 utils.logger.debug(f"...using previous calibration from {prev_run}")
                 prev_pars = utils.read_json_or_yaml(files[0])
                 break
-
+        
         if prev_pars is None:
             utils.logger.debug(
                 f"No previous calibration files found for {run}, treat as first run"
@@ -714,7 +714,7 @@ def check_calibration(
             )  # check for cuspEmax_ctc_runcal or cuspEmax_ctc_cal
             pk_fits = monitoring.get_energy_key(ecal_results).get("pk_fits", {})
 
-            operations = pars[ged]["operations"]
+            operations = pars[ged]["pars"]["operations"]
             operations_ecal = monitoring.get_energy_key(
                 operations
             )  # check for cuspEmax_ctc_runcal or cuspEmax_ctc_cal
@@ -760,10 +760,10 @@ def check_calibration(
                 if not first_run:
                     # channel might not be present in the previous run, leave it None if so
                     if ged in prev_pars:
-                        gain = operations_ecal["parameters"]["a"]
+                        gain = operations_ecal["parameters"]["b"]
                         prev_gain = monitoring.get_energy_key(
-                            prev_pars[ged]["operations"]
-                        )["parameters"]["a"]
+                            prev_pars[ged]["pars"]["operations"]
+                        )["parameters"]["b"]
                         gain_dev = abs(gain - prev_gain) / prev_gain * 2039
                         utils.update_evaluation_in_memory(
                             output, ged, "cal", "const_stab", gain_dev <= 2
