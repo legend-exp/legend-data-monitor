@@ -10,13 +10,13 @@ from functools import partial
 
 import awkward as ak
 import h5py
+import lh5
 import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import pytz
 import yaml
-from lgdo import lh5
 from lgdo.lh5 import read_as
 from matplotlib.patches import Patch
 
