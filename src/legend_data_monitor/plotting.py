@@ -5,8 +5,8 @@ from typing import Union
 
 import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
-from matplotlib.axes import Axes
 import numpy as np
+from matplotlib.axes import Axes
 from matplotlib.backends.backend_pdf import PdfPages
 from pandas import DataFrame
 from seaborn import color_palette
@@ -1033,16 +1033,18 @@ def save_pdf(plt, pdf: PdfPages):
         plt.savefig(pdf, format="pdf", bbox_inches="tight")
         plt.close()
 
+
 # -------------------------------------------------------------------------------
 # energy-scale plotting functions
 # -------------------------------------------------------------------------------
+
 
 def apply_cal_to_following_run(mu_vals: np.ndarray, cal_vals: np.ndarray):
     """
     Apply calibration parameters from each run to the following run's ADC values.
     Returns a list of calibrated peak positions in keV for each following run.
 
-    Assumes `mu_vals` and `cal_vals` have the same length. 
+    Assumes `mu_vals` and `cal_vals` have the same length.
     If `mu_vals` and `cal_vals` do not have the same length an error is raised.
     The function shifts the arrays so that each calibration is applied to the subsequent run:
     - drops the first element of `mu_vals`
@@ -1057,15 +1059,16 @@ def apply_cal_to_following_run(mu_vals: np.ndarray, cal_vals: np.ndarray):
     cal_vals : np.ndarray
         Sequence of calibration polynomial coefficients (one per run).
     """
-    if len(mu_vals)==len(cal_vals):
-        mu_vals  = mu_vals [1:  ]
-        cal_vals = cal_vals[ :-1]
-        mu_keV   = []
+    if len(mu_vals) == len(cal_vals):
+        mu_vals = mu_vals[1:]
+        cal_vals = cal_vals[:-1]
+        mu_keV = []
         for mu, cal_v in zip(mu_vals, cal_vals):
             mu_keV.append(np.polynomial.polynomial.polyval(mu, cal_v))
         return mu_keV
     else:
         raise ValueError
+
 
 def filter_period(keys: list, vals: list, *periods):
     """
@@ -1082,14 +1085,16 @@ def filter_period(keys: list, vals: list, *periods):
     *periods : ntuple of str
         Variable number of prefix strings to filter by.
     """
-    items = [(k, v) for k, v in zip(keys, vals)
-             if any(k.startswith(p) for p in periods)]
+    items = [
+        (k, v) for k, v in zip(keys, vals) if any(k.startswith(p) for p in periods)
+    ]
     if not items:
         return [], []
     ks, vs = zip(*items)
-    
+
     return list(ks), list(vs)
-    
+
+
 def plot_det_status(det_name: str, ax: Axes, detector_status: dict, keys: list):
     """
     Overlay detector usability status as shaded regions on a plot.
@@ -1107,17 +1112,18 @@ def plot_det_status(det_name: str, ax: Axes, detector_status: dict, keys: list):
     keys : list
         Ordered run keys corresponding to x-axis positions.
     """
-    proc_vals = detector_status[det_name]['processable']
-    usab_vals = detector_status[det_name]['usability']
+    proc_vals = detector_status[det_name]["processable"]
+    usab_vals = detector_status[det_name]["usability"]
 
     for j, k in enumerate(keys):
         proc_v = proc_vals[k]
         usab_v = usab_vals[k]
 
-        if usab_v == 'ac':
-            ax.axvspan(j - 0.5, j + 0.5, alpha=0.15, color='grey')
-        elif usab_v == 'off':
-            ax.axvspan(j - 0.5, j + 0.5, alpha=0.15, color='r')
+        if usab_v == "ac":
+            ax.axvspan(j - 0.5, j + 0.5, alpha=0.15, color="grey")
+        elif usab_v == "off":
+            ax.axvspan(j - 0.5, j + 0.5, alpha=0.15, color="r")
+
 
 def align_to_keys(all_keys: list, keys: list, values: list, categorical=False):
     """
@@ -1152,9 +1158,27 @@ def align_to_keys(all_keys: list, keys: list, values: list, categorical=False):
 
     return aligned
 
-def plot_variable(det_name: str, ax: Axes, all_keys: np.ndarray, keys: list, vals: list, det_status: dict, periods: list | str, current_run: str,
-                  errs=None, title='', units='keV', alpha=1,
-                  fixed_thr=None, err_thr=None, plot_det_stat=False, plot_mean=True, exclude_period=None, ylabel=None):
+
+def plot_variable(
+    det_name: str,
+    ax: Axes,
+    all_keys: np.ndarray,
+    keys: list,
+    vals: list,
+    det_status: dict,
+    periods: list | str,
+    current_run: str,
+    errs=None,
+    title="",
+    units="keV",
+    alpha=1,
+    fixed_thr=None,
+    err_thr=None,
+    plot_det_stat=False,
+    plot_mean=True,
+    exclude_period=None,
+    ylabel=None,
+):
     """
     Plot a detector variable over runs, grouped by data-taking periods.
 
@@ -1201,78 +1225,98 @@ def plot_variable(det_name: str, ax: Axes, all_keys: np.ndarray, keys: list, val
     ylabel : str, optional
         Custom y-axis label (overrides default).
     """
-    vals_aligned = align_to_keys(all_keys, keys, vals) if title!="Usability" else align_to_keys(all_keys, keys, vals, categorical=True)
+    vals_aligned = (
+        align_to_keys(all_keys, keys, vals)
+        if title != "Usability"
+        else align_to_keys(all_keys, keys, vals, categorical=True)
+    )
     errs_aligned = align_to_keys(all_keys, keys, errs) if errs is not None else None
 
     target = f"{periods}-{current_run}"
     not_out_of_bounds = None
-    
+
     x = np.arange(len(all_keys))
 
-    colors = plt.cm.tab10.colors 
+    colors = plt.cm.tab10.colors
 
     if plot_det_stat:
         plot_det_status(det_name, ax, det_status, all_keys)
 
     for i, period in enumerate(periods):
         color_p = colors[i % len(colors)]
-        
+
         if exclude_period and period in exclude_period:
             continue
 
         mask = np.array([k.startswith(period) for k in all_keys])
 
-        if title=="Usability":
+        if title == "Usability":
             x0 = x[mask]
             vals0 = vals_aligned[mask]
-        
+
             # map categories → numbers
-            mapping = {'off': 0, 'ac': 1, 'on': 2}
+            mapping = {"off": 0, "ac": 1, "on": 2}
             vals0 = np.array([mapping.get(v, np.nan) for v in vals0])
-        
+
             valid = ~np.isnan(vals0)
             x0 = x0[valid]
             vals0 = vals0[valid]
-        
-            ax.plot(x0, vals0, ls='-', marker='o', color=color_p, alpha=alpha)
-        
-            continue 
 
-        x0    = x           [mask]
+            ax.plot(x0, vals0, ls="-", marker="o", color=color_p, alpha=alpha)
+
+            continue
+
+        x0 = x[mask]
         vals0 = vals_aligned[mask]
         valid = ~np.isnan(vals0)
-        x0    = x0   [valid]
+        x0 = x0[valid]
         vals0 = vals0[valid]
 
         if len(x0) == 0:
             continue
 
-        ax.plot(x0, vals0, ls='--', lw=1, marker="*", color=color_p, alpha=alpha)
+        ax.plot(x0, vals0, ls="--", lw=1, marker="*", color=color_p, alpha=alpha)
 
         if errs_aligned is not None:
             errs0 = errs_aligned[mask][valid]
             ax.fill_between(x0, vals0 - errs0, vals0 + errs0, alpha=0.3, color=color_p)
 
-        lim_line0 = x0[ 0] - 0.5
+        lim_line0 = x0[0] - 0.5
         lim_line1 = x0[-1] + 0.5
 
         # Compute mean but include only values where detector is ON
-        usab_vals    = det_status[det_name]['usability']
-        usab_aligned = align_to_keys(all_keys, list(usab_vals.keys()), list(usab_vals.values()), categorical=True)        
-        
-        usab0     = usab_aligned[mask][valid]
-        good      = (usab0 == 'on')
+        usab_vals = det_status[det_name]["usability"]
+        usab_aligned = align_to_keys(
+            all_keys, list(usab_vals.keys()), list(usab_vals.values()), categorical=True
+        )
+
+        usab0 = usab_aligned[mask][valid]
+        good = usab0 == "on"
         vals_good = vals0[good]
-        
+
         if len(vals_good) > 0:
             mean_arr_p = np.nanmean(vals_good)
-        
+
             if plot_mean:
-                ax.hlines(mean_arr_p, lim_line0, lim_line1, color='k', ls=":", lw=1.2)
-        
+                ax.hlines(mean_arr_p, lim_line0, lim_line1, color="k", ls=":", lw=1.2)
+
             if fixed_thr is not None:
-                ax.hlines(mean_arr_p + fixed_thr, lim_line0, lim_line1, color='r', ls="--", lw=1.2)
-                ax.hlines(mean_arr_p - fixed_thr, lim_line0, lim_line1, color='r', ls="--", lw=1.2)
+                ax.hlines(
+                    mean_arr_p + fixed_thr,
+                    lim_line0,
+                    lim_line1,
+                    color="r",
+                    ls="--",
+                    lw=1.2,
+                )
+                ax.hlines(
+                    mean_arr_p - fixed_thr,
+                    lim_line0,
+                    lim_line1,
+                    color="r",
+                    ls="--",
+                    lw=1.2,
+                )
 
                 if target in all_keys:
                     idx = np.where(all_keys == target)[0][0]
@@ -1280,14 +1324,28 @@ def plot_variable(det_name: str, ax: Axes, all_keys: np.ndarray, keys: list, val
                     upper = mean_arr_p + fixed_thr
                     lower = mean_arr_p - fixed_thr
                     not_out_of_bounds = bool(lower <= val <= upper)
-                    
+
             if err_thr is not None and errs_aligned is not None:
-                errs0     = errs_aligned[mask][valid]
+                errs0 = errs_aligned[mask][valid]
                 errs_good = errs0[good]
                 means_err = np.nanmean(errs_good)
-        
-                ax.hlines(mean_arr_p - err_thr * means_err, lim_line0, lim_line1, color='r', ls="--", lw=1.2)
-                ax.hlines(mean_arr_p + err_thr * means_err, lim_line0, lim_line1, color='r', ls="--", lw=1.2)
+
+                ax.hlines(
+                    mean_arr_p - err_thr * means_err,
+                    lim_line0,
+                    lim_line1,
+                    color="r",
+                    ls="--",
+                    lw=1.2,
+                )
+                ax.hlines(
+                    mean_arr_p + err_thr * means_err,
+                    lim_line0,
+                    lim_line1,
+                    color="r",
+                    ls="--",
+                    lw=1.2,
+                )
 
                 if target in all_keys:
                     idx = np.where(all_keys == target)[0][0]
@@ -1295,27 +1353,38 @@ def plot_variable(det_name: str, ax: Axes, all_keys: np.ndarray, keys: list, val
                     upper = mean_arr_p + err_thr * means_err
                     lower = mean_arr_p - err_thr * means_err
                     not_out_of_bounds = bool(lower <= val <= upper)
-    
+
     ax.set_title(title, fontsize=14)
     if ylabel is None:
-        ax.set_ylabel(f'{title} ({units})')
+        ax.set_ylabel(f"{title} ({units})")
     else:
         ax.set_ylabel(ylabel)
     ax.set_xticks(x)
     ax.set_xticklabels(all_keys, rotation=90, fontsize=11)
     ax.grid(False)
 
-    if title=="Usability":
-        ax.plot([],[],color='r',ls='--',label='Thresholds')
-        ax.plot([],[],color='k',ls=':',label='Mean')
+    if title == "Usability":
+        ax.plot([], [], color="r", ls="--", label="Thresholds")
+        ax.plot([], [], color="k", ls=":", label="Mean")
         ax.set_yticks([0, 1, 2])
-        ax.set_yticklabels(['OFF', 'AC', 'ON'])
+        ax.set_yticklabels(["OFF", "AC", "ON"])
         ax.set_ylabel("Status")
         ax.legend(fontsize=11)
 
     return not_out_of_bounds
 
-def plot_all_detector_info(det_name: str, det_info: dict, partitions_params: dict, detector_status: dict, period: str, current_run: str, output_folder: str, save_pdf=False, exclude_period=None):
+
+def plot_all_detector_info(
+    det_name: str,
+    det_info: dict,
+    partitions_params: dict,
+    detector_status: dict,
+    period: str,
+    current_run: str,
+    output_folder: str,
+    save_pdf=False,
+    exclude_period=None,
+):
     """
     Generate a comprehensive multi-panel summary plot of detector performance.
 
@@ -1347,23 +1416,23 @@ def plot_all_detector_info(det_name: str, det_info: dict, partitions_params: dic
         True if you want to save pdf files too; default: False.
     exclude_period : list of str, optional
         Period prefixes to exclude from plotting.
-    """    
-    string = det_info["detectors"][det_name]['string']
-    position = det_info["detectors"][det_name]['position']
+    """
+    string = det_info["detectors"][det_name]["string"]
+    position = det_info["detectors"][det_name]["position"]
     det_results = partitions_params[det_name]
-    usab_values = detector_status[det_name]['usability']
-    
+    usab_values = detector_status[det_name]["usability"]
+
     all_keys = np.array(sorted(usab_values.keys()))
-    
+
     e_583 = 583.191
     e_sep = 2103.511
     e_fep = 2614.511
-    
-    fig, axs = plt.subplots(nrows=4, ncols=3, figsize=(14, 14), facecolor='white')
+
+    fig, axs = plt.subplots(nrows=4, ncols=3, figsize=(14, 14), facecolor="white")
 
     def safe_peak(det_results, field, energy):
         return det_results.get(field, {}).get(energy, {})
-    
+
     def to_arrays(d):
         if not d:
             return np.array([]), np.array([])
@@ -1371,103 +1440,307 @@ def plot_all_detector_info(det_name: str, det_info: dict, partitions_params: dic
         keys = np.array([k for k, _ in items])
         vals = np.array([v for _, v in items])
         return keys, vals
-    
+
     def to_arrays_err(d):
         if not d:
             return np.array([])
         items = sorted(d.items())
         return np.array([v for _, v in items])
-    
+
     # --- FEP ---
-    mu_fep_keV_first_cal_dict = safe_peak(det_results, 'mus_keV_first_cal_peaks', e_fep)
-    mu_fep_keV_first_cal_keys, mu_fep_keV_first_cal = to_arrays(mu_fep_keV_first_cal_dict)
-    mu_fep_keV_first_cal_err = to_arrays_err(safe_peak(det_results, 'mus_keV_first_cal_err_peaks', e_fep))
-    
-    mu_fep_keV_keys, mu_fep_keV = to_arrays(safe_peak(det_results, 'mus_keV_peaks', e_fep))
-    mu_fep_keV_err = to_arrays_err(safe_peak(det_results, 'mus_keV_err_peaks', e_fep))
-    
-    fwhm_fep_keys, fwhm_fep = to_arrays(safe_peak(det_results, 'fwhms_peaks', e_fep))
-    fwhm_fep_err = to_arrays_err(safe_peak(det_results, 'fwhms_err_peaks', e_fep))
-    
-    mu_fep_ADC_keys, mu_fep_ADC = to_arrays(safe_peak(det_results, 'mus_peaks', e_fep))
-    mu_fep_ADC_err = to_arrays_err(safe_peak(det_results, 'mus_err_peaks', e_fep))
-    
+    mu_fep_keV_first_cal_dict = safe_peak(det_results, "mus_keV_first_cal_peaks", e_fep)
+    mu_fep_keV_first_cal_keys, mu_fep_keV_first_cal = to_arrays(
+        mu_fep_keV_first_cal_dict
+    )
+    mu_fep_keV_first_cal_err = to_arrays_err(
+        safe_peak(det_results, "mus_keV_first_cal_err_peaks", e_fep)
+    )
+
+    mu_fep_keV_keys, mu_fep_keV = to_arrays(
+        safe_peak(det_results, "mus_keV_peaks", e_fep)
+    )
+    mu_fep_keV_err = to_arrays_err(safe_peak(det_results, "mus_keV_err_peaks", e_fep))
+
+    fwhm_fep_keys, fwhm_fep = to_arrays(safe_peak(det_results, "fwhms_peaks", e_fep))
+    fwhm_fep_err = to_arrays_err(safe_peak(det_results, "fwhms_err_peaks", e_fep))
+
+    mu_fep_ADC_keys, mu_fep_ADC = to_arrays(safe_peak(det_results, "mus_peaks", e_fep))
+    mu_fep_ADC_err = to_arrays_err(safe_peak(det_results, "mus_err_peaks", e_fep))
+
     # --- 583 keV ---
-    fwhm_583_keys, fwhm_583 = to_arrays(safe_peak(det_results, 'fwhms_peaks', e_583))
-    fwhm_583_err = to_arrays_err(safe_peak(det_results, 'fwhms_err_peaks', e_583))
-    
+    fwhm_583_keys, fwhm_583 = to_arrays(safe_peak(det_results, "fwhms_peaks", e_583))
+    fwhm_583_err = to_arrays_err(safe_peak(det_results, "fwhms_err_peaks", e_583))
+
     # --- residuals ---
-    fep_residuals_keys, fep_residuals = to_arrays(safe_peak(det_results, 'residuals', e_fep))
-    sep_residuals_keys, sep_residuals = to_arrays(safe_peak(det_results, 'residuals', e_sep))
-    
+    fep_residuals_keys, fep_residuals = to_arrays(
+        safe_peak(det_results, "residuals", e_fep)
+    )
+    sep_residuals_keys, sep_residuals = to_arrays(
+        safe_peak(det_results, "residuals", e_sep)
+    )
+
     # --- derived ---
     diff_FEP_ADC = np.diff(mu_fep_ADC) if len(mu_fep_ADC) > 1 else np.array([])
-    diff_FEP_keV = np.diff(mu_fep_keV_first_cal) if len(mu_fep_keV_first_cal) > 1 else np.array([])
-    
-    cal_params = np.array(list(det_results.get('cal_params', {}).values()))
-    
-    gain_keys, gain = to_arrays(det_results.get('gains', {}))
-    gain_err = to_arrays_err(det_results.get('gains_err', {}))
-    
-    mu_fep_keV_foll_run = np.array(apply_cal_to_following_run(mu_fep_ADC, cal_params)) if len(mu_fep_ADC) > 1 else np.array([])
-    mu_fep_keV_foll_run_keys = mu_fep_ADC_keys[1:] if len(mu_fep_ADC_keys) > 1 else np.array([])
-    mu_fep_keV_diff = mu_fep_keV[1:] - mu_fep_keV_foll_run if len(mu_fep_keV) > 1 else np.array([])
-    
-    # --- other params ---
-    cusp_sigma_keys, cusp_sigma = to_arrays(det_results.get('cusp_sigma', {}))
-    etrap_rise = np.array(list(det_results.get('etrap_rise', {}).values()))
-    
-    bl_std_keys, bl_std = to_arrays(det_results.get('bl_std', {}))
-    bl_std_err = to_arrays_err(det_results.get('bl_std_err', {}))
-    
-    bl_max_keys, bl_max = to_arrays(det_results.get('bl_max', {}))
-    bl_max_err = to_arrays_err(det_results.get('bl_max_err', {}))
-    
-    pzc_keys, pzc = to_arrays(det_results.get('pz_tau', {}))
-    
-    alpha_ctc_keys, alpha_ctc = to_arrays(det_results.get('ctc_alpha_par', {}))
-    
-    aoe_mu_keys, aoe_mu = to_arrays(det_results.get('aoe_mu', {}))
-    aoe_mu_err = to_arrays_err(det_results.get('aoe_mu_err', {}))
-    
-    aoe_sigma_keys, aoe_sigma = to_arrays(det_results.get('aoe_sigma', {}))
-    aoe_sigma_err = to_arrays_err(det_results.get('aoe_sigma_err', {}))
-
-    _ = plot_variable(det_name, axs[0][0], all_keys, list(usab_values.keys()), list(usab_values.values()), detector_status, period, current_run, plot_det_stat=False, plot_mean=False, title='Usability'
+    diff_FEP_keV = (
+        np.diff(mu_fep_keV_first_cal) if len(mu_fep_keV_first_cal) > 1 else np.array([])
     )
-    escale_fwhm_FEP = plot_variable(det_name, axs[0][1], all_keys, fwhm_fep_keys,  fwhm_fep,  detector_status, period, current_run, fwhm_fep_err,  plot_det_stat=True, title='FWHM at FEP',  units='keV', err_thr=3, exclude_period=exclude_period)
-    escale_fwhm_583 = plot_variable(det_name, axs[0][2], all_keys, fwhm_583_keys,  fwhm_583,  detector_status, period, current_run, fwhm_583_err,  plot_det_stat=True, title='FWHM at 583 keV', units='keV', err_thr=3, exclude_period=exclude_period)
-    escale_FEP_pos = plot_variable(det_name, axs[1][0], all_keys, mu_fep_keV_first_cal_keys, mu_fep_keV_first_cal, detector_status, period, current_run, mu_fep_keV_first_cal_err, plot_det_stat=True, title='FEP position in keV using first cal', units='keV', fixed_thr=0.65375, exclude_period=exclude_period)
-    escale_SEP_residual = plot_variable(det_name, axs[1][1], all_keys, sep_residuals_keys, sep_residuals, detector_status, period, current_run, plot_det_stat=True, title='SEP residuals', units='keV', fixed_thr=0.65375, exclude_period=exclude_period)
-    _ = plot_variable(det_name, axs[1][2], all_keys, cusp_sigma_keys, cusp_sigma, detector_status, period, current_run, plot_det_stat=False, title='', exclude_period=exclude_period)
-    _ = plot_variable(det_name, axs[1][2], all_keys, cusp_sigma_keys, etrap_rise, detector_status, period, current_run, plot_det_stat=True, title='cusp sigma / etrap rise',  units=r'$\mu$s', alpha=0.3, exclude_period=exclude_period)
-    _ = plot_variable(det_name, axs[2][0], all_keys, bl_std_keys, bl_std, detector_status, period, current_run, plot_det_stat=True, title='bl std', units='ADC', exclude_period=exclude_period)
-    _ = plot_variable(det_name, axs[2][1], all_keys, bl_max_keys, bl_max, detector_status, period, current_run, plot_det_stat=True, title='bl max', units='ADC', exclude_period=exclude_period)
-    _ = plot_variable(det_name, axs[2][2], all_keys, pzc_keys,  pzc,  detector_status, period, current_run, plot_det_stat=True, title='PZ const', units=r'$\mu$s', exclude_period=exclude_period)
-    _ = plot_variable(det_name, axs[3][0], all_keys, alpha_ctc_keys, alpha_ctc, detector_status, period, current_run, plot_det_stat=True, title='alpha ctc', units='ns^-1', exclude_period=exclude_period)
-    _ = plot_variable(det_name, axs[3][1], all_keys, aoe_mu_keys, aoe_mu, detector_status, period, current_run, aoe_mu_err, plot_det_stat=True, title='AoE mu', units='a. u.', exclude_period=exclude_period)
-    _ = plot_variable(det_name, axs[3][2], all_keys, aoe_sigma_keys, aoe_sigma, detector_status, period, current_run, aoe_sigma_err, plot_det_stat=True, title='AoE sigma', units='a. u.', exclude_period=exclude_period)
-    
-    plt.suptitle(f'{det_name}, String {string}', fontsize=16)
+
+    cal_params = np.array(list(det_results.get("cal_params", {}).values()))
+
+    gain_keys, gain = to_arrays(det_results.get("gains", {}))
+    gain_err = to_arrays_err(det_results.get("gains_err", {}))
+
+    mu_fep_keV_foll_run = (
+        np.array(apply_cal_to_following_run(mu_fep_ADC, cal_params))
+        if len(mu_fep_ADC) > 1
+        else np.array([])
+    )
+    mu_fep_keV_foll_run_keys = (
+        mu_fep_ADC_keys[1:] if len(mu_fep_ADC_keys) > 1 else np.array([])
+    )
+    mu_fep_keV_diff = (
+        mu_fep_keV[1:] - mu_fep_keV_foll_run if len(mu_fep_keV) > 1 else np.array([])
+    )
+
+    # --- other params ---
+    cusp_sigma_keys, cusp_sigma = to_arrays(det_results.get("cusp_sigma", {}))
+    etrap_rise = np.array(list(det_results.get("etrap_rise", {}).values()))
+
+    bl_std_keys, bl_std = to_arrays(det_results.get("bl_std", {}))
+    bl_std_err = to_arrays_err(det_results.get("bl_std_err", {}))
+
+    bl_max_keys, bl_max = to_arrays(det_results.get("bl_max", {}))
+    bl_max_err = to_arrays_err(det_results.get("bl_max_err", {}))
+
+    pzc_keys, pzc = to_arrays(det_results.get("pz_tau", {}))
+
+    alpha_ctc_keys, alpha_ctc = to_arrays(det_results.get("ctc_alpha_par", {}))
+
+    aoe_mu_keys, aoe_mu = to_arrays(det_results.get("aoe_mu", {}))
+    aoe_mu_err = to_arrays_err(det_results.get("aoe_mu_err", {}))
+
+    aoe_sigma_keys, aoe_sigma = to_arrays(det_results.get("aoe_sigma", {}))
+    aoe_sigma_err = to_arrays_err(det_results.get("aoe_sigma_err", {}))
+
+    _ = plot_variable(
+        det_name,
+        axs[0][0],
+        all_keys,
+        list(usab_values.keys()),
+        list(usab_values.values()),
+        detector_status,
+        period,
+        current_run,
+        plot_det_stat=False,
+        plot_mean=False,
+        title="Usability",
+    )
+    escale_fwhm_FEP = plot_variable(
+        det_name,
+        axs[0][1],
+        all_keys,
+        fwhm_fep_keys,
+        fwhm_fep,
+        detector_status,
+        period,
+        current_run,
+        fwhm_fep_err,
+        plot_det_stat=True,
+        title="FWHM at FEP",
+        units="keV",
+        err_thr=3,
+        exclude_period=exclude_period,
+    )
+    escale_fwhm_583 = plot_variable(
+        det_name,
+        axs[0][2],
+        all_keys,
+        fwhm_583_keys,
+        fwhm_583,
+        detector_status,
+        period,
+        current_run,
+        fwhm_583_err,
+        plot_det_stat=True,
+        title="FWHM at 583 keV",
+        units="keV",
+        err_thr=3,
+        exclude_period=exclude_period,
+    )
+    escale_FEP_pos = plot_variable(
+        det_name,
+        axs[1][0],
+        all_keys,
+        mu_fep_keV_first_cal_keys,
+        mu_fep_keV_first_cal,
+        detector_status,
+        period,
+        current_run,
+        mu_fep_keV_first_cal_err,
+        plot_det_stat=True,
+        title="FEP position in keV using first cal",
+        units="keV",
+        fixed_thr=0.65375,
+        exclude_period=exclude_period,
+    )
+    escale_SEP_residual = plot_variable(
+        det_name,
+        axs[1][1],
+        all_keys,
+        sep_residuals_keys,
+        sep_residuals,
+        detector_status,
+        period,
+        current_run,
+        plot_det_stat=True,
+        title="SEP residuals",
+        units="keV",
+        fixed_thr=0.65375,
+        exclude_period=exclude_period,
+    )
+    _ = plot_variable(
+        det_name,
+        axs[1][2],
+        all_keys,
+        cusp_sigma_keys,
+        cusp_sigma,
+        detector_status,
+        period,
+        current_run,
+        plot_det_stat=False,
+        title="",
+        exclude_period=exclude_period,
+    )
+    _ = plot_variable(
+        det_name,
+        axs[1][2],
+        all_keys,
+        cusp_sigma_keys,
+        etrap_rise,
+        detector_status,
+        period,
+        current_run,
+        plot_det_stat=True,
+        title="cusp sigma / etrap rise",
+        units=r"$\mu$s",
+        alpha=0.3,
+        exclude_period=exclude_period,
+    )
+    _ = plot_variable(
+        det_name,
+        axs[2][0],
+        all_keys,
+        bl_std_keys,
+        bl_std,
+        detector_status,
+        period,
+        current_run,
+        plot_det_stat=True,
+        title="bl std",
+        units="ADC",
+        exclude_period=exclude_period,
+    )
+    _ = plot_variable(
+        det_name,
+        axs[2][1],
+        all_keys,
+        bl_max_keys,
+        bl_max,
+        detector_status,
+        period,
+        current_run,
+        plot_det_stat=True,
+        title="bl max",
+        units="ADC",
+        exclude_period=exclude_period,
+    )
+    _ = plot_variable(
+        det_name,
+        axs[2][2],
+        all_keys,
+        pzc_keys,
+        pzc,
+        detector_status,
+        period,
+        current_run,
+        plot_det_stat=True,
+        title="PZ const",
+        units=r"$\mu$s",
+        exclude_period=exclude_period,
+    )
+    _ = plot_variable(
+        det_name,
+        axs[3][0],
+        all_keys,
+        alpha_ctc_keys,
+        alpha_ctc,
+        detector_status,
+        period,
+        current_run,
+        plot_det_stat=True,
+        title="alpha ctc",
+        units="ns^-1",
+        exclude_period=exclude_period,
+    )
+    _ = plot_variable(
+        det_name,
+        axs[3][1],
+        all_keys,
+        aoe_mu_keys,
+        aoe_mu,
+        detector_status,
+        period,
+        current_run,
+        aoe_mu_err,
+        plot_det_stat=True,
+        title="AoE mu",
+        units="a. u.",
+        exclude_period=exclude_period,
+    )
+    _ = plot_variable(
+        det_name,
+        axs[3][2],
+        all_keys,
+        aoe_sigma_keys,
+        aoe_sigma,
+        detector_status,
+        period,
+        current_run,
+        aoe_sigma_err,
+        plot_det_stat=True,
+        title="AoE sigma",
+        units="a. u.",
+        exclude_period=exclude_period,
+    )
+
+    plt.suptitle(f"{det_name}, String {string}", fontsize=16)
     plt.tight_layout()
-    
+
     if save_pdf:
-        final_path = os.path.join(output_folder, period, "mtg/pdf", f"st{string}", f"{period}_string{string}_pos{position}_{det_name}_ESCALEusability.pdf")
+        final_path = os.path.join(
+            output_folder,
+            period,
+            "mtg/pdf",
+            f"st{string}",
+            f"{period}_string{string}_pos{position}_{det_name}_ESCALEusability.pdf",
+        )
         fig.savefig(final_path)
 
     # store the serialized plot in a shelve object under key
     serialized_plot = pickle.dumps(plt.gcf())
     with shelve.open(
         os.path.join(
-            output_folder, period, "mtg",
+            output_folder,
+            period,
+            "mtg",
             f"l200-{period}-cal-monitoring",
         ),
         "c",
         protocol=pickle.HIGHEST_PROTOCOL,
     ) as shelf:
-        shelf[
-            f"{period}_string{string}_pos{position}_{det_name}_ESCALEusability"
-        ] = serialized_plot
+        shelf[f"{period}_string{string}_pos{position}_{det_name}_ESCALEusability"] = (
+            serialized_plot
+        )
     plt.close()
 
     eval_result = {
