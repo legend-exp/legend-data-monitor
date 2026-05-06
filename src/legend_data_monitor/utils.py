@@ -12,12 +12,12 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
 import h5py
+import lh5
 import numpy as np
 import pandas as pd
 import yaml
 from dbetto import TextDB
 from legendmeta import LegendMetadata
-from lgdo import lh5
 from pandas import DataFrame
 
 # -------------------------------------------------------------------------

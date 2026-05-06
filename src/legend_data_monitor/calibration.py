@@ -3,12 +3,12 @@ import os
 import pickle
 import shelve
 
+import lh5
 import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import yaml
-from lgdo import lh5
 
 from . import monitoring, utils
 
