@@ -237,7 +237,7 @@ def auto_run(
     phy_folder = os.path.join(
         output_folder, ref_version, "generated/plt/hit", data_type
     )
-    os.makedirs(os.path.join(phy_folder, period, run), exist_ok=True)    
+    os.makedirs(os.path.join(phy_folder, period, run), exist_ok=True)
     if os.path.isfile(
         os.path.join(phy_folder, period, run, f"l200-{period}-{run}-qcp_summary.yaml")
     ):

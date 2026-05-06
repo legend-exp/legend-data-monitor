@@ -1523,7 +1523,7 @@ def get_map_dict(data_analysis: DataFrame):
     return map_dict
 
 
-def build_file_map(base_path: str, tier: str="hit") -> dict:
+def build_file_map(base_path: str, tier: str = "hit") -> dict:
     """
     Build mapping from (period, run) to calibration file paths.
     Returns (period, run) -> file path mapping.
@@ -1536,7 +1536,7 @@ def build_file_map(base_path: str, tier: str="hit") -> dict:
         Data tier ('hit' or 'dsp').
     """
     cal_path = os.path.join(base_path, "generated/par", tier, "cal")
-    
+
     files = glob.glob(f"{cal_path}/*/*/*.yaml")
     if not files:
         files = glob.glob(f"{cal_path}/*/*/*.json")
@@ -1545,9 +1545,9 @@ def build_file_map(base_path: str, tier: str="hit") -> dict:
 
     for f in files:
         parts = f.split(os.sep)
-        
+
         period = parts[-3]
-        run    = parts[-2]
+        run = parts[-2]
 
         file_map[(period, run)] = f
 
@@ -2093,12 +2093,13 @@ def build_detector_info_per_period(auto_dir_path: str, run_dict: dict, period: s
                 continue
 
             if det not in detector_status:
-                detector_status[det] = {
-                    "processable": {},
-                    "usability": {}
-                }
+                detector_status[det] = {"processable": {}, "usability": {}}
 
-            detector_status[det]["processable"][key] = info.get("analysis", {}).get("processable", False)
-            detector_status[det]["usability"][key]   = info.get("analysis", {}).get("usability", None)
+            detector_status[det]["processable"][key] = info.get("analysis", {}).get(
+                "processable", False
+            )
+            detector_status[det]["usability"][key] = info.get("analysis", {}).get(
+                "usability", None
+            )
 
     return detector_status

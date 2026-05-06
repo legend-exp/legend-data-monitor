@@ -29,8 +29,11 @@ matplotlib.rcParams["mathtext.fontset"] = "stix"
 
 plt.rc("axes", facecolor="white", edgecolor="black", axisbelow=True, grid=True)
 
+
 # -------------------------------------------------------------------------
-def get_partitions_params(ge_keys: list, detector_status: dict, run_dict: dict, hit_map: dict, dsp_map: dict) -> dict:
+def get_partitions_params(
+    ge_keys: list, detector_status: dict, run_dict: dict, hit_map: dict, dsp_map: dict
+) -> dict:
     """
     Build per-detector calibration and analysis parameters across runs.
     Returns a nested dictionary: det -> parameter -> peak -> run_key -> value
@@ -52,23 +55,37 @@ def get_partitions_params(ge_keys: list, detector_status: dict, run_dict: dict, 
 
     hit_cache = {}
     dsp_cache = {}
-    
+
     ref_cal_pars_map = {}
 
     for det_name in ge_keys:
-        all_params_ch[det_name] = {'mus_peaks':               {}, 'mus_err_peaks':               {},
-                                   'mus_keV_peaks':           {}, 'mus_keV_err_peaks':           {},
-                                   'mus_keV_first_cal_peaks': {}, 'mus_keV_first_cal_err_peaks': {},
-                                   'fwhms_peaks':             {}, 'fwhms_err_peaks':             {},
-                                   'gains':                   {}, 'gains_err':                   {},
-                                   'ctc_alpha_par':           {},
-                                   'bl_std':                  {}, 'bl_max':                      {},
-                                   'bl_std_err':              {}, 'bl_max_err':                  {},
-                                   'aoe_mu':                  {}, 'aoe_mu_err':                  {},
-                                   'aoe_sigma':               {}, 'aoe_sigma_err':               {},
-                                   'cusp_sigma':              {}, 'etrap_rise':                  {},
-                                   'zac_sigma':               {}, 'pz_tau':                      {},
-                                   'cal_params':              {}, 'residuals':                   {}}
+        all_params_ch[det_name] = {
+            "mus_peaks": {},
+            "mus_err_peaks": {},
+            "mus_keV_peaks": {},
+            "mus_keV_err_peaks": {},
+            "mus_keV_first_cal_peaks": {},
+            "mus_keV_first_cal_err_peaks": {},
+            "fwhms_peaks": {},
+            "fwhms_err_peaks": {},
+            "gains": {},
+            "gains_err": {},
+            "ctc_alpha_par": {},
+            "bl_std": {},
+            "bl_max": {},
+            "bl_std_err": {},
+            "bl_max_err": {},
+            "aoe_mu": {},
+            "aoe_mu_err": {},
+            "aoe_sigma": {},
+            "aoe_sigma_err": {},
+            "cusp_sigma": {},
+            "etrap_rise": {},
+            "zac_sigma": {},
+            "pz_tau": {},
+            "cal_params": {},
+            "residuals": {},
+        }
 
     for period, runs in run_dict.items():
         for run in runs:
@@ -94,103 +111,142 @@ def get_partitions_params(ge_keys: list, detector_status: dict, run_dict: dict, 
                 data_pd = {}
 
             for det_name in ge_keys:
-                if not detector_status[det_name]['processable'].get(key, False):
+                if not detector_status[det_name]["processable"].get(key, False):
                     continue
-    
+
                 try:
                     pars_per_ch = all_params_ch[det_name]
-                    data_det    = data_ph      [det_name]
-                    ecal        = data_det['results']['ecal']
-                    results     = ecal    ['cuspEmax_ctc_cal']
-                    peak_fits   = results ['pk_fits']
-                    cal_op      = data_det['pars']['operations']['cuspEmax_ctc_cal']['parameters']
-                    cal_pars    = list(cal_op.values())
-                    
-                    pars_per_ch['gains']        [key] = results['eres_linear']['parameters']   ['b']
-                    pars_per_ch['gains_err']    [key] = results['eres_linear']['uncertainties']['b']
-                    pars_per_ch['ctc_alpha_par'][key] = data_det['pars']['operations']['cuspEmax_ctc']['parameters']['a']
+                    data_det = data_ph[det_name]
+                    ecal = data_det["results"]["ecal"]
+                    results = ecal["cuspEmax_ctc_cal"]
+                    peak_fits = results["pk_fits"]
+                    cal_op = data_det["pars"]["operations"]["cuspEmax_ctc_cal"][
+                        "parameters"
+                    ]
+                    cal_pars = list(cal_op.values())
 
-                        
+                    pars_per_ch["gains"][key] = results["eres_linear"]["parameters"][
+                        "b"
+                    ]
+                    pars_per_ch["gains_err"][key] = results["eres_linear"][
+                        "uncertainties"
+                    ]["b"]
+                    pars_per_ch["ctc_alpha_par"][key] = data_det["pars"]["operations"][
+                        "cuspEmax_ctc"
+                    ]["parameters"]["a"]
+
                     if det_name not in ref_cal_pars_map:
                         ref_cal_pars_map[det_name] = {}
-                    
+
                     # set reference only once per period, using first GOOD run
-                    if (period not in ref_cal_pars_map[det_name]
-                        and detector_status[det_name]['usability'].get(key) == 'on'):
+                    if (
+                        period not in ref_cal_pars_map[det_name]
+                        and detector_status[det_name]["usability"].get(key) == "on"
+                    ):
                         ref_cal_pars_map[det_name][period] = cal_pars
-                    
+
                     # fallback if no "on" run was found yet
                     if period in ref_cal_pars_map[det_name]:
                         ref_cal_pars = ref_cal_pars_map[det_name][period]
                     else:
                         ref_cal_pars = cal_pars  # fallback to current run
-                
+
                     for peak, peak_data in peak_fits.items():
 
-                        if peak not in pars_per_ch['mus_keV_peaks']:
-                            for field in ['mus_peaks',               'mus_err_peaks',
-                                          'mus_keV_peaks',           'mus_keV_err_peaks',
-                                          'mus_keV_first_cal_peaks', 'mus_keV_first_cal_err_peaks',
-                                          'fwhms_peaks', 'fwhms_err_peaks', 'residuals']:
+                        if peak not in pars_per_ch["mus_keV_peaks"]:
+                            for field in [
+                                "mus_peaks",
+                                "mus_err_peaks",
+                                "mus_keV_peaks",
+                                "mus_keV_err_peaks",
+                                "mus_keV_first_cal_peaks",
+                                "mus_keV_first_cal_err_peaks",
+                                "fwhms_peaks",
+                                "fwhms_err_peaks",
+                                "residuals",
+                            ]:
                                 pars_per_ch[field][peak] = {}
 
-                        peak_tmp     = peak_data['position']
-                        peak_tmp_err = peak_data['position_uncertainty']
-                        fwhm_tmp     = peak_data['fwhm_in_kev']
-                        fwhm_err_tmp = peak_data['fwhm_err_in_kev']
+                        peak_tmp = peak_data["position"]
+                        peak_tmp_err = peak_data["position_uncertainty"]
+                        fwhm_tmp = peak_data["fwhm_in_kev"]
+                        fwhm_err_tmp = peak_data["fwhm_err_in_kev"]
 
-                        peak_kev           = np.polynomial.polynomial.polyval(peak_tmp,     cal_pars)
-                        peak_kev_err       = np.polynomial.polynomial.polyval(peak_tmp_err, cal_pars)
-                        peak_kev_first     = np.polynomial.polynomial.polyval(peak_tmp,     ref_cal_pars)
-                        peak_kev_first_err = np.polynomial.polynomial.polyval(peak_tmp_err, ref_cal_pars)
+                        peak_kev = np.polynomial.polynomial.polyval(peak_tmp, cal_pars)
+                        peak_kev_err = np.polynomial.polynomial.polyval(
+                            peak_tmp_err, cal_pars
+                        )
+                        peak_kev_first = np.polynomial.polynomial.polyval(
+                            peak_tmp, ref_cal_pars
+                        )
+                        peak_kev_first_err = np.polynomial.polynomial.polyval(
+                            peak_tmp_err, ref_cal_pars
+                        )
 
-                        pars_per_ch['mus_peaks']                  [peak][key] = peak_tmp
-                        pars_per_ch['mus_err_peaks']              [peak][key] = peak_tmp_err
-                        pars_per_ch['mus_keV_peaks']              [peak][key] = peak_kev
-                        pars_per_ch['mus_keV_err_peaks']          [peak][key] = peak_kev_err
-                        pars_per_ch['mus_keV_first_cal_peaks']    [peak][key] = peak_kev_first
-                        pars_per_ch['mus_keV_first_cal_err_peaks'][peak][key] = peak_kev_first_err
-                        pars_per_ch['fwhms_peaks']                [peak][key] = fwhm_tmp
-                        pars_per_ch['fwhms_err_peaks']            [peak][key] = fwhm_err_tmp
-                        pars_per_ch['residuals']                  [peak][key] = peak_kev - float(peak)
+                        pars_per_ch["mus_peaks"][peak][key] = peak_tmp
+                        pars_per_ch["mus_err_peaks"][peak][key] = peak_tmp_err
+                        pars_per_ch["mus_keV_peaks"][peak][key] = peak_kev
+                        pars_per_ch["mus_keV_err_peaks"][peak][key] = peak_kev_err
+                        pars_per_ch["mus_keV_first_cal_peaks"][peak][
+                            key
+                        ] = peak_kev_first
+                        pars_per_ch["mus_keV_first_cal_err_peaks"][peak][
+                            key
+                        ] = peak_kev_first_err
+                        pars_per_ch["fwhms_peaks"][peak][key] = fwhm_tmp
+                        pars_per_ch["fwhms_err_peaks"][peak][key] = fwhm_err_tmp
+                        pars_per_ch["residuals"][peak][key] = peak_kev - float(peak)
 
-                    pars_per_ch['cal_params'][key] = cal_pars
+                    pars_per_ch["cal_params"][key] = cal_pars
 
-                    mon                            = ecal["monitoring_parameters"]
-                    pars_per_ch['bl_std'][key]     = mon["bl_std"]      ["mode"]
-                    pars_per_ch['bl_max'][key]     = mon["baselineEmax"]["mode"]
-                    pars_per_ch['bl_std_err'][key] = mon["bl_std"]      ["stdev"]
-                    pars_per_ch['bl_max_err'][key] = mon["baselineEmax"]["stdev"]
+                    mon = ecal["monitoring_parameters"]
+                    pars_per_ch["bl_std"][key] = mon["bl_std"]["mode"]
+                    pars_per_ch["bl_max"][key] = mon["baselineEmax"]["mode"]
+                    pars_per_ch["bl_std_err"][key] = mon["bl_std"]["stdev"]
+                    pars_per_ch["bl_max_err"][key] = mon["baselineEmax"]["stdev"]
 
-                    aoe_block = data_det['results']['aoe']['1000-1300keV']
-                    ts        = next(iter(aoe_block))
-                    aoe       = aoe_block[ts]
+                    aoe_block = data_det["results"]["aoe"]["1000-1300keV"]
+                    ts = next(iter(aoe_block))
+                    aoe = aoe_block[ts]
 
-                    pars_per_ch['aoe_mu']       [key] = aoe['mean']
-                    pars_per_ch['aoe_mu_err']   [key] = aoe['mean_err']
-                    pars_per_ch['aoe_sigma']    [key] = aoe['sigma']
-                    pars_per_ch['aoe_sigma_err'][key] = aoe['sigma_err']
+                    pars_per_ch["aoe_mu"][key] = aoe["mean"]
+                    pars_per_ch["aoe_mu_err"][key] = aoe["mean_err"]
+                    pars_per_ch["aoe_sigma"][key] = aoe["sigma"]
+                    pars_per_ch["aoe_sigma_err"][key] = aoe["sigma_err"]
 
                     if dsp_fname and det_name in data_pd:
                         det_dsp = data_pd[det_name]
 
                         if "cusp" in det_dsp:
-                            pars_per_ch['cusp_sigma'][key] = float(det_dsp["cusp"]["sigma"].split("*")[0])
+                            pars_per_ch["cusp_sigma"][key] = float(
+                                det_dsp["cusp"]["sigma"].split("*")[0]
+                            )
                         if "etrap" in det_dsp:
-                            pars_per_ch['etrap_rise'][key] = float(det_dsp["etrap"]["rise"].split("*")[0])
+                            pars_per_ch["etrap_rise"][key] = float(
+                                det_dsp["etrap"]["rise"].split("*")[0]
+                            )
                         if "pz" in det_dsp:
-                            pars_per_ch['pz_tau'][key] = float(det_dsp["pz"]["tau1"].split("*")[0]) / 1000
+                            pars_per_ch["pz_tau"][key] = (
+                                float(det_dsp["pz"]["tau1"].split("*")[0]) / 1000
+                            )
 
                 except (KeyError, TypeError) as e:
-                    utils.logger.error(f'Error with {det_name}')
+                    utils.logger.error(f"Error with {det_name}")
                     utils.logger.error(e)
                     continue
 
     return all_params_ch
 
 
-
-def check_escale(auto_dir_path: str, cal_path: str, output_folder: str, period: str, current_run: str, det_info: dict, save_pdf: bool) -> None:
+def check_escale(
+    auto_dir_path: str,
+    cal_path: str,
+    output_folder: str,
+    period: str,
+    current_run: str,
+    det_info: dict,
+    save_pdf: bool,
+) -> None:
     """
     Run energy-scale calibration checks and generate detector plots.
 
@@ -213,13 +269,15 @@ def check_escale(auto_dir_path: str, cal_path: str, output_folder: str, period: 
     """
     utils.logger.debug("...inspecting energy-scale stability in cal runs")
     hit_map = utils.build_file_map(auto_dir_path, tier="hit")
-    dsp_map = utils.build_file_map(auto_dir_path, tier="dsp") 
+    dsp_map = utils.build_file_map(auto_dir_path, tier="dsp")
 
     run_dict = {period: sorted(os.listdir(cal_path))}
     detectors_name = list(det_info["detectors"].keys())
 
-    detector_status = utils.build_detector_info_per_period(auto_dir_path, run_dict, period)
-                
+    detector_status = utils.build_detector_info_per_period(
+        auto_dir_path, run_dict, period
+    )
+
     partitions_params = get_partitions_params(
         detectors_name, detector_status, run_dict, hit_map, dsp_map
     )
@@ -234,31 +292,47 @@ def check_escale(auto_dir_path: str, cal_path: str, output_folder: str, period: 
     for det_name in detectors_name:
         eval_result = plotting.plot_all_detector_info(
             det_name,
-            det_info, 
+            det_info,
             partitions_params,
             detector_status,
             period,
             current_run,
             output_folder,
             save_pdf=save_pdf,
-            exclude_period=['p05', 'p10', 'p11', 'p13', 'p15', 'p17']
+            exclude_period=["p05", "p10", "p11", "p13", "p15", "p17"],
         )
 
         # update psd status
         print(usability_map_file, eval_result)
         utils.update_evaluation_in_memory(
-            escale_data, det_name, "cal", "escale_fwhm_FEP", eval_result["escale_fwhm_FEP"]
+            escale_data,
+            det_name,
+            "cal",
+            "escale_fwhm_FEP",
+            eval_result["escale_fwhm_FEP"],
         )
         utils.update_evaluation_in_memory(
-            escale_data, det_name, "cal", "escale_fwhm_583", eval_result["escale_fwhm_583"]
+            escale_data,
+            det_name,
+            "cal",
+            "escale_fwhm_583",
+            eval_result["escale_fwhm_583"],
         )
         utils.update_evaluation_in_memory(
-            escale_data, det_name, "cal", "escale_FEP_pos", eval_result["escale_FEP_pos"]
+            escale_data,
+            det_name,
+            "cal",
+            "escale_FEP_pos",
+            eval_result["escale_FEP_pos"],
         )
         utils.update_evaluation_in_memory(
-            escale_data, det_name, "cal", "escale_SEP_residual", eval_result["escale_SEP_residual"]
+            escale_data,
+            det_name,
+            "cal",
+            "escale_SEP_residual",
+            eval_result["escale_SEP_residual"],
         )
-    
+
     with open(usability_map_file, "w") as f:
         yaml.dump(escale_data, f, sort_keys=False)
 
@@ -877,7 +951,7 @@ def check_calibration(
                 utils.logger.debug(f"...using previous calibration from {prev_run}")
                 prev_pars = utils.read_json_or_yaml(files[0])
                 break
-        
+
         if prev_pars is None:
             utils.logger.debug(
                 f"No previous calibration files found for {run}, treat as first run"
