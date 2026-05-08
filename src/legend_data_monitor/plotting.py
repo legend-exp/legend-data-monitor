@@ -1043,6 +1043,7 @@ def save_pdf(plt, pdf: PdfPages):
 def apply_cal_to_following_run(mu_vals: np.ndarray, cal_vals: np.ndarray):
     """
     Apply calibration parameters from each run to the following run's ADC values.
+
     Returns a list of calibrated peak positions in keV for each following run.
 
     Assumes `mu_vals` and `cal_vals` have the same length.
@@ -1073,8 +1074,8 @@ def apply_cal_to_following_run(mu_vals: np.ndarray, cal_vals: np.ndarray):
 
 def filter_period(keys: list, vals: list, *periods):
     """
-    Filter key-value pairs by matching key prefixes (e.g. 'p18').
-    Only entries where the key starts with any of the provided period prefixes (e.g. 'p18', 'p19') are retained.
+    Filter key-value pairs by matching key prefixes (e.g. 'p18'); only entries where the key starts with any of the provided period prefixes (e.g. 'p18', 'p19') are retained.
+
     Returns filtered (keys, values), otherwise empty lists if no matches are found.
 
     Parameters
@@ -1098,9 +1099,7 @@ def filter_period(keys: list, vals: list, *periods):
 
 def plot_det_status(det_name: str, ax: Axes, detector_status: dict, keys: list):
     """
-    Overlay detector usability status as shaded regions on a plot.
-    - 'ac': grey shaded region
-    - 'off': red shaded region
+    Overlay detector usability status as shaded regions on a plot: 'ac' ('off') grey (red) shaded region.
 
     Parameters
     ----------
@@ -1113,11 +1112,9 @@ def plot_det_status(det_name: str, ax: Axes, detector_status: dict, keys: list):
     keys : list
         Ordered run keys corresponding to x-axis positions.
     """
-    proc_vals = detector_status[det_name]["processable"]
     usab_vals = detector_status[det_name]["usability"]
 
     for j, k in enumerate(keys):
-        proc_v = proc_vals[k]
         usab_v = usab_vals[k]
 
         if usab_v == "ac":
@@ -1460,13 +1457,11 @@ def plot_all_detector_info(
     mu_fep_keV_keys, mu_fep_keV = to_arrays(
         safe_peak(det_results, "mus_keV_peaks", e_fep)
     )
-    mu_fep_keV_err = to_arrays_err(safe_peak(det_results, "mus_keV_err_peaks", e_fep))
 
     fwhm_fep_keys, fwhm_fep = to_arrays(safe_peak(det_results, "fwhms_peaks", e_fep))
     fwhm_fep_err = to_arrays_err(safe_peak(det_results, "fwhms_err_peaks", e_fep))
 
     mu_fep_ADC_keys, mu_fep_ADC = to_arrays(safe_peak(det_results, "mus_peaks", e_fep))
-    mu_fep_ADC_err = to_arrays_err(safe_peak(det_results, "mus_err_peaks", e_fep))
 
     # --- 583 keV ---
     fwhm_583_keys, fwhm_583 = to_arrays(safe_peak(det_results, "fwhms_peaks", e_583))
@@ -1481,37 +1476,15 @@ def plot_all_detector_info(
     )
 
     # --- derived ---
-    diff_FEP_ADC = np.diff(mu_fep_ADC) if len(mu_fep_ADC) > 1 else np.array([])
-    diff_FEP_keV = (
-        np.diff(mu_fep_keV_first_cal) if len(mu_fep_keV_first_cal) > 1 else np.array([])
-    )
-
-    cal_params = np.array(list(det_results.get("cal_params", {}).values()))
-
     gain_keys, gain = to_arrays(det_results.get("gains", {}))
-    gain_err = to_arrays_err(det_results.get("gains_err", {}))
-
-    mu_fep_keV_foll_run = (
-        np.array(apply_cal_to_following_run(mu_fep_ADC, cal_params))
-        if len(mu_fep_ADC) > 1
-        else np.array([])
-    )
-    mu_fep_keV_foll_run_keys = (
-        mu_fep_ADC_keys[1:] if len(mu_fep_ADC_keys) > 1 else np.array([])
-    )
-    mu_fep_keV_diff = (
-        mu_fep_keV[1:] - mu_fep_keV_foll_run if len(mu_fep_keV) > 1 else np.array([])
-    )
 
     # --- other params ---
     cusp_sigma_keys, cusp_sigma = to_arrays(det_results.get("cusp_sigma", {}))
     etrap_rise = np.array(list(det_results.get("etrap_rise", {}).values()))
 
     bl_std_keys, bl_std = to_arrays(det_results.get("bl_std", {}))
-    bl_std_err = to_arrays_err(det_results.get("bl_std_err", {}))
 
     bl_max_keys, bl_max = to_arrays(det_results.get("bl_max", {}))
-    bl_max_err = to_arrays_err(det_results.get("bl_max_err", {}))
 
     pzc_keys, pzc = to_arrays(det_results.get("pz_tau", {}))
 

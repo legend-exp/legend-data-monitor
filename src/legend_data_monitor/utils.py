@@ -1526,6 +1526,7 @@ def get_map_dict(data_analysis: DataFrame):
 def build_file_map(base_path: str, tier: str = "hit") -> dict:
     """
     Build mapping from (period, run) to calibration file paths.
+
     Returns (period, run) -> file path mapping.
 
     Parameters

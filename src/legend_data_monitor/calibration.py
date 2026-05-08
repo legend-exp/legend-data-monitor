@@ -36,6 +36,7 @@ def get_partitions_params(
 ) -> dict:
     """
     Build per-detector calibration and analysis parameters across runs.
+
     Returns a nested dictionary: det -> parameter -> peak -> run_key -> value
 
     Parameters
@@ -271,7 +272,7 @@ def check_escale(
     hit_map = utils.build_file_map(auto_dir_path, tier="hit")
     dsp_map = utils.build_file_map(auto_dir_path, tier="dsp")
 
-    run_dict = {period: sorted(os.listdir(cal_path))}
+    run_dict = {period: sorted(r for r in os.listdir(cal_path) if "_old" not in r)}
     detectors_name = list(det_info["detectors"].keys())
 
     detector_status = utils.build_detector_info_per_period(
@@ -303,7 +304,6 @@ def check_escale(
         )
 
         # update psd status
-        print(usability_map_file, eval_result)
         utils.update_evaluation_in_memory(
             escale_data,
             det_name,
