@@ -1523,6 +1523,38 @@ def get_map_dict(data_analysis: DataFrame):
     return map_dict
 
 
+def build_file_map(base_path: str, tier: str = "hit") -> dict:
+    """
+    Build mapping from (period, run) to calibration file paths.
+
+    Returns (period, run) -> file path mapping.
+
+    Parameters
+    ----------
+    base_path : str
+        Base directory of auto production data.
+    tier : str
+        Data tier ('hit' or 'dsp').
+    """
+    cal_path = os.path.join(base_path, "generated/par", tier, "cal")
+
+    files = glob.glob(f"{cal_path}/*/*/*.yaml")
+    if not files:
+        files = glob.glob(f"{cal_path}/*/*/*.json")
+
+    file_map = {}
+
+    for f in files:
+        parts = f.split(os.sep)
+
+        period = parts[-3]
+        run = parts[-2]
+
+        file_map[(period, run)] = f
+
+    return file_map
+
+
 def get_tiers_pars_folders(path: str):
     """
     Get the absolute path to different tier and par folders.
@@ -1893,6 +1925,10 @@ def load_yaml_or_default(path: str, detectors: dict) -> dict:
                     "FEP_gain_stab": None,
                     "const_stab": None,
                     "PSD": None,
+                    "escale_fwhm_FEP": None,
+                    "escale_fwhm_583": None,
+                    "escale_FEP_pos": None,
+                    "escale_SEP_residual": None,
                 },
                 "phy": {
                     "pulser_stab": None,
@@ -2040,3 +2076,31 @@ def build_detector_info(metadata_path, start_key=None):
             str_chns[string].append(det)
 
     return {"detectors": detectors, "str_chns": dict(str_chns)}
+
+
+def build_detector_info_per_period(auto_dir_path: str, run_dict: dict, period: str):
+    metadata_path = os.path.join(auto_dir_path, "inputs")
+    lmeta = LegendMetadata(metadata_path)
+
+    detector_status = {}
+
+    for run in run_dict[period]:
+        key = f"{period}-{run}"
+        start_key = get_start_key(auto_dir_path, "phy", period, run)
+        chmap = lmeta.channelmap(start_key)
+
+        for det, info in chmap.items():
+            if info["system"] != "geds" or info["name"] != det:
+                continue
+
+            if det not in detector_status:
+                detector_status[det] = {"processable": {}, "usability": {}}
+
+            detector_status[det]["processable"][key] = info.get("analysis", {}).get(
+                "processable", False
+            )
+            detector_status[det]["usability"][key] = info.get("analysis", {}).get(
+                "usability", None
+            )
+
+    return detector_status

@@ -693,6 +693,16 @@ def check_calib(
             det_info,
             save_pdf,
         )
+
+        calibration.check_escale(
+            auto_dir_path,
+            cal_path,
+            output_folder,
+            period,
+            current_run,
+            det_info,
+            save_pdf,
+        )
     else:
         calibration.check_calibration_lac_ssc(
             auto_dir_path,
