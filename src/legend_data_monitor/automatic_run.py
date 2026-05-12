@@ -379,7 +379,11 @@ def auto_run(
         # define dataset depending on the (latest) monitored period/run
         avail_runs = sorted(os.listdir(os.path.join(mtg_folder, period)))
         avail_runs = [
-            ar for ar in avail_runs if "mtg" not in ar and ar != ".ipynb_checkpoints" and not ar.endswith(".xlsx")
+            ar
+            for ar in avail_runs
+            if "mtg" not in ar
+            and ar != ".ipynb_checkpoints"
+            and not ar.endswith(".xlsx")
         ]
         dataset = {period: avail_runs}
         if dataset[period] != []:
