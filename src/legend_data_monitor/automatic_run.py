@@ -300,6 +300,7 @@ def auto_run(
             # get only files with correct ending (and discard the ones that are still under processing)
             if len(matches) == 6:
                 correct_files.append(new_file)
+
         new_files = correct_files
     new_files = sorted(new_files)
 
@@ -378,7 +379,7 @@ def auto_run(
         # define dataset depending on the (latest) monitored period/run
         avail_runs = sorted(os.listdir(os.path.join(mtg_folder, period)))
         avail_runs = [
-            ar for ar in avail_runs if "mtg" not in ar and ar != ".ipynb_checkpoints"
+            ar for ar in avail_runs if "mtg" not in ar and ar != ".ipynb_checkpoints" and not ar.endswith(".xlsx")
         ]
         dataset = {period: avail_runs}
         if dataset[period] != []:

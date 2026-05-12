@@ -60,6 +60,8 @@ def qc_distributions(
         "IsValidTailRmsClassifier",
         "IsValidPzSlopeClassifier",
         "IsValidBlSlopeRmsClassifier",
+        "IsValidBlPolyRmsClassifier",
+        "IsValidBlSlopeRmsClassifier",
         "IsValidCuspeminClassifier",
         "IsValidCuspemaxClassifier",
     ]
@@ -359,7 +361,7 @@ def qc_and_evt_summary_plots(
         "evt/geds/quality",
         evt_files_phy,
         "ak",
-        field_mask=["is_bb_like", "is_bb_like_old", "is_good_channel"],
+        field_mask=["is_bb_like", "is_good_channel"],
     )
     is_dis = read_as(
         "evt/geds/quality/is_not_bb_like",
@@ -413,7 +415,9 @@ def qc_and_evt_summary_plots(
         # --- Per-string plots ---
         for string, det_list in det_info["str_chns"].items():
             fig, ax = plt.subplots(figsize=(12, 6))
-            string_sum = None
+
+            string_counts = None
+            string_mass = 0
 
             for det in det_list:
                 if not det_info["detectors"][det]["processable"]:
@@ -430,11 +434,20 @@ def qc_and_evt_summary_plots(
                 color = next(color_cycle)
                 hourly_rate.plot(ax=ax, drawstyle="steps-mid", label=det, color=color)
 
-                string_sum = (
-                    hourly_rate if string_sum is None else string_sum + hourly_rate
+                det_counts = daily_cnt[ch]
+                
+                string_counts = (
+                    det_counts
+                    if string_counts is None
+                    else string_counts.add(det_counts, fill_value=0)
                 )
+                
+                string_mass += mass
 
-            str_counts[string] = string_sum
+            if string_counts is not None and string_mass > 0:
+                str_counts[string] = string_counts / 3600 * 1000 / string_mass
+            else:
+                str_counts[string] = None
 
             m2p = partial(mhz_to_percent, avg_total_forced_mhz=avg_total_forced_mhz)
             p2m = partial(percent_to_mhz, avg_total_forced_mhz=avg_total_forced_mhz)
@@ -499,8 +512,8 @@ def qc_and_evt_summary_plots(
         total_forced = df_all.resample("H").sum()["count"]
         surviving = df_survived.resample("H").sum()["count"]
         surviving_frac = surviving / total_forced * 100
+        
         fig, ax = plt.subplots(figsize=(12, 6))
-
         surviving_frac.plot(ax=ax, drawstyle="steps-mid", color="red")
         ax.set_ylabel("FT surviving events (%)")
         ax.set_title(f"{period} - All strings combined")
@@ -521,12 +534,14 @@ def qc_and_evt_summary_plots(
         # --- Event rates ---
         fig, ax = plt.subplots(figsize=(10, 3.5))
 
-        mask2 = (
+        # base sample
+        base = (
             ged_pul.geds
             & ~ged_pul.puls
             & ~forced.is_forced
             & ~is_dis.is_delayed_discharge
         )
+        
         ser = pd.to_datetime(
             forced.timestamp[ged_pul.geds & ~ged_pul.puls & ~forced.is_forced], unit="s"
         )
@@ -539,8 +554,9 @@ def qc_and_evt_summary_plots(
             ],
             unit="s",
         )
-        ser_pass = pd.to_datetime(forced.timestamp[mask2 & is_bb.is_bb_like], unit="s")
-        ser_fail = pd.to_datetime(forced.timestamp[mask2 & ~is_bb.is_bb_like], unit="s")
+        
+        ser_pass = pd.to_datetime(forced.timestamp[base & is_bb.is_bb_like], unit="s")
+        ser_fail = pd.to_datetime(forced.timestamp[base & ~is_bb.is_bb_like], unit="s")
 
         for s, label, color in [
             (ser, "All events", "dimgrey"),
@@ -554,7 +570,7 @@ def qc_and_evt_summary_plots(
                 s, bins=pd.date_range(start=s.min(), end=s.max(), freq="H")
             )
             ax.stairs(freq / 3600 * 1000 / on_mass, bin_edges, label=label, color=color)
-
+    
         ax.set_ylabel("Hourly rate normalized by ON mass (mHz/kg)")
         ax.legend(title=f"ON mass = {on_mass:.1f} kg", loc="upper right")
         ax.grid(False)
@@ -831,6 +847,7 @@ def qc_average(
             "IsHighlyPositivePolarityCandidate",
             "IsValidBlSlope",
             "IsValidBlSlopeRms",
+            "IsValidBlPolyRms",
             "IsValidTailRms",
             "IsNotNoiseBurst",
             "IsValidCuspemin",
@@ -1493,6 +1510,7 @@ def get_calib_pars(
     """
     # add special calib runs at the end of a period
     run_list = add_calibration_runs(period, run_list)
+    run_list = [r for r in run_list if "old" not in r]
 
     calib_data = {
         "fep": [],
@@ -1612,6 +1630,7 @@ def get_dfs(phy_mtg_data: str, period: str, run_list: list, parameter: str):
 
     base_dir = os.path.join(phy_mtg_data, period)
     runs = os.listdir(base_dir)
+    runs = [r for r in runs if "old" not in r]
 
     for r in runs:
         if r not in run_list:
@@ -1900,6 +1919,7 @@ def get_pulser_data(
         ser_pul_tp0est_new = ser_pul_tp0est[mask]
 
         if not ser_pul_tp0est_new.empty:
+            
             valid_idx = ser_ged_cusp.index.intersection(ser_pul_tp0est_new.index)
             ser_ged_cusp = ser_ged_cusp.reindex(valid_idx)
 
