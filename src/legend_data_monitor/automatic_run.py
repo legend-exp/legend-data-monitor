@@ -69,8 +69,10 @@ def auto_run(
         search_latest_folder(search_directory) if input_period is None else input_period
     )
     # Run to monitor
+    search_directory = os.path.join(search_directory, period)
     run = search_latest_folder(search_directory) if input_run is None else input_run
-    source_dir = os.path.join(search_directory, period, run)
+    source_dir = os.path.join(search_directory, run)
+    utils.logger.info(f"You are inspecting {period}-{run}")
 
     # ===========================================================================================
     # START OF THE ANALYSIS
@@ -392,7 +394,7 @@ def auto_run(
             utils.logger.debug("...generating monitoring plots")
             start_key = (
                 sorted(
-                    os.listdir(os.path.join(search_directory, period, avail_runs[0]))
+                    os.listdir(os.path.join(search_directory, avail_runs[0]))
                 )[0]
             ).split("-")[4]
 
@@ -439,6 +441,7 @@ def auto_run(
         period,
     )
     generate_dashboard(auto_dir_path, period, output)
+    utils.logger.debug(f"Generated summary excel workbook at {output}")
 
     # Update the last checked timestamp
     with open(timestamp_file, "w") as file:
