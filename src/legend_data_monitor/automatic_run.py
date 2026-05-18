@@ -7,6 +7,7 @@ import yaml
 
 from . import calibration, core, monitoring, utils
 
+from .excel.core import generate_dashboard
 
 def auto_run(
     cluster,
@@ -428,6 +429,12 @@ def auto_run(
 
     else:
         utils.logger.debug("No new files were detected.")
+
+    # create dashboard file 
+    output = os.path.join(
+        output_folder, ref_version, "generated/plt/hit", data_type, period, 
+    )
+    generate_dashboard(auto_dir_path, period, output)
 
     # Update the last checked timestamp
     with open(timestamp_file, "w") as file:

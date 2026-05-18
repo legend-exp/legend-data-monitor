@@ -25,8 +25,6 @@ import yaml
 from dbetto import TextDB
 from lgdo import lh5
 
-# LEGEND_DATASETS = Path(__file__).parent / "legend-datasets"
-LEGEND_DATASETS = "/global/cfs/cdirs/m2676/data/lngs/l200/public/prodenv/prod-blind/auto/latest/inputs/datasets/"
 
 PSD_RANK = {"valid": 2, "present": 1, "missing": 0}
 PSD_FROM_RANK = {2: "valid", 1: "present", 0: "missing"}
@@ -208,7 +206,7 @@ def _build_reason_map(datasets: Path, validity: list) -> dict:
 def get_usability_data(
     strings: dict,
     periods: dict,
-    legend_datasets_path: Path = LEGEND_DATASETS,
+    datasets: str, 
     alter_mode: bool = False,
 ) -> dict:
     """
@@ -227,7 +225,6 @@ def get_usability_data(
       field = "reason" → str | None  (only where written)
       field = "PSD_note" → str | None  (only at cal runs where PSD changed)
     """
-    datasets = Path(legend_datasets_path)
     statuses = TextDB(str(datasets / "statuses"))
 
     with open(datasets / "runinfo.yaml") as f:

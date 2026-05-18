@@ -17,7 +17,7 @@ Three kinds of change
 from pathlib import Path
 
 import yaml
-from config_io import (
+from .config_io import (
     append_to_config,
     ensure_validity_entry,
     read_config,
@@ -25,7 +25,7 @@ from config_io import (
     update_in_config,
     validity_blocked,
 )
-from detector_history import (
+from .detector_history import (
     History,
     Transition,
     _ordered_entries,

@@ -7,8 +7,8 @@ Includes examples for structure of the inputs.
 from pathlib import Path
 
 import yaml
-from make_dashboard import make_excel
-from read_usability import get_usability_data
+from .make_dashboard import make_excel
+from .read_usability import get_usability_data
 
 LEGEND_DATASETS = Path(__file__).parent / "legend-datasets"
 

@@ -9,9 +9,9 @@ Uses the same strings/periods as create_dashboard.py.
 
 from pathlib import Path
 
-from create_dashboard import example_periods, example_strings
-from make_dashboard import make_qcp_sheet
-from read_qcp import get_qcp_data
+from .create_dashboard import example_periods, example_strings
+from .make_dashboard import make_qcp_sheet
+from .read_qcp import get_qcp_data
 
 OUTPUT = Path(__file__).parent / "dashboard_output.xlsx"
 
