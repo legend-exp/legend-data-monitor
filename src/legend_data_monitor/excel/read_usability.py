@@ -25,7 +25,6 @@ import yaml
 from dbetto import TextDB
 from lgdo import lh5
 
-
 PSD_RANK = {"valid": 2, "present": 1, "missing": 0}
 PSD_FROM_RANK = {2: "valid", 1: "present", 0: "missing"}
 
@@ -103,8 +102,7 @@ def _build_psd_note_map(
     return psd_note_map
 
 
-def write_runinfo(legend_datasets_path, runinfo):
-    datasets = Path(legend_datasets_path)
+def write_runinfo(datasets, runinfo):
     with open(datasets / "runinfo.yaml", "w") as yamlfile:
         yaml.safe_dump(runinfo, yamlfile)
 
@@ -155,7 +153,7 @@ def get_live_time(period, run):
     return (live_time, min_time, max_time)
 
 
-def correct_runinfo(legend_datasets_path, run_info, period, run):
+def correct_runinfo(datasets, run_info, period, run):
     if period not in run_info.keys():
         run_info[period] = {}
     if run not in run_info[period].keys():
@@ -173,7 +171,7 @@ def correct_runinfo(legend_datasets_path, run_info, period, run):
                 "start_key": get_run_start_timestamp(period, run, "phy"),
                 "livetime_in_s": get_live_time(period, run)[0],
             }
-    write_runinfo(legend_datasets_path, run_info)
+    write_runinfo(datasets, run_info)
 
     return run_info
 
@@ -206,7 +204,7 @@ def _build_reason_map(datasets: Path, validity: list) -> dict:
 def get_usability_data(
     strings: dict,
     periods: dict,
-    datasets: str, 
+    datasets: str,
     alter_mode: bool = False,
 ) -> dict:
     """
@@ -245,13 +243,13 @@ def get_usability_data(
         for run_type, run in cols:
             if alter_mode:
                 if period not in runinfo:
-                    correct_runinfo(legend_datasets_path, runinfo, period, run)
+                    correct_runinfo(datasets, runinfo, period, run)
                 if run not in runinfo[period]:
                     # try set this in the run info
-                    correct_runinfo(legend_datasets_path, runinfo, period, run)
+                    correct_runinfo(datasets, runinfo, period, run)
                 run_info = runinfo[period][run]
                 if run_type not in run_info:
-                    correct_runinfo(legend_datasets_path, runinfo, period, run)
+                    correct_runinfo(datasets, runinfo, period, run)
                 timestamp = run_info[run_type]["start_key"]
             else:
                 timestamp = get_run_start_timestamp(period, run, run_type)

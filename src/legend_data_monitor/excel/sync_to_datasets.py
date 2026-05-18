@@ -17,6 +17,7 @@ Three kinds of change
 from pathlib import Path
 
 import yaml
+
 from .config_io import (
     append_to_config,
     ensure_validity_entry,

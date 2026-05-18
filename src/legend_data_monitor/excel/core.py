@@ -1,11 +1,11 @@
-import argparse
 import os
 from pathlib import Path
-from legendmeta import LegendMetadata
+
 import awkward as ak
+from legendmeta import LegendMetadata
 
 from .make_dashboard import make_excel, make_qcp_sheet, make_qcp_sheets_detailed
-from .read_qcp import ROOT_DIR, get_qcp_data
+from .read_qcp import get_qcp_data
 from .read_usability import get_usability_data
 
 # ---------------------------------------------------------------------------
@@ -89,7 +89,9 @@ def get_geds(key: str, datasets_path: Path) -> dict[int, list[tuple[str, float]]
 # ---------------------------------------------------------------------------
 
 
-def get_runs_for_a_period(auto_dir_path: str, period: str) -> dict[str, list[tuple[str, str]]]:
+def get_runs_for_a_period(
+    auto_dir_path: str, period: str
+) -> dict[str, list[tuple[str, str]]]:
     """
     Discover all runs for *period* by scanning the DSP tier directories.
 
@@ -100,7 +102,7 @@ def get_runs_for_a_period(auto_dir_path: str, period: str) -> dict[str, list[tup
     data_base = os.path.join(auto_dir_path, "generated/tier/dsp")
     cal_dir = Path(os.path.join(data_base, "cal", period))
     phy_dir = Path(os.path.join(data_base, "phy", period))
-    
+
     if not cal_dir.exists():
         raise SystemExit(f"No cal DSP data found for {period} at {cal_dir}")
 
@@ -121,7 +123,7 @@ def get_runs_for_a_period(auto_dir_path: str, period: str) -> dict[str, list[tup
 def generate_dashboard(auto_dir_path: str, period: str, output: str) -> None:
     """
     Generate the LEGEND usability dashboard for one period.
-    
+
     Parameters
     ----------
     auto_dir_path : str
@@ -131,13 +133,16 @@ def generate_dashboard(auto_dir_path: str, period: str, output: str) -> None:
     output: str
         Directory to write sheet_{period}.xlsx into
     """
-
     strings_info = get_strings_info(auto_dir_path, period)
-    
-    periods = get_runs_for_a_period(auto_dir_path, period)
-    usability = get_usability_data(strings_info, periods, Path(os.path.join(auto_dir_path, "inputs/datasets")))
 
-    output_path = str(os.path.join(output, f"l200-{period}-auto_latest-qcp_summary.xlsx"))
+    periods = get_runs_for_a_period(auto_dir_path, period)
+    usability = get_usability_data(
+        strings_info, periods, Path(os.path.join(auto_dir_path, "inputs/datasets"))
+    )
+
+    output_path = str(
+        os.path.join(output, f"l200-{period}-auto_latest-qcp_summary.xlsx")
+    )
 
     make_excel(strings_info, periods, usability, output_path)
 
@@ -146,25 +151,24 @@ def generate_dashboard(auto_dir_path: str, period: str, output: str) -> None:
     make_qcp_sheets_detailed(output_path, strings_info, periods, qcp_data)
 
 
-
-def get_strings_info(auto_dir_path: str, period: str)-> dict:
+def get_strings_info(auto_dir_path: str, period: str) -> dict:
     """Get string info in the desired fashion fashion: {string_number: [(ged_name, mass_g), ...]}, top-to-bottom within each string."""
     strings_info = {}
 
     lmeta = LegendMetadata(os.path.join(auto_dir_path, "inputs"))
-    chmap = lmeta.channelmap("20251211T120001Z") # if start_key else lmeta.channelmap()
+    chmap = lmeta.channelmap("20251211T120001Z")  # if start_key else lmeta.channelmap()
     chmap = ak.Array(chmap.group("system").geds.values())
-    
+
     sorted_chmap = chmap[ak.argsort(chmap.location.position)]
-    
+
     for det in sorted_chmap:
         string = int(det.location.string)
         name = str(det.name)
         mass = float(det.production.mass_in_g)
-    
+
         if string not in strings_info:
             strings_info[string] = []
-    
+
         strings_info[string].append((name, mass))
 
     return strings_info

@@ -6,8 +6,8 @@ from pathlib import Path
 import yaml
 
 from . import calibration, core, monitoring, utils
-
 from .excel.core import generate_dashboard
+
 
 def auto_run(
     cluster,
@@ -430,9 +430,13 @@ def auto_run(
     else:
         utils.logger.debug("No new files were detected.")
 
-    # create dashboard file 
+    # create dashboard file
     output = os.path.join(
-        output_folder, ref_version, "generated/plt/hit", data_type, period, 
+        output_folder,
+        ref_version,
+        "generated/plt/hit",
+        data_type,
+        period,
     )
     generate_dashboard(auto_dir_path, period, output)
 
