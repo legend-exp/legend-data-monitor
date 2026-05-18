@@ -1694,6 +1694,18 @@ def pulser_from_evt_or_mtg(my_dir, period, run, output, run_info):
     return run_info
 
 
+def is_bad(t, intervals):
+    return any(start <= t < end for start, end in intervals)
+
+
+def get_timestamp_from_path(path):
+    pattern = re.compile(r"(\d{8}T\d{6}Z)")
+    match = pattern.search(os.path.basename(path))
+    if not match:
+        return None
+    return datetime.strptime(match.group(1), "%Y%m%dT%H%M%SZ")
+
+    
 def build_runinfo(path: str, version: str, proc_folder: str, output: str | None):
     """Build dictionary with main run information (start key, phy livetime in seconds) for multiple data types (phy, cal, fft, bkg, pzc, pul)."""
     periods = []
@@ -1716,6 +1728,10 @@ def build_runinfo(path: str, version: str, proc_folder: str, output: str | None)
                 break
         if run_info:
             break
+
+    if run_info is None:
+        logger.error(f"Found no runninfo file at {os.path.join(proc_folder, version, subdir, pattern)}, retry. Exit here")
+        exit()
 
     raw_paths = [
         os.path.join(proc_folder, "ref/raw/ref-raw/generated/tier/raw"),
@@ -1810,11 +1826,23 @@ def build_runinfo(path: str, version: str, proc_folder: str, output: str | None)
     # evaluate and save livetime from pulser events
     data_type = "phy"
     for idx_p, period in enumerate(periods):
+        if period !='p19': continue # remove me 
         if period in ["p01", "p02"]:
             logger.debug(f"...skipping {period}")
             continue
 
+        intervals = []
+        if period in IGNORE_KEYS.keys():
+            intervals = [
+                (
+                    datetime.strptime(s, "%Y%m%dT%H%M%SZ"),
+                    datetime.strptime(e, "%Y%m%dT%H%M%SZ"),
+                )
+                for s, e in zip(IGNORE_KEYS[period]["start_keys"], IGNORE_KEYS[period]["stop_keys"])
+            ]
+
         for run in runs[idx_p]:
+            if run != 'r012': continue # remove me
             versions = (
                 [version] if version == "auto/latest" else ["auto/latest", version]
             )
@@ -1837,7 +1865,12 @@ def build_runinfo(path: str, version: str, proc_folder: str, output: str | None)
                     evt_files = [
                         os.path.join(my_dir, period, run, f) for f in evt_files
                     ]
-
+                    if intervals:
+                        evt_files = [
+                            f for f in evt_files
+                            if (t := get_timestamp_from_path(f)) is not None and not is_bad(t, intervals)
+                        ]
+                    
                 data = lh5.read("evt/coincident/puls", evt_files)
                 df_coincident = pd.DataFrame(data, columns=["puls"])
                 df = pd.concat([df_coincident], axis=1)
