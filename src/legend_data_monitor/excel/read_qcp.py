@@ -11,6 +11,7 @@ import os
 
 import yaml
 
+
 def read_qcp_summary(
     output: str, period: str, run: str, prod_cycle: str = "auto/latest"
 ) -> dict:
