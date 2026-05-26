@@ -405,7 +405,28 @@ def dataset_validity_check(data_info: dict):
         logger.error("\033[91mProvide period!\033[0m")
         return
 
-    data_types = ["phy", "cal", "lac", "ssc", "pzc", "bkg", "tst"]
+    data_types = [
+        "acs",
+        "anc",
+        "anp",
+        "ant",
+        "aph",
+        "ath",
+        "bkg",
+        "cal",
+        "cos",
+        "fft",
+        "hvs",
+        "lac",
+        "old_tst",
+        "phy",
+        "pul",
+        "pzc",
+        "rdc",
+        "ssc",
+        "tst",
+        "xtc",
+    ]
     if not data_info["type"] in data_types:
         logger.error("\033[91mInvalid data type provided!\033[0m")
         return
@@ -1694,8 +1715,20 @@ def pulser_from_evt_or_mtg(my_dir, period, run, output, run_info):
     return run_info
 
 
+def is_bad(t, intervals):
+    return any(start <= t < end for start, end in intervals)
+
+
+def get_timestamp_from_path(path):
+    pattern = re.compile(r"(\d{8}T\d{6}Z)")
+    match = pattern.search(os.path.basename(path))
+    if not match:
+        return None
+    return datetime.strptime(match.group(1), "%Y%m%dT%H%M%SZ")
+
+
 def build_runinfo(path: str, version: str, proc_folder: str, output: str | None):
-    """Build dictionary with main run information (start key, phy livetime in seconds) for multiple data types (phy, cal, fft, bkg, pzc, pul)."""
+    """Build dictionary with main run information (start key, phy livetime in seconds) for multiple data types (phy, cal, fft, bkg, pzc, pul, ...)."""
     periods = []
     runs = []
 
@@ -1717,6 +1750,12 @@ def build_runinfo(path: str, version: str, proc_folder: str, output: str | None)
         if run_info:
             break
 
+    if run_info is None:
+        logger.error(
+            f"Found no runninfo file at {os.path.join(proc_folder, version, subdir, pattern)}, retry. Exit here"
+        )
+        exit()
+
     raw_paths = [
         os.path.join(proc_folder, "ref/raw/ref-raw/generated/tier/raw"),
         os.path.join(proc_folder, "tmp-p14-raw/generated/tier/raw"),
@@ -1734,7 +1773,7 @@ def build_runinfo(path: str, version: str, proc_folder: str, output: str | None)
 
         data_types = sorted(os.listdir(raw_path))
         data_types = sorted(data_types, key=lambda x: (x != "phy", x))
-        for data_type in data_types:  # cal | fft | bkg | phy | pul | pzc
+        for data_type in data_types:  # cal | fft | bkg | phy | pul | pzc | ...
             data_type_path = os.path.join(raw_path, data_type)
             if not os.listdir(data_type_path):
                 continue
@@ -1814,6 +1853,18 @@ def build_runinfo(path: str, version: str, proc_folder: str, output: str | None)
             logger.debug(f"...skipping {period}")
             continue
 
+        intervals = []
+        if period in IGNORE_KEYS.keys():
+            intervals = [
+                (
+                    datetime.strptime(s, "%Y%m%dT%H%M%SZ"),
+                    datetime.strptime(e, "%Y%m%dT%H%M%SZ"),
+                )
+                for s, e in zip(
+                    IGNORE_KEYS[period]["start_keys"], IGNORE_KEYS[period]["stop_keys"]
+                )
+            ]
+
         for run in runs[idx_p]:
             versions = (
                 [version] if version == "auto/latest" else ["auto/latest", version]
@@ -1837,6 +1888,13 @@ def build_runinfo(path: str, version: str, proc_folder: str, output: str | None)
                     evt_files = [
                         os.path.join(my_dir, period, run, f) for f in evt_files
                     ]
+                    if intervals:
+                        evt_files = [
+                            f
+                            for f in evt_files
+                            if (t := get_timestamp_from_path(f)) is not None
+                            and not is_bad(t, intervals)
+                        ]
 
                 data = lh5.read("evt/coincident/puls", evt_files)
                 df_coincident = pd.DataFrame(data, columns=["puls"])

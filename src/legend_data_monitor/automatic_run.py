@@ -6,6 +6,7 @@ from pathlib import Path
 import yaml
 
 from . import calibration, core, monitoring, utils
+from .excel.core import generate_dashboard
 
 
 def auto_run(
@@ -68,8 +69,10 @@ def auto_run(
         search_latest_folder(search_directory) if input_period is None else input_period
     )
     # Run to monitor
+    search_directory = os.path.join(search_directory, period)
     run = search_latest_folder(search_directory) if input_run is None else input_run
-    source_dir = os.path.join(search_directory, period, run)
+    source_dir = os.path.join(search_directory, run)
+    utils.logger.info(f"You are inspecting {period}-{run}")
 
     # ===========================================================================================
     # START OF THE ANALYSIS
@@ -300,6 +303,7 @@ def auto_run(
             # get only files with correct ending (and discard the ones that are still under processing)
             if len(matches) == 6:
                 correct_files.append(new_file)
+
         new_files = correct_files
     new_files = sorted(new_files)
 
@@ -378,16 +382,18 @@ def auto_run(
         # define dataset depending on the (latest) monitored period/run
         avail_runs = sorted(os.listdir(os.path.join(mtg_folder, period)))
         avail_runs = [
-            ar for ar in avail_runs if "mtg" not in ar and ar != ".ipynb_checkpoints"
+            ar
+            for ar in avail_runs
+            if "mtg" not in ar
+            and ar != ".ipynb_checkpoints"
+            and not ar.endswith(".xlsx")
         ]
         dataset = {period: avail_runs}
         if dataset[period] != []:
             # per-period & per-run monitoring plots
             utils.logger.debug("...generating monitoring plots")
             start_key = (
-                sorted(
-                    os.listdir(os.path.join(search_directory, period, avail_runs[0]))
-                )[0]
+                sorted(os.listdir(os.path.join(search_directory, avail_runs[0])))[0]
             ).split("-")[4]
 
             summary_plots(
@@ -423,6 +429,17 @@ def auto_run(
 
     else:
         utils.logger.debug("No new files were detected.")
+
+    # create dashboard file
+    output = os.path.join(
+        output_folder,
+        ref_version,
+        "generated/plt/hit",
+        data_type,
+        period,
+    )
+    generate_dashboard(auto_dir_path, period, output)
+    utils.logger.debug(f"Generated summary excel workbook at {output}")
 
     # Update the last checked timestamp
     with open(timestamp_file, "w") as file:

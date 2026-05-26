@@ -37,8 +37,10 @@ requires-python = ">=3.9"
 
 dependencies = [
     "pygama",
+    "pylegendmeta >=0.9",
+    "seaborn",
+    "openpyxl",
     "legend-lh5io",
-    "seaborn"
 ]
 dynamic = ["version"]
 
@@ -82,4 +84,4 @@ multi_line_output = 3
 extend-ignore = "E203, E501, D10, N806"
 
 [tool.codespell]
-ignore-words-list = "crate, nd, unparseable, compiletime, puls, ser, livetime, whis"
+ignore-words-list = "crate, nd, unparseable, compiletime, puls, ser, livetime, whis, acs, anc, anp, ant, aph, ath, bkg, cal, cos, fft, hvs, lac, old_tst, phy, pul, pzc, rdc, ssc, tst, xtc"

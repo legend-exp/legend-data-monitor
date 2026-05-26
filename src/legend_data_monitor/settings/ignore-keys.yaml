@@ -107,12 +107,24 @@ p18:
 p19:
   start_keys:
   - 20251229T131356Z
-  - 20260212T150111Z
-  - 20260219T083215Z
+  - 20260212T150111Z # bad timing sync
+  - 20260219T083215Z # bad timing sync
+  - 20260306T142727Z # start of p19 r012
+  - 20260211T220030Z # spike in V04199A gain
+  - 20260215T180835Z # spike in V05261A gain
+  - 20260221T110114Z # spike in V05612A gain
+  - 20260227T192852Z # spike in V14673A gain
+  - 20260322T145329Z # spike in V04545A noise
   stop_keys:
   - 20251229T140949Z
-  - 20260212T170115Z
-  - 20260219T133223Z
+  - 20260212T170115Z # bad timing sync
+  - 20260219T133223Z # bad timing sync
+  - 20260311T002510Z # middle of p19 r012 after Ar preessure valve repair
+  - 20260211T230032Z # spike in V04199A gain r008
+  - 20260215T190838Z # spike in V05261A gain r009
+  - 20260221T120117Z # spike in V05612A gain r010
+  - 20260227T202855Z # spike in V10447B gain r011
+  - 20260322T155332Z # spike in V04545A noise
 p21:
   start_keys:
   - 20260414T124242Z
