@@ -12,12 +12,12 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
 import h5py
+import lh5
 import numpy as np
 import pandas as pd
 import yaml
 from dbetto import TextDB
 from legendmeta import LegendMetadata
-from lgdo import lh5
 from pandas import DataFrame
 
 # -------------------------------------------------------------------------
@@ -405,7 +405,28 @@ def dataset_validity_check(data_info: dict):
         logger.error("\033[91mProvide period!\033[0m")
         return
 
-    data_types = ["phy", "cal", "lac", "ssc", "pzc", "bkg", "tst"]
+    data_types = [
+        "acs",
+        "anc",
+        "anp",
+        "ant",
+        "aph",
+        "ath",
+        "bkg",
+        "cal",
+        "cos",
+        "fft",
+        "hvs",
+        "lac",
+        "old_tst",
+        "phy",
+        "pul",
+        "pzc",
+        "rdc",
+        "ssc",
+        "tst",
+        "xtc",
+    ]
     if not data_info["type"] in data_types:
         logger.error("\033[91mInvalid data type provided!\033[0m")
         return
@@ -1523,6 +1544,38 @@ def get_map_dict(data_analysis: DataFrame):
     return map_dict
 
 
+def build_file_map(base_path: str, tier: str = "hit") -> dict:
+    """
+    Build mapping from (period, run) to calibration file paths.
+
+    Returns (period, run) -> file path mapping.
+
+    Parameters
+    ----------
+    base_path : str
+        Base directory of auto production data.
+    tier : str
+        Data tier ('hit' or 'dsp').
+    """
+    cal_path = os.path.join(base_path, "generated/par", tier, "cal")
+
+    files = glob.glob(f"{cal_path}/*/*/*.yaml")
+    if not files:
+        files = glob.glob(f"{cal_path}/*/*/*.json")
+
+    file_map = {}
+
+    for f in files:
+        parts = f.split(os.sep)
+
+        period = parts[-3]
+        run = parts[-2]
+
+        file_map[(period, run)] = f
+
+    return file_map
+
+
 def get_tiers_pars_folders(path: str):
     """
     Get the absolute path to different tier and par folders.
@@ -1662,8 +1715,20 @@ def pulser_from_evt_or_mtg(my_dir, period, run, output, run_info):
     return run_info
 
 
+def is_bad(t, intervals):
+    return any(start <= t < end for start, end in intervals)
+
+
+def get_timestamp_from_path(path):
+    pattern = re.compile(r"(\d{8}T\d{6}Z)")
+    match = pattern.search(os.path.basename(path))
+    if not match:
+        return None
+    return datetime.strptime(match.group(1), "%Y%m%dT%H%M%SZ")
+
+
 def build_runinfo(path: str, version: str, proc_folder: str, output: str | None):
-    """Build dictionary with main run information (start key, phy livetime in seconds) for multiple data types (phy, cal, fft, bkg, pzc, pul)."""
+    """Build dictionary with main run information (start key, phy livetime in seconds) for multiple data types (phy, cal, fft, bkg, pzc, pul, ...)."""
     periods = []
     runs = []
 
@@ -1685,6 +1750,12 @@ def build_runinfo(path: str, version: str, proc_folder: str, output: str | None)
         if run_info:
             break
 
+    if run_info is None:
+        logger.error(
+            f"Found no runninfo file at {os.path.join(proc_folder, version, subdir, pattern)}, retry. Exit here"
+        )
+        exit()
+
     raw_paths = [
         os.path.join(proc_folder, "ref/raw/ref-raw/generated/tier/raw"),
         os.path.join(proc_folder, "tmp-p14-raw/generated/tier/raw"),
@@ -1702,7 +1773,7 @@ def build_runinfo(path: str, version: str, proc_folder: str, output: str | None)
 
         data_types = sorted(os.listdir(raw_path))
         data_types = sorted(data_types, key=lambda x: (x != "phy", x))
-        for data_type in data_types:  # cal | fft | bkg | phy | pul | pzc
+        for data_type in data_types:  # cal | fft | bkg | phy | pul | pzc | ...
             data_type_path = os.path.join(raw_path, data_type)
             if not os.listdir(data_type_path):
                 continue
@@ -1782,6 +1853,18 @@ def build_runinfo(path: str, version: str, proc_folder: str, output: str | None)
             logger.debug(f"...skipping {period}")
             continue
 
+        intervals = []
+        if period in IGNORE_KEYS.keys():
+            intervals = [
+                (
+                    datetime.strptime(s, "%Y%m%dT%H%M%SZ"),
+                    datetime.strptime(e, "%Y%m%dT%H%M%SZ"),
+                )
+                for s, e in zip(
+                    IGNORE_KEYS[period]["start_keys"], IGNORE_KEYS[period]["stop_keys"]
+                )
+            ]
+
         for run in runs[idx_p]:
             versions = (
                 [version] if version == "auto/latest" else ["auto/latest", version]
@@ -1805,6 +1888,13 @@ def build_runinfo(path: str, version: str, proc_folder: str, output: str | None)
                     evt_files = [
                         os.path.join(my_dir, period, run, f) for f in evt_files
                     ]
+                    if intervals:
+                        evt_files = [
+                            f
+                            for f in evt_files
+                            if (t := get_timestamp_from_path(f)) is not None
+                            and not is_bad(t, intervals)
+                        ]
 
                 data = lh5.read("evt/coincident/puls", evt_files)
                 df_coincident = pd.DataFrame(data, columns=["puls"])
@@ -1893,6 +1983,10 @@ def load_yaml_or_default(path: str, detectors: dict) -> dict:
                     "FEP_gain_stab": None,
                     "const_stab": None,
                     "PSD": None,
+                    "escale_fwhm_FEP": None,
+                    "escale_fwhm_583": None,
+                    "escale_FEP_pos": None,
+                    "escale_SEP_residual": None,
                 },
                 "phy": {
                     "pulser_stab": None,
@@ -2040,3 +2134,31 @@ def build_detector_info(metadata_path, start_key=None):
             str_chns[string].append(det)
 
     return {"detectors": detectors, "str_chns": dict(str_chns)}
+
+
+def build_detector_info_per_period(auto_dir_path: str, run_dict: dict, period: str):
+    metadata_path = os.path.join(auto_dir_path, "inputs")
+    lmeta = LegendMetadata(metadata_path)
+
+    detector_status = {}
+
+    for run in run_dict[period]:
+        key = f"{period}-{run}"
+        start_key = get_start_key(auto_dir_path, "phy", period, run)
+        chmap = lmeta.channelmap(start_key)
+
+        for det, info in chmap.items():
+            if info["system"] != "geds" or info["name"] != det:
+                continue
+
+            if det not in detector_status:
+                detector_status[det] = {"processable": {}, "usability": {}}
+
+            detector_status[det]["processable"][key] = info.get("analysis", {}).get(
+                "processable", False
+            )
+            detector_status[det]["usability"][key] = info.get("analysis", {}).get(
+                "usability", None
+            )
+
+    return detector_status

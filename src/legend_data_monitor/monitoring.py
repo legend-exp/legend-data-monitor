@@ -10,13 +10,13 @@ from functools import partial
 
 import awkward as ak
 import h5py
+import lh5
 import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import pytz
 import yaml
-from lgdo import lh5
 from lgdo.lh5 import read_as
 from matplotlib.patches import Patch
 
@@ -59,6 +59,8 @@ def qc_distributions(
         "IsValidBlSlopeClassifier",
         "IsValidTailRmsClassifier",
         "IsValidPzSlopeClassifier",
+        "IsValidBlSlopeRmsClassifier",
+        "IsValidBlPolyRmsClassifier",
         "IsValidBlSlopeRmsClassifier",
         "IsValidCuspeminClassifier",
         "IsValidCuspemaxClassifier",
@@ -359,7 +361,7 @@ def qc_and_evt_summary_plots(
         "evt/geds/quality",
         evt_files_phy,
         "ak",
-        field_mask=["is_bb_like", "is_bb_like_old", "is_good_channel"],
+        field_mask=["is_bb_like", "is_good_channel"],
     )
     is_dis = read_as(
         "evt/geds/quality/is_not_bb_like",
@@ -413,7 +415,9 @@ def qc_and_evt_summary_plots(
         # --- Per-string plots ---
         for string, det_list in det_info["str_chns"].items():
             fig, ax = plt.subplots(figsize=(12, 6))
-            string_sum = None
+
+            string_counts = None
+            string_mass = 0
 
             for det in det_list:
                 if not det_info["detectors"][det]["processable"]:
@@ -430,11 +434,20 @@ def qc_and_evt_summary_plots(
                 color = next(color_cycle)
                 hourly_rate.plot(ax=ax, drawstyle="steps-mid", label=det, color=color)
 
-                string_sum = (
-                    hourly_rate if string_sum is None else string_sum + hourly_rate
+                det_counts = daily_cnt[ch]
+
+                string_counts = (
+                    det_counts
+                    if string_counts is None
+                    else string_counts.add(det_counts, fill_value=0)
                 )
 
-            str_counts[string] = string_sum
+                string_mass += mass
+
+            if string_counts is not None and string_mass > 0:
+                str_counts[string] = string_counts / 3600 * 1000 / string_mass
+            else:
+                str_counts[string] = None
 
             m2p = partial(mhz_to_percent, avg_total_forced_mhz=avg_total_forced_mhz)
             p2m = partial(percent_to_mhz, avg_total_forced_mhz=avg_total_forced_mhz)
@@ -499,8 +512,8 @@ def qc_and_evt_summary_plots(
         total_forced = df_all.resample("H").sum()["count"]
         surviving = df_survived.resample("H").sum()["count"]
         surviving_frac = surviving / total_forced * 100
-        fig, ax = plt.subplots(figsize=(12, 6))
 
+        fig, ax = plt.subplots(figsize=(12, 6))
         surviving_frac.plot(ax=ax, drawstyle="steps-mid", color="red")
         ax.set_ylabel("FT surviving events (%)")
         ax.set_title(f"{period} - All strings combined")
@@ -521,12 +534,14 @@ def qc_and_evt_summary_plots(
         # --- Event rates ---
         fig, ax = plt.subplots(figsize=(10, 3.5))
 
-        mask2 = (
+        # base sample
+        base = (
             ged_pul.geds
             & ~ged_pul.puls
             & ~forced.is_forced
             & ~is_dis.is_delayed_discharge
         )
+
         ser = pd.to_datetime(
             forced.timestamp[ged_pul.geds & ~ged_pul.puls & ~forced.is_forced], unit="s"
         )
@@ -539,8 +554,9 @@ def qc_and_evt_summary_plots(
             ],
             unit="s",
         )
-        ser_pass = pd.to_datetime(forced.timestamp[mask2 & is_bb.is_bb_like], unit="s")
-        ser_fail = pd.to_datetime(forced.timestamp[mask2 & ~is_bb.is_bb_like], unit="s")
+
+        ser_pass = pd.to_datetime(forced.timestamp[base & is_bb.is_bb_like], unit="s")
+        ser_fail = pd.to_datetime(forced.timestamp[base & ~is_bb.is_bb_like], unit="s")
 
         for s, label, color in [
             (ser, "All events", "dimgrey"),
@@ -831,6 +847,7 @@ def qc_average(
             "IsHighlyPositivePolarityCandidate",
             "IsValidBlSlope",
             "IsValidBlSlopeRms",
+            "IsValidBlPolyRms",
             "IsValidTailRms",
             "IsNotNoiseBurst",
             "IsValidCuspemin",
@@ -1493,6 +1510,7 @@ def get_calib_pars(
     """
     # add special calib runs at the end of a period
     run_list = add_calibration_runs(period, run_list)
+    run_list = [r for r in run_list if "old" not in str(r)]
 
     calib_data = {
         "fep": [],
@@ -1612,6 +1630,7 @@ def get_dfs(phy_mtg_data: str, period: str, run_list: list, parameter: str):
 
     base_dir = os.path.join(phy_mtg_data, period)
     runs = os.listdir(base_dir)
+    runs = [r for r in runs if "old" not in r]
 
     for r in runs:
         if r not in run_list:
@@ -1883,6 +1902,9 @@ def get_pulser_data(
     # geds
     ser_ged_cusp = dfs[0][channel].sort_index()
     ser_ged_cusp = filter_by_period(ser_ged_cusp, period)
+    ser_ged_cusp = ser_ged_cusp[
+        ~ser_ged_cusp.index.duplicated(keep="first")
+    ]  # remove duplicates
     ser_pul_tp0est_new = pd.DataFrame()
 
     if ser_ged_cusp.empty:
@@ -1893,6 +1915,9 @@ def get_pulser_data(
     if isinstance(dfs[6], pd.DataFrame) and not dfs[6].empty:
         ser_pul_tp0est = dfs[6][1027203].sort_index()
         ser_pul_tp0est = filter_by_period(ser_pul_tp0est, period)
+        ser_pul_tp0est = ser_pul_tp0est[
+            ~ser_pul_tp0est.index.duplicated(keep="first")
+        ]  # remove duplicates
 
         low_lim = 4.8e4
         upp_lim = 5.0e4
@@ -1933,6 +1958,9 @@ def get_pulser_data(
     # ...if pulser is available:
     if not dfs[2].empty:
         ser_pul_cusp = dfs[2][1027203].sort_index()
+        ser_pul_cusp = ser_pul_cusp[
+            ~ser_pul_cusp.index.duplicated(keep="first")
+        ]  # remove duplicates
         ser_pul_cusp = filter_by_period(ser_pul_cusp, period)
 
         # pulser average and diffs

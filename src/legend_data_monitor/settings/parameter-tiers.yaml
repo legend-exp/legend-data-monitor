@@ -69,7 +69,7 @@ is_upgoing_baseline: hit
 is_noise_burst: hit
 is_valid_neg_current: hit
 is_valid_bl_slope: hit
-is_valid_bl_slope_rms: hit
+is_valid_bl_poly_rms: hit
 is_valid_pz_slope: hit
 is_valid_tail_rms: hit
 is_valid_cuspEmax: hit
@@ -87,6 +87,7 @@ is_valid_cuspEmax_classifier: hit
 is_valid_cuspEmin_classifier: hit
 is_valid_bl_slope_classifier: hit
 is_valid_bl_slope_rms_classifier: hit
+is_valid_bl_poly_rms_classifier: hit
 is_valid_pz_slope_classifier: hit
 is_valid_tail_rms_classifier: hit
 is_negative_polarity_candidate: hit
