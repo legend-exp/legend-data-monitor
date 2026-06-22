@@ -1,6 +1,7 @@
 import glob
 import os
 import re
+import matplotlib.pyplot as plt
 from pathlib import Path
 
 import yaml
@@ -346,6 +347,7 @@ def auto_run(
                     "...running command for generating hdf monitoring files"
                 )
                 core.auto_control_plots(my_config, output_file, "", {})
+                plt.close('all')  # close all figures
         else:
             utils.logger.debug(f"... file has {num_lines} lines. No need to split.")
             utils.logger.debug("...running command for generating hdf monitoring files")
@@ -384,9 +386,7 @@ def auto_run(
         avail_runs = [
             ar
             for ar in avail_runs
-            if "mtg" not in ar
-            and ar != ".ipynb_checkpoints"
-            and not ar.endswith(".xlsx")
+            if re.fullmatch(r"r\d{3}", ar)
         ]
         dataset = {period: avail_runs}
         if dataset[period] != []:

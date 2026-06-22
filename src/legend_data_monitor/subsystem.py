@@ -304,11 +304,8 @@ class Subsystem:
         utils.logger.info("... mapping to name and string/fiber position")
         self.data = self.data.set_index("channel")
         # expand channel map index to match that of data with repeating channels
-        ch_map_reindexed = self.channel_map.set_index("channel").reindex(
-            self.data.index
-        )
-        # append the channel map columns to the data
-        self.data = pd.concat([self.data, ch_map_reindexed], axis=1)
+        ch_map_indexed = self.channel_map.set_index("channel")
+        self.data = self.data.join(ch_map_indexed, how="left")
         self.data = self.data.reset_index()
         for col in ["location", "position"]:
             # ignore string values for fibers ('I/OB-XXX-XXX') and positions ('top/bottom') for SiPMs
@@ -370,6 +367,7 @@ class Subsystem:
             self.data = self.data.merge(
                 aux_subsys.data[["datetime", param]], on="datetime", how="left"
             )
+            del aux_subsys
 
             # ratio
             self.data[f"{param}_{aux_ch}Ratio"] = (

@@ -413,17 +413,12 @@ class AnalysisData:
                 # need to copy, otherwise next line removes "channel" from original, and crashes next time over not finding channel
                 columns = utils.COLUMNS_TO_LOAD[:]
                 columns.remove("channel")
-                self.data = pd.concat(
-                    [
-                        event_rate,
-                        self.data.groupby("channel")
-                        .first()
-                        .reindex(event_rate.index)[columns],
-                    ],
-                    axis=1,
-                )
-                # put the channel back as column
+                event_rate = event_rate.set_index("channel")
+                ch_info = self.data.groupby("channel").first()[columns]
+                self.data = event_rate.join(ch_info)
                 self.data = self.data.reset_index()
+                del event_rate
+                
             elif param == "FWHM":
                 # calculate FWHM for each channel (substitute 'param' column with it)
                 channel_fwhm = (
@@ -478,9 +473,8 @@ class AnalysisData:
                 df_livetime["livetime_in_s"] = df_livetime["pulser_events"] / rate
 
                 self.data = self.data.set_index("name")
-                self.data = pd.concat(
-                    [self.data, df_livetime.reindex(self.data.index)], axis=1
-                )
+                self.data = self.data.join(df_livetime)
+                self.data = self.data.reset_index()
                 # drop the pulser events column we don't need it
                 self.data = self.data.drop("pulser_events", axis=1)
 
@@ -566,6 +560,7 @@ class AnalysisData:
                 channel_mean = self_data_time_cut.groupby("channel").mean(
                     numeric_only=True
                 )[self.parameters]
+                del self_data_time_cut
                 # concatenate column with mean values
                 self.data = concat_channel_mean(self, channel_mean)
 
@@ -758,15 +753,19 @@ def get_saved_df_hdf(
     long_df = wide_df_reset.melt(
         id_vars="datetime", var_name="channel", value_name=param
     )
+    del wide_df_reset
 
     # merge self.data with old_df
-    old_absolute_values = long_df.copy().filter(items=["channel", "datetime", param])
-    new_absolute_values = self.data.copy().filter(items=["channel", "datetime", param])
+    old_absolute_values = long_df.filter(items=["channel", "datetime", param])
+    del long_df
+    new_absolute_values = self.data.filter(items=["channel", "datetime", param])
 
     # concatenate and cut over first 10%
     concatenated_df = pd.concat(
         [old_absolute_values, new_absolute_values], ignore_index=True
     )
+    del old_absolute_values
+    del new_absolute_values
     concatenated_df_time_cut = cut_dataframe(concatenated_df)
     concatenated_df_time_cut = concatenated_df_time_cut.drop(columns=["datetime"])
 
@@ -774,11 +773,12 @@ def get_saved_df_hdf(
     channel_mean = (
         concatenated_df_time_cut.groupby("channel")[param].mean().reset_index()
     )
+    del concatenated_df
     channel_mean = channel_mean.drop_duplicates(subset=["channel"]).set_index("channel")
 
     # reshape back to wide format if needed
     # result_wide = channel_mean.reset_index().pivot_table(index=None, columns='channel', values=param)
-
+    
     return channel_mean
 
 
@@ -831,7 +831,7 @@ def get_aux_df(
 
         # get channel mean and blabla
         aux_analysis = AnalysisData(aux_data, selection=plot_settings)
-        utils.logger.debug("... aux dataframe \n%s", aux_analysis.data)
+        del aux_data
 
         # get abs/mean/% variation for ratio values with aux channel data --> objects to save
         utils.logger.debug(f"Getting ratio wrt {aux_ch} data for {param}")
@@ -848,7 +848,7 @@ def get_aux_df(
         aux_ratio_analysis = AnalysisData(
             aux_ratio_data, selection=plot_settings, aux_info="pulser01anaRatio"
         )
-        utils.logger.debug("... aux ratio dataframe \n%s", aux_ratio_analysis.data)
+        del aux_ratio_data
 
         # get abs/mean/% variation for difference values with aux channel data --> objects to save
         utils.logger.debug(f"Getting difference wrt {aux_ch} data for {param}")
@@ -864,7 +864,7 @@ def get_aux_df(
         aux_diff_analysis = AnalysisData(
             aux_diff_data, selection=plot_settings, aux_info="pulser01anaDiff"
         )
-        utils.logger.debug("... aux difference dataframe \n%s", aux_diff_analysis.data)
+        del aux_diff_data
 
     if len(parameter) > 1:
         utils.logger.warning(
@@ -914,8 +914,7 @@ def concat_channel_mean(self, channel_mean) -> pd.DataFrame:
     )
     # add it as column for convenience - repeating redundant information, but convenient
     self.data = self.data.set_index("channel")
-    self.data = pd.concat([self.data, channel_mean.reindex(self.data.index)], axis=1)
-
+    self.data = self.data.join(channel_mean)
     return self.data.reset_index()
 
 
@@ -942,7 +941,6 @@ def load_subsystem_data(
         data_analysis = AnalysisData(subsystem.data, selection=plot_settings | dataset)
         if utils.check_empty_df(data_analysis):
             continue
-        utils.logger.debug(data_analysis.data)
 
         # get list of parameters
         params = plot_settings["parameters"]

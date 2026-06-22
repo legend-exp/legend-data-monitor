@@ -520,13 +520,13 @@ def save_hdf(
 
         # one-param case
         if len(parameters) == 1:
-            df_to_save = df.data.copy()
+            df_to_save = df.data
             if not utils.check_empty_df(aux_analysis):
-                df_aux_to_save = aux_analysis.data.copy()
+                df_aux_to_save = aux_analysis.data
             if not utils.check_empty_df(aux_ratio_analysis):
-                df_aux_ratio_to_save = aux_ratio_analysis.data.copy()
+                df_aux_ratio_to_save = aux_ratio_analysis.data
             if not utils.check_empty_df(aux_diff_analysis):
-                df_aux_diff_to_save = aux_diff_analysis.data.copy()
+                df_aux_diff_to_save = aux_diff_analysis.data
         # multi-param case (get only the df for the param of interest)
         if len(parameters) > 1:
             df_to_save = get_param_df(param_orig, df.data)
@@ -610,6 +610,7 @@ def save_hdf(
             utils.logger.info(
                 f"... HDF file for {aux_ch} - pure AUX values - saved in: \33[4m{file_path.replace(plot_info_param['subsystem'], aux_ch)}\33[0m"
             )
+            del df_aux_to_save
 
         # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
         # PURE VALUES
@@ -637,6 +638,7 @@ def save_hdf(
                     file_path,
                     saving,
                 )
+            del df_to_save
         else:
             # ... absolute values
             get_pivot(
@@ -662,6 +664,7 @@ def save_hdf(
                 file_path,
                 saving,
             )
+            del df_to_save
 
             # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
             # RATIO WRT AUX CHANNEL
@@ -691,6 +694,7 @@ def save_hdf(
                     file_path,
                     saving,
                 )
+                del df_aux_ratio_to_save
 
             # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
             # DIFFERENCE WRT AUX CHANNEL
@@ -720,6 +724,7 @@ def save_hdf(
                     file_path,
                     saving,
                 )
+                del df_aux_diff_to_save
 
     utils.logger.info(
         f"... HDF file for {plot_info_param['subsystem']} saved in: \33[4m{file_path}\33[0m"
@@ -742,9 +747,6 @@ def get_pivot(
     if saving == "append":
         # check if the file exists: if not, create a new one
         if not os.path.exists(file_path):
-            utils.logger.info(
-                f"The file {file_path} does not exist, we will create a new one with mode append."
-            )
             df_pivot.to_hdf(file_path, key=key_name, mode="a")
             return
         # the file exists, but this specific key was not saved - create the new key
@@ -752,9 +754,6 @@ def get_pivot(
         with h5py.File(file_path, "r") as file:
             saved_keys = list(file.keys())
         if os.path.exists(file_path) and key_name not in saved_keys:
-            utils.logger.info(
-                f"The key {key_name} does not exist, we will create a new one."
-            )
             df_pivot.to_hdf(file_path, key=key_name, mode="a")
             return
 

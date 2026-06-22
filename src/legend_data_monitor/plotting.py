@@ -130,7 +130,6 @@ def make_subsystem_plots(
         # check if the dataframe is empty; if so, skip this parameter
         if utils.check_empty_df(data_analysis):
             continue
-        utils.logger.debug(data_analysis.data)
 
         # get list of parameters
         params = plot_settings["parameters"]
@@ -140,7 +139,7 @@ def make_subsystem_plots(
         # this is ok for geds, but for spms? maybe another function will be necessary for this?
         # note: this will not do anything in case the parameter is from hit tier
         aux_analysis, aux_ratio_analysis, aux_diff_analysis = analysis_data.get_aux_df(
-            subsystem.data.copy(), params, plot_settings | dataset_info, "pulser01ana"
+            subsystem.data, params, plot_settings | dataset_info, "pulser01ana"
         )
 
         # -------------------------------------------------------------------------
@@ -391,7 +390,6 @@ def plot_per_ch(data_analysis: DataFrame, plot_info: dict, pdf: PdfPages):
 
     # separate figure for each string/fiber ("location")
     for location, data_location in data_analysis.groupby("location"):
-        utils.logger.debug(f"... {plot_info['locname']} {location}")
 
         # -------------------------------------------------------------------------------
         # create plot structure: 1 column, N rows with subplot for each channel
@@ -417,7 +415,6 @@ def plot_per_ch(data_analysis: DataFrame, plot_info: dict, pdf: PdfPages):
         ax_idx = 0
         # plot one channel on each axis, ordered by position
         for position, data_channel in data_location.groupby("position"):
-            utils.logger.debug(f"...... position {position}")
             # define what colors are needed
             # if this function is not called by makes_subsystem_plot() need to define colors locally
             # to be included in a separate function to be called every time (maybe in utils?)
@@ -531,7 +528,6 @@ def plot_per_cc4(data_analysis: DataFrame, plot_info: dict, pdf: PdfPages):
     # new subplot for each string
     ax_idx = 0
     for cc4_id, data_cc4_id in data_analysis.groupby("cc4_id"):
-        utils.logger.debug(f"... CC4 {cc4_id}")
         # set colors
         max_ch_per_cc4 = data_analysis.groupby("cc4_id")["cc4_channel"].nunique().max()
         global COLORS
@@ -542,7 +538,6 @@ def plot_per_cc4(data_analysis: DataFrame, plot_info: dict, pdf: PdfPages):
         labels = []
         for label, data_channel in data_cc4_id.groupby("label"):
             cc4_channel = (label.split("-"))[-1]
-            utils.logger.debug(f"...... {cc4_channel}")
             plot_style(data_channel, fig, axes[ax_idx], plot_info, COLORS[col_idx])
 
             labels.append(label)
@@ -636,8 +631,6 @@ def plot_per_string(data_analysis: DataFrame, plot_info: dict, pdf: PdfPages):
         )
         global COLORS
         COLORS = color_palette("hls", max_ch_per_string).as_hex()
-
-        utils.logger.debug(f"... {plot_info['locname']} {location}")
 
         # new color for each channel
         col_idx = 0
@@ -742,7 +735,6 @@ def plot_array(data_analysis: DataFrame, plot_info: dict, pdf: PdfPages):
 
     # group by string
     for location, data_location in data_analysis.groupby("location"):
-        utils.logger.debug(f"... {plot_info['locname']} {location}")
 
         max_ch_per_string = (
             data_analysis.groupby("location")["position"].nunique().max()
@@ -778,7 +770,6 @@ def plot_array(data_analysis: DataFrame, plot_info: dict, pdf: PdfPages):
                 linestyle="-",
                 linewidth=1,
             )
-            utils.logger.debug(f"..... average: {round(avg_of_string, 2)}")
 
             # get legend entry (print string + colour)
             legend.append(
@@ -888,10 +879,8 @@ def plot_per_barrel_and_position(
 
     # separate figure for each barrel ("location"= IB, OB)...
     for location, data_location in data_analysis.groupby("location"):
-        utils.logger.debug(f"... {location} barrel")
         # ...and position ("position"= bottom, top)
         for position, data_position in data_location.groupby("position"):
-            utils.logger.debug(f"..... {position}")
 
             # -------------------------------------------------------------------------------
             # create plot structure: M columns, N rows with subplots for each channel
