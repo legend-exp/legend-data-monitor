@@ -418,7 +418,7 @@ class AnalysisData:
                 self.data = event_rate.join(ch_info)
                 self.data = self.data.reset_index()
                 del event_rate
-                
+
             elif param == "FWHM":
                 # calculate FWHM for each channel (substitute 'param' column with it)
                 channel_fwhm = (
@@ -778,7 +778,7 @@ def get_saved_df_hdf(
 
     # reshape back to wide format if needed
     # result_wide = channel_mean.reset_index().pivot_table(index=None, columns='channel', values=param)
-    
+
     return channel_mean
 
 

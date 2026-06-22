@@ -1280,11 +1280,8 @@ def get_run_start_end_times(
     pattern = re.compile(
         r"^l\d+-p\d+-r\d+-(cal|hit|raw)-\d{8}T\d{6}Z-tier_(dsp|hit|raw)\.lh5$"
     )
-    
-    run_files = sorted(
-        f for f in os.listdir(folder_tier)
-        if pattern.match(f)
-    )
+
+    run_files = sorted(f for f in os.listdir(folder_tier) if pattern.match(f))
 
     # for when we have a calib run but zero phy runs for a given period
     if os.path.isdir(dir_path) and run not in os.listdir(dir_path):

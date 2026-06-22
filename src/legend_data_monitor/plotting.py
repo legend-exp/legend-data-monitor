@@ -414,7 +414,7 @@ def plot_per_ch(data_analysis: DataFrame, plot_info: dict, pdf: PdfPages):
 
         ax_idx = 0
         # plot one channel on each axis, ordered by position
-        for position, data_channel in data_location.groupby("position"):
+        for _, data_channel in data_location.groupby("position"):
             # define what colors are needed
             # if this function is not called by makes_subsystem_plot() need to define colors locally
             # to be included in a separate function to be called every time (maybe in utils?)
@@ -537,7 +537,6 @@ def plot_per_cc4(data_analysis: DataFrame, plot_info: dict, pdf: PdfPages):
         col_idx = 0
         labels = []
         for label, data_channel in data_cc4_id.groupby("label"):
-            cc4_channel = (label.split("-"))[-1]
             plot_style(data_channel, fig, axes[ax_idx], plot_info, COLORS[col_idx])
 
             labels.append(label)

@@ -1,5 +1,4 @@
 import os
-import re
 import subprocess
 import sys
 
@@ -400,7 +399,7 @@ def make_plots(config: dict, plt_path: str, saving: str):
         )
         del subsystems[system]
 
-    # flush and remove the handler 
+    # flush and remove the handler
     file_handler.flush()
     utils.logger.removeHandler(file_handler)
     file_handler.close()

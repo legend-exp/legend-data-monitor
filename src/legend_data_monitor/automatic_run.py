@@ -1,9 +1,9 @@
 import glob
 import os
 import re
-import matplotlib.pyplot as plt
 from pathlib import Path
 
+import matplotlib.pyplot as plt
 import yaml
 
 from . import calibration, core, monitoring, utils
@@ -347,7 +347,7 @@ def auto_run(
                     "...running command for generating hdf monitoring files"
                 )
                 core.auto_control_plots(my_config, output_file, "", {})
-                plt.close('all')  # close all figures
+                plt.close("all")  # close all figures
         else:
             utils.logger.debug(f"... file has {num_lines} lines. No need to split.")
             utils.logger.debug("...running command for generating hdf monitoring files")
@@ -383,11 +383,7 @@ def auto_run(
 
         # define dataset depending on the (latest) monitored period/run
         avail_runs = sorted(os.listdir(os.path.join(mtg_folder, period)))
-        avail_runs = [
-            ar
-            for ar in avail_runs
-            if re.fullmatch(r"r\d{3}", ar)
-        ]
+        avail_runs = [ar for ar in avail_runs if re.fullmatch(r"r\d{3}", ar)]
         dataset = {period: avail_runs}
         if dataset[period] != []:
             # per-period & per-run monitoring plots
