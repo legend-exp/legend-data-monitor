@@ -30,6 +30,9 @@ def read_qcp_summary(
         Production cycle subdirectory (default: "auto/latest")
     """
     file = os.path.join(output, run, f"l200-{period}-{run}-qcp_summary.yaml")
+    if not os.path.exists(file):
+        return None
+        
     with open(file) as yaml_file:
         qcp_summary = yaml.safe_load(yaml_file)
     return qcp_summary
@@ -51,7 +54,9 @@ def get_qcp_data(output: str, periods: dict) -> dict:
         seen: set = set()
         for _, run in periods[period]:
             seen.add(run)
+            
         qcp_data[period] = {}
         for run in sorted(seen):
             qcp_data[period][run] = read_qcp_summary(output, period, run)
+            
     return qcp_data
