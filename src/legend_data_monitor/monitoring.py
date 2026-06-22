@@ -4,6 +4,7 @@ import json
 import math
 import os
 import pickle
+import re
 import shelve
 import sys
 from functools import partial
@@ -1276,10 +1277,17 @@ def get_run_start_end_times(
     """
     folder_tier = os.path.join(tiers[0 if tier == "hit" else 1], "cal", period, run)
     dir_path = os.path.join(tiers[-1], "phy", period)
+    pattern = re.compile(
+        r"^l\d+-p\d+-r\d+-(cal|hit|raw)-\d{8}T\d{6}Z-tier_(dsp|hit|raw)\.lh5$"
+    )
+    
+    run_files = sorted(
+        f for f in os.listdir(folder_tier)
+        if pattern.match(f)
+    )
 
     # for when we have a calib run but zero phy runs for a given period
     if os.path.isdir(dir_path) and run not in os.listdir(dir_path):
-        run_files = sorted(os.listdir(folder_tier))
         run_end_time = pd.to_datetime(
             sto.read(
                 "ch1027201/dsp/timestamp", os.path.join(folder_tier, run_files[-1])
@@ -1288,7 +1296,6 @@ def get_run_start_end_times(
         )
         run_start_time = run_end_time
     else:
-        run_files = sorted(os.listdir(folder_tier))
         run_start_time = pd.to_datetime(
             sto.read(
                 "ch1027201/dsp/timestamp", os.path.join(folder_tier, run_files[0])
