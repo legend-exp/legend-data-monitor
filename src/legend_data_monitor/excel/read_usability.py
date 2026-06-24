@@ -235,7 +235,7 @@ def get_usability_data(
     psd_note_map = _build_psd_note_map(statuses, runinfo, periods)
 
     ged_to_string = {
-        ged: snum for snum, detectors in strings.items() for ged, _ in detectors
+        ged: snum for snum, detectors in strings.items() for ged, *_ in detectors
     }
 
     data = {}

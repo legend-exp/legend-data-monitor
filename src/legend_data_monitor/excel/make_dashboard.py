@@ -5,7 +5,7 @@ Call ``make_excel(strings, periods, data, output_path)``.
 Inputs
 ------
 strings : dict[int, list[tuple[str, float]]]
-    ``{string_number: [(ged_name, mass_g), ...]}`` — detectors in top-to-bottom order.
+    ``{string_number: [(ged_name, mass_g, cc4), ...]}`` — detectors in top-to-bottom order.
 
 periods : dict[str, list[tuple[str, str]]]
     ``{period: [(run_type, run), ...]}`` — columns in display order.
@@ -40,22 +40,22 @@ PREFERRED_PERIOD_COLOURS: dict[str, str] = {
     "p22": "BB00BB",  # pink
 }
 DEFAULT_PERIOD_COLOUR = "808080"  # grey fallback for unlisted periods
+WHITE = "FFFFFF"
 
-CAL_HEADER_ROW_FILL = "98FAE9"  # teal — cal run header
-PHY_HEADER_ROW_FILL = "FF42A1"  # pink — phy run header
+CAL_HEADER_ROW_FILL = "E0E0E0"  # mid gray — cal run header
+PHY_HEADER_ROW_FILL = WHITE  # white — phy run header
 STRING_FILL_ODD = "F2F2F2"  # light grey — alternating string groups
 STRING_FILL_EVEN = "E0E0E0"  # mid grey
-ESCALE_FILL = "F6D7B8"  # Escale row marker
-PSD_FILL = "95B3DE"  # PSD row marker
-WHITE = "FFFFFF"
+ESCALE_FILL = "E0E0E0"  # Escale row marker
+PSD_FILL = WHITE  # PSD row marker
 
 # Conditional formatting colours
 CF_GREEN = "CEEED0"  # on
-CF_AMBER = "FCEBA5"  # ac
+CF_AMBER = "FF8C00"  # ac
 CF_RED = "F7C9CF"  # off
-CF_LIGHT_BLUE = "B0CBFFFF"  # valid
-CF_BLUE = "8A9FC5FF"  # present
-CF_DARK_BLUE = "667590FF"  # missing
+CF_LIGHT_BLUE = "CEEED0"  # valid
+CF_BLUE = "FF8C00"  # present
+CF_DARK_BLUE = "F7C9CF"  # missing
 
 # ---------------------------------------------------------------------------
 # Excel sheet functions
@@ -270,7 +270,7 @@ def make_excel(
 
     # Build (period, run_type, run) -> 1-based column index
     col_index: dict[tuple, int] = {}
-    col = 5  # A=String, B=GED, C=Mass, D=E/P type
+    col = 6  # A=String, B=GED, C=Mass, D=C4, E=E/P type
     for period in period_list:
         for run_type, run in periods[period]:
             col_index[(period, run_type, run)] = col
@@ -298,7 +298,7 @@ def make_excel(
     # row 2 column headers
     work_sheet.row_dimensions[2].height = 50
 
-    for label, col in [("String", 1), ("GED", 2), ("Mass [g]", 3)]:
+    for label, col in [("String", 1), ("GED", 2), ("Mass [g]", 3), ("CC4 ID", 4)]:
         cell = work_sheet.cell(row=2, column=col, value=label)
         cell.font = Font(bold=True, size=11)
         cell.alignment = Alignment(horizontal="center", vertical="center")
@@ -338,7 +338,7 @@ def make_excel(
         string_start_row = current_row
         string_end_row = current_row + len(detectors) * 2 - 1
 
-        for det_idx, (ged_name, mass) in enumerate(detectors):
+        for det_idx, (ged_name, mass, cc4) in enumerate(detectors):
             e_row = current_row
             p_row = current_row + 1
             first = det_idx == 0
@@ -356,7 +356,7 @@ def make_excel(
                 bottom="medium" if last else "thin",
             )
 
-            # Column B — GED name (merged E+P rows)
+            # Column B — GED name
             b = work_sheet.cell(row=e_row, column=2, value=ged_name)
             b.font = Font(size=11)
             b.alignment = Alignment(horizontal="center", vertical="center")
@@ -367,7 +367,7 @@ def make_excel(
                 start_row=e_row, start_column=2, end_row=p_row, end_column=2
             )
 
-            # Column C — mass (merged E+P rows)
+            # Column C — mass
             c = work_sheet.cell(row=e_row, column=3, value=mass)
             c.font = Font(size=11)
             c.alignment = Alignment(horizontal="center", vertical="center")
@@ -378,10 +378,21 @@ def make_excel(
                 start_row=e_row, start_column=3, end_row=p_row, end_column=3
             )
 
-            # Column D — usability type label (E / P)
+            # Column D — CC4
+            c = work_sheet.cell(row=e_row, column=4, value=cc4)
+            c.font = Font(size=11)
+            c.alignment = Alignment(horizontal="center", vertical="center")
+            c.border = _border(
+                top="medium" if first else "thin", bottom="medium" if last else "thin"
+            )
+            work_sheet.merge_cells(
+                start_row=e_row, start_column=4, end_row=p_row, end_column=4
+            )
+
+            # Column E — usability type label (E / P)
             for row_offset, usability_type in [(0, "E"), (1, "P")]:
                 row = e_row + row_offset
-                d = work_sheet.cell(row=row, column=4, value=usability_type)
+                d = work_sheet.cell(row=row, column=5, value=usability_type)
                 d.fill = _fill(ESCALE_FILL if usability_type == "E" else PSD_FILL)
                 d.font = Font(size=11)
                 d.alignment = Alignment(horizontal="center", vertical="center")
@@ -466,7 +477,7 @@ def make_excel(
     # conditional formatting on the data range
     total_dets = sum(len(dets) for dets in strings.values())
     last_data_row = 2 + total_dets * 2
-    first_data_col = get_column_letter(5)  # always column E
+    first_data_col = get_column_letter(6)  # always column F
     last_data_col = get_column_letter(max(col_index.values()))
     cf_range = f"{first_data_col}3:{last_data_col}{last_data_row}"
     ref = f"{first_data_col}3"  # top-left cell — Excel adjusts relatively
@@ -488,7 +499,7 @@ def make_excel(
         )
 
     # Freeze rows 1-2 and columns A-D
-    work_sheet.freeze_panes = "E3"
+    work_sheet.freeze_panes = "F3"
 
     if livetimes:
         add_summary_rows(work_sheet, strings, periods, col_index, livetimes)
@@ -511,7 +522,6 @@ QCP_CAL_CHECKS = [
     ("fwhm_ok", "FWHM", "F6D7B8"),
     ("npeak", "Npeak", "F6D7B8"),
     ("const_stab", "Const", "F6D7B8"),
-    ("PSD", "PSD", "95B3DE"),
 ]
 QCP_PHY_CHECKS = [
     ("baseln_spike", "BL spike", "FFD0E8"),
@@ -519,10 +529,13 @@ QCP_PHY_CHECKS = [
     ("pulser_stab", "Pulser", "FFD0E8"),
 ]
 QCP_ESCALE_CHECKS = [
-    ("escale_fwhm_FEP", "FWHM FEP", "D9E1F2"),
-    ("escale_fwhm_583", "FWHM 583", "D9E1F2"),
-    ("escale_FEP_pos", "FEP pos", "D9E1F2"),
-    ("escale_SEP_residual", "SEP resid", "D9E1F2"),
+    ("escale_fwhm_FEP", "FWHM 2615 keV", "D9E1F2"),
+    ("escale_fwhm_583", "FWHM 583 keV", "D9E1F2"),
+    ("escale_FEP_pos", "FEP position", "D9E1F2"),
+    ("escale_SEP_residual", "SEP residual", "D9E1F2"),
+]
+QCP_PSD_CHECKS = [
+    ("PSD", "A/E variations", "95B3DE"),
 ]
 
 # Registry of detail sheets: (sheet_name, run_type_filter, checks).
@@ -530,7 +543,8 @@ QCP_ESCALE_CHECKS = [
 _DETAIL_SHEETS: list[tuple[str, str, list]] = [
     ("QCP Cal", "cal", QCP_CAL_CHECKS),
     ("QCP Phy", "phy", QCP_PHY_CHECKS),
-    ("Escale partitioning", "cal", QCP_ESCALE_CHECKS),
+    ("(For experts) E-scale Cal partitioning", "cal", QCP_ESCALE_CHECKS),
+    ("(For experts) PSD Cal partitioning", "cal", QCP_PSD_CHECKS),
 ]
 
 
@@ -580,7 +594,7 @@ def make_qcp_sheet(
     work_sheet = work_book.create_sheet("QCP Summary")
 
     col_index: dict[tuple, int] = {}
-    col = 4
+    col = 5
     for period in periods:
         for run_type, run in periods[period]:
             col_index[(period, run_type, run)] = col
@@ -611,7 +625,7 @@ def make_qcp_sheet(
     # row 2: column headers
     work_sheet.row_dimensions[2].height = 50
 
-    for label, col in [("String", 1), ("GED", 2), ("Mass [g]", 3)]:
+    for label, col in [("String", 1), ("GED", 2), ("Mass [g]", 3), ("CC4 ID", 4)]:
         cell = work_sheet.cell(row=2, column=col, value=label)
         cell.font = Font(bold=True, size=11)
         cell.alignment = Alignment(horizontal="center", vertical="center")
@@ -649,7 +663,7 @@ def make_qcp_sheet(
         string_start_row = current_row
         string_end_row = current_row + len(detectors) - 1
 
-        for det_idx, (ged_name, mass) in enumerate(detectors):
+        for det_idx, (ged_name, mass, cc4) in enumerate(detectors):
             row = current_row
             first = det_idx == 0
             last = det_idx == len(detectors) - 1
@@ -676,6 +690,14 @@ def make_qcp_sheet(
 
             # Column C — mass
             c_cell = work_sheet.cell(row=row, column=3, value=mass)
+            c_cell.font = Font(size=11)
+            c_cell.alignment = Alignment(horizontal="center", vertical="center")
+            c_cell.border = _border(
+                top="medium" if first else "thin", bottom="medium" if last else "thin"
+            )
+
+            # Column D — CC4
+            c_cell = work_sheet.cell(row=row, column=4, value=cc4)
             c_cell.font = Font(size=11)
             c_cell.alignment = Alignment(horizontal="center", vertical="center")
             c_cell.border = _border(
@@ -731,7 +753,7 @@ def make_qcp_sheet(
                 end_column=1,
             )
 
-    work_sheet.freeze_panes = "D3"
+    work_sheet.freeze_panes = "E3"
     work_book.save(work_book_path)
 
 
@@ -749,7 +771,7 @@ def _make_qcp_detail_sheet(
 
     # Only include columns whose run_type matches phy or cal
     col_index: dict[tuple, int] = {}
-    col = 5
+    col = 6
     for period in periods:
         for run_type, run in periods[period]:
             if run_type == run_type_filter:
@@ -787,7 +809,13 @@ def _make_qcp_detail_sheet(
     # row 2: column headers
     work_sheet.row_dimensions[2].height = 50
 
-    for label, col in [("String", 1), ("GED", 2), ("Mass [g]", 3), ("Check", 4)]:
+    for label, col in [
+        ("String", 1),
+        ("GED", 2),
+        ("Mass [g]", 3),
+        ("CC4 ID", 4),
+        ("Check", 5),
+    ]:
         cell = work_sheet.cell(row=2, column=col, value=label)
         cell.font = Font(bold=True, size=11)
         cell.alignment = Alignment(horizontal="center", vertical="center")
@@ -829,7 +857,7 @@ def _make_qcp_detail_sheet(
         string_start_row = current_row
         string_end_row = current_row + len(detectors) * n_checks - 1
 
-        for det_idx, (ged_name, mass) in enumerate(detectors):
+        for det_idx, (ged_name, mass, cc4) in enumerate(detectors):
             det_start = current_row
             det_end = current_row + n_checks - 1
             first_det = det_idx == 0
@@ -871,6 +899,18 @@ def _make_qcp_detail_sheet(
                 start_row=det_start, start_column=3, end_row=det_end, end_column=3
             )
 
+            # Column D — CC4
+            c_cell = work_sheet.cell(row=det_start, column=4, value=cc4)
+            c_cell.font = Font(size=11)
+            c_cell.alignment = Alignment(horizontal="center", vertical="center")
+            c_cell.border = _border(
+                top="medium" if first_det else "thin",
+                bottom="medium" if last_det else "thin",
+            )
+            work_sheet.merge_cells(
+                start_row=det_start, start_column=4, end_row=det_end, end_column=4
+            )
+
             # One row per check
             for chk_idx, (yaml_key, label, check_fill_hex) in enumerate(checks):
                 row = det_start + chk_idx
@@ -879,8 +919,8 @@ def _make_qcp_detail_sheet(
                 top = "medium" if (first_det and first_chk) else "thin"
                 bot = "medium" if (last_det and last_chk) else "thin"
 
-                # Column D — check label
-                d = work_sheet.cell(row=row, column=4, value=label)
+                # Column E — check label
+                d = work_sheet.cell(row=row, column=5, value=label)
                 d.fill = _fill(check_fill_hex)
                 d.font = Font(size=9)
                 d.alignment = Alignment(horizontal="center", vertical="center")
@@ -929,7 +969,7 @@ def _make_qcp_detail_sheet(
                 end_column=1,
             )
 
-    work_sheet.freeze_panes = "E3"
+    work_sheet.freeze_panes = "F3"
 
 
 def make_qcp_sheets_detailed(

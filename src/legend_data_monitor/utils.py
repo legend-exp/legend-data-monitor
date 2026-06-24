@@ -1992,6 +1992,8 @@ def load_yaml_or_default(path: str, detectors: dict) -> dict:
                     "pulser_stab": None,
                     "baseln_stab": None,
                     "baseln_spike": None,
+                    "discharge_rate": None,
+                    "saturated_rate": None,
                 },
             }
             for ged in detectors

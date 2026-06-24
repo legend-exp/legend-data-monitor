@@ -106,6 +106,9 @@ def qc_distributions(
             df_IsBsln = utils.load_and_filter(store, f"/IsBsln_{par}")
             df_IsPhysics = utils.load_and_filter(store, f"/IsPhysics_{par}", mask=mask)
 
+            if df_All.empty:
+                continue
+
             df_All = filter_series_by_ignore_keys(df_All, utils.IGNORE_KEYS, period)
             df_IsPulser = filter_series_by_ignore_keys(
                 df_IsPulser, utils.IGNORE_KEYS, period
@@ -669,7 +672,14 @@ def box_summary_plot(
 
     fig, ax = plt.subplots(figsize=(12, 6))
     x = np.arange(len(df))
+
+    if info["title"] in ["FEP_gain", "pulser_stab"]:
+        plt.axhline(0, color="k", lw=0.8)
+
     if not df["fwhm"].isna().all():
+        fwhm_label = (
+            r"$\pm$FWHM/2" if info["title"] == "FEP_gain" else r"$\pm$FWHM (threshold)"
+        )
         ax.bar(
             x,
             df["fwhm"],
@@ -677,7 +687,7 @@ def box_summary_plot(
             width=0.4,
             color="orange",
             alpha=0.2,
-            label="FWHM",
+            label=fwhm_label,
         )
 
     ax.bar(
@@ -738,12 +748,12 @@ def box_summary_plot(
     ax.grid(False)
 
     if info["title"] in ["baseln_stab"]:
-        ax.axhline(-10, ls="--", color="black")
+        ax.axhline(-10, ls="--", color="black", label=r"$\pm$10% threshold")
         ax.axhline(10, ls="--", color="black")
         ax.axhspan(10, 500, color="gray", alpha=0.25)
         ax.axhspan(-10, -500, color="gray", alpha=0.25)
     if info["title"] in ["baseln_spike"]:
-        ax.axhline(50, ls="--", color="black")
+        ax.axhline(50, ls="--", color="black", label=r"50 ADC upper threshold")
         ax.axhspan(50, 500, color="gray", alpha=0.25)
 
     if info["title"] in ["FEP_gain", "pulser_stab"]:
@@ -881,6 +891,14 @@ def qc_average(
         f"l200-{period}-{run}-phy-monitoring",
     )
 
+    usability_map_file = os.path.join(
+        output_folder,
+        period,
+        run,
+        f"l200-{period}-{run}-qcp_summary.yaml",
+    )
+    output = utils.load_yaml_or_default(usability_map_file, detectors)
+
     with (
         shelve.open(shelve_path, "c", protocol=pickle.HIGHEST_PROTOCOL) as shelf,
         pd.HDFStore(my_file, "r") as store,
@@ -927,6 +945,18 @@ def qc_average(
                     ys.append(rates[rawid])
                     xs.append(ct)
 
+                    if par in ["IsDischarge", "IsSaturated"]:
+                        condition = bool(
+                            (rates[rawid] > utils.MTG_PLOT_INFO[par]["limits"][1]).any()
+                        )  # no lower limit for rates
+                        utils.update_evaluation_in_memory(
+                            output,
+                            det_name,
+                            "phy",
+                            utils.MTG_PLOT_INFO[par]["title"],
+                            not condition,
+                        )
+
                 string_indices[string] = indices
 
             ax.scatter(xs, ys, color="dodgerblue", marker="o")
@@ -939,6 +969,19 @@ def qc_average(
             ax.set_xticks(range(len(x_labels)))
             ax.set_xticklabels(x_labels, rotation=90)
             ax.grid(False)
+            if par in ["IsDischarge", "IsSaturated"]:
+                ax.axhspan(
+                    utils.MTG_PLOT_INFO[par]["limits"][1],
+                    ax.get_ylim()[1],
+                    color="gray",
+                    alpha=0.25,
+                )
+                ax.axhline(
+                    utils.MTG_PLOT_INFO[par]["limits"][1],
+                    ls="--",
+                    color="black",
+                    label=r"5 mHz upper threshold",
+                )
 
             ymin, ymax = ax.get_ylim()
             label_y = ymin * (ymax / ymin) ** 0.05 if ymin > 0 else 0.1
@@ -957,6 +1000,7 @@ def qc_average(
                     fontsize=8,
                 )
 
+            ax.legend()
             plt.tight_layout()
             if save_pdf:
                 pdf_dir = os.path.join(end_folder, "pdf")
@@ -967,6 +1011,9 @@ def qc_average(
             # serialize+save plot
             shelf[f"{period}_{run}_{par}_avg"] = pickle.dumps(fig)
             plt.close(fig)
+
+    with open(usability_map_file, "w") as f:
+        yaml.dump(output, f)
 
 
 def qc_time_series(
@@ -1085,6 +1132,19 @@ def qc_time_series(
                 ax.grid(False)
                 ax.set_ylabel(f"{period} {run} - 1h {par} rate (mHz)")
                 fig.suptitle(f"{period} {run} - String: {string}")
+                if par in ["IsDischarge", "IsSaturated"]:
+                    ax.axhspan(
+                        utils.MTG_PLOT_INFO[par]["limits"][1],
+                        ax.get_ylim()[1],
+                        color="gray",
+                        alpha=0.25,
+                    )
+                    ax.axhline(
+                        utils.MTG_PLOT_INFO[par]["limits"][1],
+                        ls="--",
+                        color="black",
+                        label=r"5 mHz upper threshold",
+                    )
                 ax.legend(loc="lower left")
                 plt.tight_layout()
 
@@ -2477,13 +2537,18 @@ def plot_time_series(
                             f"period: {period} - string: {string} - position: {pos} - ged: {channel_name}"
                         )
                         plt.ylabel(r"Energy diff / keV")
-                        plt.plot([0, 1], [0, 1], "b", label="Qbb FWHM keV lin.")
+                        plt.plot(
+                            [0, 1],
+                            [0, 1],
+                            "b",
+                            label=r"Q$_{\beta\beta}$ $\pm$FWHM/2 lin. threshold",
+                        )
                         if quadratic:
                             plt.plot(
                                 [1, 2],
                                 [1, 2],
                                 "dodgerblue",
-                                label="Qbb FWHM keV quadr.",
+                                label=r"Q$_{\beta\beta}$ $\pm$FWHM/2 quad. threshold",
                             )
 
                         if zoom:
@@ -2759,7 +2824,7 @@ def plot_time_series(
                                 [0, 1],
                                 [0, 1],
                                 color=info[inspected_parameter]["colors"][1],
-                                label="Qbb FWHM keV lin.",
+                                label=r"Q$_{\beta\beta}$ $\pm$FWHM/2 lin. threshold",
                             )
                         else:
                             if info[inspected_parameter]["limits"][1] is not None:

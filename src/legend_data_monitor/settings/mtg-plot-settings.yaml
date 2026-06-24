@@ -52,3 +52,15 @@ FEP_variation:
   limits:
     - null
     - null
+
+IsDischarge:
+  title: "discharge_rate"
+  limits:
+    - null
+    - 5
+
+IsSaturated:
+  title: "saturated_rate"
+  limits:
+    - null
+    - 5

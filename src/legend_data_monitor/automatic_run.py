@@ -296,7 +296,7 @@ def auto_run(
 
     # If new files are found, check if they are ok or not
     if new_files:
-        pattern = r"\d+"
+        pattern = r"\\d+"
         correct_files = []
 
         for new_file in new_files:
@@ -383,7 +383,7 @@ def auto_run(
 
         # define dataset depending on the (latest) monitored period/run
         avail_runs = sorted(os.listdir(os.path.join(mtg_folder, period)))
-        avail_runs = [ar for ar in avail_runs if re.fullmatch(r"r\d{3}", ar)]
+        avail_runs = [ar for ar in avail_runs if re.fullmatch(r"r\\d{3}", ar)]
         dataset = {period: avail_runs}
         if dataset[period] != []:
             # per-period & per-run monitoring plots

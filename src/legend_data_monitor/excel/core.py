@@ -98,10 +98,10 @@ def get_geds(key: str, datasets_path: Path) -> dict[int, list[tuple[str, float]]
 
 
 def get_runs_for_a_period(
-    auto_dir_path: str, period: str
+    auto_dir_path: str, mtg_path: str, period: str
 ) -> dict[str, list[tuple[str, str]]]:
     """
-    Discover all runs for *period* by scanning the DSP tier directories.
+    Discover all runs for *period* by scanning the DSP tier directories and filtering out runs that were not inspected.
 
     Returns {period: [(run_type, run), ...]} as:
       cal r000, phy r000, cal r001, phy r001, ..., cal rN
@@ -121,6 +121,8 @@ def get_runs_for_a_period(
 
     pairs: list[tuple[str, str]] = []
     for run in cal_runs:
+        if run not in os.listdir(mtg_path):
+            continue
         pairs.append(("cal", run))
         if run in phy_runs:
             pairs.append(("phy", run))
@@ -143,7 +145,7 @@ def generate_dashboard(auto_dir_path: str, period: str, output: str) -> None:
     """
     strings_info = get_strings_info(auto_dir_path, period)
 
-    periods = get_runs_for_a_period(auto_dir_path, period)
+    periods = get_runs_for_a_period(auto_dir_path, output, period)
     usability = get_usability_data(
         strings_info, periods, Path(os.path.join(auto_dir_path, "inputs/datasets"))
     )
@@ -160,7 +162,7 @@ def generate_dashboard(auto_dir_path: str, period: str, output: str) -> None:
 
 
 def get_strings_info(auto_dir_path: str, period: str) -> dict:
-    """Get string info in the desired fashion fashion: {string_number: [(ged_name, mass_g), ...]}, top-to-bottom within each string."""
+    """Get string info in the desired fashion fashion: {string_number: [(ged_name, mass_g, cc4), ...]}, top-to-bottom within each string."""
     strings_info = {}
 
     lmeta_path = os.path.join(auto_dir_path, "inputs")
@@ -199,10 +201,11 @@ def get_strings_info(auto_dir_path: str, period: str) -> dict:
         string = int(det.location.string)
         name = str(det.name)
         mass = float(det.production.mass_in_g)
+        cc4 = det.electronics.cc4.id
 
         if string not in strings_info:
             strings_info[string] = []
 
-        strings_info[string].append((name, mass))
+        strings_info[string].append((name, mass, cc4))
 
     return strings_info
