@@ -157,8 +157,8 @@ def generate_dashboard(auto_dir_path: str, period: str, output: str) -> None:
     make_excel(strings_info, periods, usability, output_path)
 
     qcp_data = get_qcp_data(output, periods)
-    make_qcp_sheet(output_path, strings_info, periods, qcp_data)
-    make_qcp_sheets_detailed(output_path, strings_info, periods, qcp_data)
+    make_qcp_sheet(output_path, strings_info, periods, qcp_data, usability)
+    make_qcp_sheets_detailed(output_path, strings_info, periods, qcp_data, usability)
 
 
 def get_strings_info(auto_dir_path: str, period: str) -> dict:

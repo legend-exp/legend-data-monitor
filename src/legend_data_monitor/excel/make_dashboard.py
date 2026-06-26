@@ -5,10 +5,10 @@ Call ``make_excel(strings, periods, data, output_path)``.
 Inputs
 ------
 strings : dict[int, list[tuple[str, float]]]
-    ``{string_number: [(ged_name, mass_g, cc4), ...]}`` — detectors in top-to-bottom order.
+    ``{string_number: [(ged_name, mass_g, cc4), ...]}`` - detectors in top-to-bottom order.
 
 periods : dict[str, list[tuple[str, str]]]
-    ``{period: [(run_type, run), ...]}`` — columns in display order.
+    ``{period: [(run_type, run), ...]}`` - columns in display order.
     The last run of each period should be cal-only (no trailing phy entry).
 
 data : dict[tuple, any]
@@ -27,7 +27,7 @@ from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
 # ---------------------------------------------------------------------------
-# Visual stuff — edit here to restyle the sheet if you want
+# Visual stuff - edit here to restyle the sheet if you want
 # ---------------------------------------------------------------------------
 
 # One hex color per period label; add entries for new periods as needed.
@@ -42,9 +42,9 @@ PREFERRED_PERIOD_COLOURS: dict[str, str] = {
 DEFAULT_PERIOD_COLOUR = "808080"  # grey fallback for unlisted periods
 WHITE = "FFFFFF"
 
-CAL_HEADER_ROW_FILL = "E0E0E0"  # mid gray — cal run header
-PHY_HEADER_ROW_FILL = WHITE  # white — phy run header
-STRING_FILL_ODD = "F2F2F2"  # light grey — alternating string groups
+CAL_HEADER_ROW_FILL = "E0E0E0"  # mid gray - cal run header
+PHY_HEADER_ROW_FILL = WHITE  # white - phy run header
+STRING_FILL_ODD = "F2F2F2"  # light grey - alternating string groups
 STRING_FILL_EVEN = "E0E0E0"  # mid grey
 ESCALE_FILL = "E0E0E0"  # Escale row marker
 PSD_FILL = WHITE  # PSD row marker
@@ -60,7 +60,21 @@ CF_DARK_BLUE = "F7C9CF"  # missing
 # ---------------------------------------------------------------------------
 # Excel sheet functions
 # ---------------------------------------------------------------------------
-
+def is_detector_off(
+    ged_name: str,
+    period: str,
+    run: str,
+    run_type: str,
+    data: dict,
+    strings: dict,
+    string_num: int
+) -> bool:
+    """
+    Check if a detector is marked as off; if so, return True.
+    """
+    e_value = data.get((string_num, ged_name, period, run, run_type, "E"))
+    return e_value == "off"
+    
 
 def generate_period_colors(period_list: list[str]) -> dict[str, str]:
     """
@@ -113,11 +127,11 @@ def add_summary_rows(
     """
     Append livetime and exposure summary rows below the detector data.
 
-      Livetime [days]              — actual values, phy columns only
-      Exposure ON    [kg·yr]       — Excel SUMPRODUCT formula
-      Exposure AC    [kg·yr]       — Excel SUMPRODUCT formula
-      Exposure OFF   [kg·yr]       — Excel SUMPRODUCT formula
-      Exposure PSD valid+ON [kg·yr] — detectors with E=on AND P=valid
+      Livetime [days]              - actual values, phy columns only
+      Exposure ON    [kg·yr]       - Excel SUMPRODUCT formula
+      Exposure AC    [kg·yr]       - Excel SUMPRODUCT formula
+      Exposure OFF   [kg·yr]       - Excel SUMPRODUCT formula
+      Exposure PSD valid+ON [kg·yr] - detectors with E=on AND P=valid
     """
     total_dets = sum(len(dets) for dets in strings.values())
     last_row = 2 + total_dets * 2  # last P row of the data block
@@ -172,7 +186,7 @@ def add_summary_rows(
             col_letter = get_column_letter(col_idx)
             livetime_days = livetime_s / 60 / 60 / 24
 
-            # Livetime cell — actual value, overwritable in Excel
+            # Livetime cell - actual value, overwritable in Excel
             cell = work_sheet.cell(
                 row=livetime_row, column=col_idx, value=round(livetime_days, 2)
             )
@@ -254,11 +268,11 @@ def make_excel(
 
     Parameters
     ----------
-    strings     : see module docstring — detector layout per string
-    periods     : see module docstring — (run_type, run) columns per period
-    data        : see module docstring — usability values
+    strings     : see module docstring - detector layout per string
+    periods     : see module docstring - (run_type, run) columns per period
+    data        : see module docstring - usability values
     output_path : path to write the .xlsx file
-    livetimes   : optional {(period, run): livetime_in_seconds} — if supplied,
+    livetimes   : optional {(period, run): livetime_in_seconds} - if supplied,
                   summary exposure rows are appended below the detector data
     """
     work_book = openpyxl.Workbook()
@@ -326,9 +340,10 @@ def make_excel(
     work_sheet.column_dimensions["A"].width = 8
     work_sheet.column_dimensions["B"].width = 10
     work_sheet.column_dimensions["C"].width = 8
-    work_sheet.column_dimensions["D"].width = 3
+    work_sheet.column_dimensions["D"].width = 8
+    work_sheet.column_dimensions["E"].width = 3
     for col in col_index.values():
-        work_sheet.column_dimensions[get_column_letter(col)].width = 5
+        work_sheet.column_dimensions[get_column_letter(col)].width = 7
 
     # data rows
     current_row = 3
@@ -344,7 +359,7 @@ def make_excel(
             first = det_idx == 0
             last = det_idx == len(detectors) - 1
 
-            # Column A — string number
+            # Column A - string number
             a = work_sheet.cell(row=e_row, column=1, value=string_num)
             a.fill = str_fill
             a.font = Font(size=11, color="000000")
@@ -356,7 +371,7 @@ def make_excel(
                 bottom="medium" if last else "thin",
             )
 
-            # Column B — GED name
+            # Column B - GED name
             b = work_sheet.cell(row=e_row, column=2, value=ged_name)
             b.font = Font(size=11)
             b.alignment = Alignment(horizontal="center", vertical="center")
@@ -367,7 +382,7 @@ def make_excel(
                 start_row=e_row, start_column=2, end_row=p_row, end_column=2
             )
 
-            # Column C — mass
+            # Column C - mass
             c = work_sheet.cell(row=e_row, column=3, value=mass)
             c.font = Font(size=11)
             c.alignment = Alignment(horizontal="center", vertical="center")
@@ -378,7 +393,7 @@ def make_excel(
                 start_row=e_row, start_column=3, end_row=p_row, end_column=3
             )
 
-            # Column D — CC4
+            # Column D - CC4
             c = work_sheet.cell(row=e_row, column=4, value=cc4)
             c.font = Font(size=11)
             c.alignment = Alignment(horizontal="center", vertical="center")
@@ -389,7 +404,7 @@ def make_excel(
                 start_row=e_row, start_column=4, end_row=p_row, end_column=4
             )
 
-            # Column E — usability type label (E / P)
+            # Column E - usability type label (E / P)
             for row_offset, usability_type in [(0, "E"), (1, "P")]:
                 row = e_row + row_offset
                 d = work_sheet.cell(row=row, column=5, value=usability_type)
@@ -405,6 +420,7 @@ def make_excel(
                 period_cols = periods[period]
                 for col_pos, (run_type, run) in enumerate(period_cols):
                     col_idx = col_index[(period, run_type, run)]
+
                     is_first_col = col_pos == 0
 
                     reason = data.get(
@@ -480,7 +496,7 @@ def make_excel(
     first_data_col = get_column_letter(6)  # always column F
     last_data_col = get_column_letter(max(col_index.values()))
     cf_range = f"{first_data_col}3:{last_data_col}{last_data_row}"
-    ref = f"{first_data_col}3"  # top-left cell — Excel adjusts relatively
+    ref = f"{first_data_col}3"  # top-left cell - Excel adjusts relatively
 
     for values, hex_color in [
         (["on", "valid"], CF_GREEN),
@@ -511,10 +527,10 @@ def make_excel(
 # QCP check constants
 # ---------------------------------------------------------------------------
 
-QCP_TRUE_FILL = "CEEED0"  # green — all checks passed
-QCP_FALSE_FILL = "F7C9CF"  # red   — at least one non-PSD check failed
-QCP_PSD_FILL = "9DC3E6"  # blue  — only PSD failed
-QCP_NULL_FILL = "E8E8E8"  # grey  — no data
+QCP_TRUE_FILL = "CEEED0"  # green - all checks passed
+QCP_FALSE_FILL = "F7C9CF"  # red   - at least one non-PSD check failed
+QCP_PSD_FILL = "9DC3E6"  # blue  - only PSD failed
+QCP_NULL_FILL = "E8E8E8"  # grey  - no data
 
 
 QCP_CAL_CHECKS = [
@@ -539,22 +555,40 @@ QCP_PSD_CHECKS = [
 ]
 
 # Registry of detail sheets: (sheet_name, run_type_filter, checks).
-# Add new sheets here — no need to touch make_qcp_sheets_detailed.
+# Add new sheets here - no need to touch make_qcp_sheets_detailed.
 _DETAIL_SHEETS: list[tuple[str, str, list]] = [
     ("QCP Cal", "cal", QCP_CAL_CHECKS),
     ("QCP Phy", "phy", QCP_PHY_CHECKS),
-    ("(For experts) E-scale Cal partitioning", "cal", QCP_ESCALE_CHECKS),
-    ("(For experts) PSD Cal partitioning", "cal", QCP_PSD_CHECKS),
+    ("(For experts) E-scale Cal part.", "cal", QCP_ESCALE_CHECKS),
+    ("(For experts) PSD Cal part.", "cal", QCP_PSD_CHECKS),
 ]
+"""
 
+def _qcp_result(det_qcp: dict, run_type: str, is_first_cal_run: bool = False) -> tuple[str | None, list[str], bool]:
+    checks = QCP_CAL_CHECKS if run_type == "cal" else QCP_PHY_CHECKS
+    const_stab_excluded = False
+    
+    # exclude const_stab for the first cal run
+    if run_type == "cal" and is_first_cal_run:
+        # Check if const_stab would have been in the checks
+        const_stab_in_checks = any(c[0] == "const_stab" for c in checks)
+        if const_stab_in_checks:
+            const_stab_excluded = True
+        checks = [c for c in checks if c[0] != "const_stab"]
+    
+    section = det_qcp.get(run_type, {})
+    checks_non_null = {
+        k[0]: section[k[0]]
+        for k in checks
+        if k[0] in section and section[k[0]] is not None
+    }
+    if not checks_non_null:
+        return None, [], const_stab_excluded
+    failed = [k for k, v in checks_non_null.items() if v is False]
+    return ("fail" if failed else "pass"), failed, const_stab_excluded
 
+"""
 def _qcp_result(det_qcp: dict, run_type: str) -> tuple[str | None, list[str]]:
-    """
-    Check all checks for a ged for a run type.
-
-    Returns (result, failed_checks) where result is "pass", "fail", or None.
-    None means all checks were null (no data available).
-    """
     checks = QCP_CAL_CHECKS if run_type == "cal" else QCP_PHY_CHECKS
     section = det_qcp.get(run_type, {})
     checks_non_null = {
@@ -567,12 +601,12 @@ def _qcp_result(det_qcp: dict, run_type: str) -> tuple[str | None, list[str]]:
     failed = [k for k, v in checks_non_null.items() if v is False]
     return ("fail" if failed else "pass"), failed
 
-
 def make_qcp_sheet(
     work_book_path: str,
     strings: dict,
     periods: dict,
     qcp_data: dict,
+    data: dict,
 ) -> None:
     """
     Add a 'QCP Summary' sheet to an existing workbook at wb_path.
@@ -580,7 +614,7 @@ def make_qcp_sheet(
     One row per detector.  Columns:
     cal r000, phy r000, cal r001, phy r001, ...
     Each cell shows "pass" or "fail" if
-    any fail — with a comment listing the failing check names.
+    any fail - with a comment listing the failing check names.
 
     Parameters
     ----------
@@ -653,7 +687,7 @@ def make_qcp_sheet(
     work_sheet.column_dimensions["B"].width = 10
     work_sheet.column_dimensions["C"].width = 8
     for col in col_index.values():
-        work_sheet.column_dimensions[get_column_letter(col)].width = 5
+        work_sheet.column_dimensions[get_column_letter(col)].width = 7
 
     # data rows
     current_row = 3
@@ -668,7 +702,7 @@ def make_qcp_sheet(
             first = det_idx == 0
             last = det_idx == len(detectors) - 1
 
-            # Column A — string number (written every row; merged at end)
+            # Column A - string number (written every row; merged at end)
             a = work_sheet.cell(row=row, column=1, value=string_num)
             a.fill = str_fill
             a.font = Font(size=11)
@@ -680,7 +714,7 @@ def make_qcp_sheet(
                 bottom="medium" if last else "thin",
             )
 
-            # Column B — GED name
+            # Column B - GED name
             b = work_sheet.cell(row=row, column=2, value=ged_name)
             b.font = Font(size=11)
             b.alignment = Alignment(horizontal="center", vertical="center")
@@ -688,7 +722,7 @@ def make_qcp_sheet(
                 top="medium" if first else "thin", bottom="medium" if last else "thin"
             )
 
-            # Column C — mass
+            # Column C - mass
             c_cell = work_sheet.cell(row=row, column=3, value=mass)
             c_cell.font = Font(size=11)
             c_cell.alignment = Alignment(horizontal="center", vertical="center")
@@ -696,7 +730,7 @@ def make_qcp_sheet(
                 top="medium" if first else "thin", bottom="medium" if last else "thin"
             )
 
-            # Column D — CC4
+            # Column D - CC4
             c_cell = work_sheet.cell(row=row, column=4, value=cc4)
             c_cell.font = Font(size=11)
             c_cell.alignment = Alignment(horizontal="center", vertical="center")
@@ -707,19 +741,30 @@ def make_qcp_sheet(
             # Data columns
             for period in periods:
                 done_border = False
+                
                 for run_type, run in periods[period]:
                     c_idx = col_index[(period, run_type, run)]
-                    det_qcp = qcp_data.get(period, {}).get(run, {}).get(ged_name, {})
-                    result, failed = _qcp_result(det_qcp, run_type)
 
-                    if result == "pass":
-                        fill_hex, display = QCP_TRUE_FILL, "pass"
-                    elif result == "fail" and failed == ["PSD"]:
-                        fill_hex, display = QCP_PSD_FILL, "fail"
-                    elif result == "fail":
-                        fill_hex, display = QCP_FALSE_FILL, "fail"
+                    is_off = is_detector_off(
+                        ged_name, period, run, run_type, data, strings, string_num
+                    )
+                    
+                    if is_off:
+                        fill_hex, display = WHITE, None
+                        failed = []
                     else:
-                        fill_hex, display = QCP_NULL_FILL, None
+                        det_qcp = qcp_data.get(period, {}).get(run, {}).get(ged_name, {})
+    
+                        result, failed = _qcp_result(det_qcp, run_type)
+                        
+                        if result=="pass":
+                            fill_hex, display = QCP_TRUE_FILL, "pass"
+                        elif result == "fail" and failed == ["PSD"]:
+                            fill_hex, display = QCP_PSD_FILL, "fail"
+                        elif result == "fail":
+                            fill_hex, display = QCP_FALSE_FILL, "fail"
+                        else:
+                            fill_hex, display = QCP_NULL_FILL, None
 
                     cell = work_sheet.cell(row=row, column=c_idx, value=display)
                     cell.fill = _fill(fill_hex)
@@ -765,6 +810,7 @@ def _make_qcp_detail_sheet(
     strings: dict,
     periods: dict,
     qcp_data: dict,
+    data: dict,
 ) -> None:
     work_sheet = work_book.create_sheet(sheet_name)
     n_checks = len(checks)
@@ -846,8 +892,9 @@ def _make_qcp_detail_sheet(
     work_sheet.column_dimensions["B"].width = 10
     work_sheet.column_dimensions["C"].width = 8
     work_sheet.column_dimensions["D"].width = 8
+    work_sheet.column_dimensions["E"].width = 16
     for col in col_index.values():
-        work_sheet.column_dimensions[get_column_letter(col)].width = 5
+        work_sheet.column_dimensions[get_column_letter(col)].width = 7
 
     # data rows
     current_row = 3
@@ -863,7 +910,7 @@ def _make_qcp_detail_sheet(
             first_det = det_idx == 0
             last_det = det_idx == len(detectors) - 1
 
-            # Column A — string number (written per detector; string-level merge at end)
+            # Column A - string number (written per detector; string-level merge at end)
             a = work_sheet.cell(row=det_start, column=1, value=string_num)
             a.fill = str_fill
             a.font = Font(size=11)
@@ -875,7 +922,7 @@ def _make_qcp_detail_sheet(
                 bottom="medium" if last_det else "thin",
             )
 
-            # Column B — GED (merged over check rows)
+            # Column B - GED (merged over check rows)
             b = work_sheet.cell(row=det_start, column=2, value=ged_name)
             b.font = Font(size=11)
             b.alignment = Alignment(horizontal="center", vertical="center")
@@ -887,7 +934,7 @@ def _make_qcp_detail_sheet(
                 start_row=det_start, start_column=2, end_row=det_end, end_column=2
             )
 
-            # Column C — mass (merged over check rows)
+            # Column C - mass (merged over check rows)
             c_cell = work_sheet.cell(row=det_start, column=3, value=mass)
             c_cell.font = Font(size=11)
             c_cell.alignment = Alignment(horizontal="center", vertical="center")
@@ -899,7 +946,7 @@ def _make_qcp_detail_sheet(
                 start_row=det_start, start_column=3, end_row=det_end, end_column=3
             )
 
-            # Column D — CC4
+            # Column D - CC4
             c_cell = work_sheet.cell(row=det_start, column=4, value=cc4)
             c_cell.font = Font(size=11)
             c_cell.alignment = Alignment(horizontal="center", vertical="center")
@@ -919,7 +966,7 @@ def _make_qcp_detail_sheet(
                 top = "medium" if (first_det and first_chk) else "thin"
                 bot = "medium" if (last_det and last_chk) else "thin"
 
-                # Column E — check label
+                # Column E - check label
                 d = work_sheet.cell(row=row, column=5, value=label)
                 d.fill = _fill(check_fill_hex)
                 d.font = Font(size=9)
@@ -929,21 +976,37 @@ def _make_qcp_detail_sheet(
                 # Data columns
                 for period in periods:
                     first_in_period = True
+                    first_cal_run = next((r for rt, r in periods[period] if rt == "cal"), None)
                     for run_type, run in periods[period]:
                         if run_type != run_type_filter:
                             continue
+                        
                         c_idx = col_index[(period, run)]
-                        det_qcp = (
-                            qcp_data.get(period, {}).get(run, {}).get(ged_name, {})
-                        )
-                        value = det_qcp.get(run_type_filter, {}).get(yaml_key)
 
-                        if value is True:
-                            fill_hex, display = QCP_TRUE_FILL, "pass"
-                        elif value is False:
-                            fill_hex, display = QCP_FALSE_FILL, "fail"
+                        is_off = is_detector_off(
+                            ged_name, period, run, run_type, data, strings, string_num
+                        )
+                        
+                        if is_off:
+                            fill_hex, display = WHITE, None
                         else:
-                            fill_hex, display = QCP_NULL_FILL, None
+                            det_qcp = (
+                                qcp_data.get(period, {}).get(run, {}).get(ged_name, {})
+                            )
+                            value = det_qcp.get(run_type_filter, {}).get(yaml_key)
+    
+                            # check if this is the first cal run and the check is const_stab
+                            is_first_cal = (run_type == "cal" and run == first_cal_run)
+                            is_const_stab = (yaml_key == "const_stab")
+    
+                            if is_first_cal and is_const_stab:
+                                fill_hex, display = WHITE, None
+                            elif value is True:
+                                fill_hex, display = QCP_TRUE_FILL, "pass"
+                            elif value is False:
+                                fill_hex, display = QCP_FALSE_FILL, "fail"
+                            else:
+                                fill_hex, display = QCP_NULL_FILL, None
 
                         cell = work_sheet.cell(row=row, column=c_idx, value=display)
                         cell.fill = _fill(fill_hex)
@@ -977,11 +1040,12 @@ def make_qcp_sheets_detailed(
     strings: dict,
     periods: dict,
     qcp_data: dict,
+    data: dict,
 ) -> None:
     """Add per-check detail sheets to an existing workbook, one sheet per entry in _DETAIL_SHEETS."""
     wb = load_workbook(wb_path)
     for sheet_name, run_type_filter, checks in _DETAIL_SHEETS:
         _make_qcp_detail_sheet(
-            wb, sheet_name, run_type_filter, checks, strings, periods, qcp_data
+            wb, sheet_name, run_type_filter, checks, strings, periods, qcp_data, data,
         )
     wb.save(wb_path)
