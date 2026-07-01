@@ -962,7 +962,7 @@ def qc_average(
 
             ax.scatter(xs, ys, color="dodgerblue", marker="o")
             ax.set_title(f"period: {period} - run: {run} - passing {par}")
-            #if par == 'IsDischarge':
+            # if par == 'IsDischarge':
             #    dt = compute_dead_time(geds_df_abs)
             #    ax.set_title(f"period: {period} - run: {run} - passing {par} - tot dead time {dt:.3f}%")
             ax.set_ylabel(f"Average rate {par}=True (mHz)")

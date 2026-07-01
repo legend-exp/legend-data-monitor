@@ -57,6 +57,7 @@ CF_LIGHT_BLUE = "CEEED0"  # valid
 CF_BLUE = "FF8C00"  # present
 CF_DARK_BLUE = "F7C9CF"  # missing
 
+
 # ---------------------------------------------------------------------------
 # Excel sheet functions
 # ---------------------------------------------------------------------------
@@ -67,14 +68,14 @@ def is_detector_off(
     run_type: str,
     data: dict,
     strings: dict,
-    string_num: int
+    string_num: int,
 ) -> bool:
     """
     Check if a detector is marked as off; if so, return True.
     """
     e_value = data.get((string_num, ged_name, period, run, run_type, "E"))
     return e_value == "off"
-    
+
 
 def generate_period_colors(period_list: list[str]) -> dict[str, str]:
     """
@@ -567,7 +568,7 @@ _DETAIL_SHEETS: list[tuple[str, str, list]] = [
 def _qcp_result(det_qcp: dict, run_type: str, is_first_cal_run: bool = False) -> tuple[str | None, list[str], bool]:
     checks = QCP_CAL_CHECKS if run_type == "cal" else QCP_PHY_CHECKS
     const_stab_excluded = False
-    
+
     # exclude const_stab for the first cal run
     if run_type == "cal" and is_first_cal_run:
         # Check if const_stab would have been in the checks
@@ -575,7 +576,7 @@ def _qcp_result(det_qcp: dict, run_type: str, is_first_cal_run: bool = False) ->
         if const_stab_in_checks:
             const_stab_excluded = True
         checks = [c for c in checks if c[0] != "const_stab"]
-    
+
     section = det_qcp.get(run_type, {})
     checks_non_null = {
         k[0]: section[k[0]]
@@ -588,6 +589,8 @@ def _qcp_result(det_qcp: dict, run_type: str, is_first_cal_run: bool = False) ->
     return ("fail" if failed else "pass"), failed, const_stab_excluded
 
 """
+
+
 def _qcp_result(det_qcp: dict, run_type: str) -> tuple[str | None, list[str]]:
     checks = QCP_CAL_CHECKS if run_type == "cal" else QCP_PHY_CHECKS
     section = det_qcp.get(run_type, {})
@@ -600,6 +603,7 @@ def _qcp_result(det_qcp: dict, run_type: str) -> tuple[str | None, list[str]]:
         return None, []
     failed = [k for k, v in checks_non_null.items() if v is False]
     return ("fail" if failed else "pass"), failed
+
 
 def make_qcp_sheet(
     work_book_path: str,
@@ -741,23 +745,25 @@ def make_qcp_sheet(
             # Data columns
             for period in periods:
                 done_border = False
-                
+
                 for run_type, run in periods[period]:
                     c_idx = col_index[(period, run_type, run)]
 
                     is_off = is_detector_off(
                         ged_name, period, run, run_type, data, strings, string_num
                     )
-                    
+
                     if is_off:
                         fill_hex, display = WHITE, None
                         failed = []
                     else:
-                        det_qcp = qcp_data.get(period, {}).get(run, {}).get(ged_name, {})
-    
+                        det_qcp = (
+                            qcp_data.get(period, {}).get(run, {}).get(ged_name, {})
+                        )
+
                         result, failed = _qcp_result(det_qcp, run_type)
-                        
-                        if result=="pass":
+
+                        if result == "pass":
                             fill_hex, display = QCP_TRUE_FILL, "pass"
                         elif result == "fail" and failed == ["PSD"]:
                             fill_hex, display = QCP_PSD_FILL, "fail"
@@ -976,17 +982,19 @@ def _make_qcp_detail_sheet(
                 # Data columns
                 for period in periods:
                     first_in_period = True
-                    first_cal_run = next((r for rt, r in periods[period] if rt == "cal"), None)
+                    first_cal_run = next(
+                        (r for rt, r in periods[period] if rt == "cal"), None
+                    )
                     for run_type, run in periods[period]:
                         if run_type != run_type_filter:
                             continue
-                        
+
                         c_idx = col_index[(period, run)]
 
                         is_off = is_detector_off(
                             ged_name, period, run, run_type, data, strings, string_num
                         )
-                        
+
                         if is_off:
                             fill_hex, display = WHITE, None
                         else:
@@ -994,11 +1002,11 @@ def _make_qcp_detail_sheet(
                                 qcp_data.get(period, {}).get(run, {}).get(ged_name, {})
                             )
                             value = det_qcp.get(run_type_filter, {}).get(yaml_key)
-    
+
                             # check if this is the first cal run and the check is const_stab
-                            is_first_cal = (run_type == "cal" and run == first_cal_run)
-                            is_const_stab = (yaml_key == "const_stab")
-    
+                            is_first_cal = run_type == "cal" and run == first_cal_run
+                            is_const_stab = yaml_key == "const_stab"
+
                             if is_first_cal and is_const_stab:
                                 fill_hex, display = WHITE, None
                             elif value is True:
@@ -1046,6 +1054,13 @@ def make_qcp_sheets_detailed(
     wb = load_workbook(wb_path)
     for sheet_name, run_type_filter, checks in _DETAIL_SHEETS:
         _make_qcp_detail_sheet(
-            wb, sheet_name, run_type_filter, checks, strings, periods, qcp_data, data,
+            wb,
+            sheet_name,
+            run_type_filter,
+            checks,
+            strings,
+            periods,
+            qcp_data,
+            data,
         )
     wb.save(wb_path)
