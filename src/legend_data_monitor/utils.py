@@ -1966,7 +1966,7 @@ def get_vals(df, ch):
         return np.array([])
     vals = df[ch].values
     return vals[~np.isnan(vals)]
-    
+
 
 def load_and_filter(store, key: str, mask=None):
     """Load a given key from a HDF file and applies a mask."""

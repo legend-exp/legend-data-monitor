@@ -107,7 +107,7 @@ def qc_distributions(
             df_IsBsln = utils.load_and_filter(store, f"/IsBsln_{par}")
             df_IsPhysics = utils.load_and_filter(store, f"/IsPhysics_{par}", mask=mask)
 
-            if df_All.empty: 
+            if df_All.empty:
                 continue
 
             df_All = filter_series_by_ignore_keys(df_All, utils.IGNORE_KEYS, period)
@@ -147,7 +147,7 @@ def qc_distributions(
 
                     vals_all = utils.get_vals(df_All, ch)
                     vals_pulser = utils.get_vals(df_IsPulser, ch)
-                    vals_bsln = utils.get_vals(df_IsBsln, ch) 
+                    vals_bsln = utils.get_vals(df_IsBsln, ch)
                     vals_phys = utils.get_vals(df_IsPhysics, ch)
 
                     vals_all = vals_all[~np.isnan(vals_all)]
@@ -168,7 +168,7 @@ def qc_distributions(
                     perc_pulser = safe_perc(vals_pulser)
                     perc_bsln = safe_perc(vals_bsln)
                     perc_phys = safe_perc(vals_phys)
-                    
+
                     # plotting
                     ax.hist(
                         vals_all,
@@ -217,7 +217,9 @@ def qc_distributions(
                 for j in range(i + 1, len(axes)):
                     axes[j].axis("off")
 
-                fig.suptitle(f"{period} {run} - string {string} - {par} - last cycle: {last_cycle}")
+                fig.suptitle(
+                    f"{period} {run} - string {string} - {par} - last cycle: {last_cycle}"
+                )
                 fig.tight_layout()
 
                 if save_pdf:
@@ -467,7 +469,12 @@ def qc_and_evt_summary_plots(
             secax.set_ylabel("FT failure fraction (%)")
 
             ax.set_ylabel("Normalized FT failure rate (mHz/kg)")
-            ax.legend(ncol=2, fontsize="small", loc="upper left", title=f"Last cycle: {last_cycle}")
+            ax.legend(
+                ncol=2,
+                fontsize="small",
+                loc="upper left",
+                title=f"Last cycle: {last_cycle}",
+            )
             ax.grid(False)
             fig.suptitle(f"{period} - {run} - string {string}")
             fig.tight_layout()
@@ -499,7 +506,12 @@ def qc_and_evt_summary_plots(
 
         ax.set_ylabel("Normalized FT failure rate (mHz/kg)")
         ax.set_title(f"{period} - {run} - All strings")
-        ax.legend(ncol=2, fontsize="small", loc="upper left", title=f"Last cycle: {last_cycle}")
+        ax.legend(
+            ncol=2,
+            fontsize="small",
+            loc="upper left",
+            title=f"Last cycle: {last_cycle}",
+        )
         ax.grid(False)
         fig.tight_layout()
 
@@ -584,7 +596,10 @@ def qc_and_evt_summary_plots(
             ax.stairs(freq / 3600 * 1000 / on_mass, bin_edges, label=label, color=color)
 
         ax.set_ylabel("Hourly rate normalized by ON mass (mHz/kg)")
-        ax.legend(title=f"Last cycle: {last_cycle}\nON mass = {on_mass:.1f} kg", loc="upper right")
+        ax.legend(
+            title=f"Last cycle: {last_cycle}\nON mass = {on_mass:.1f} kg",
+            loc="upper right",
+        )
         ax.grid(False)
         fig.tight_layout()
 
@@ -598,24 +613,25 @@ def qc_and_evt_summary_plots(
         shelf[f"{period}_{run}_event_rate_qc"] = pickle.dumps(fig)
         plt.close(fig)
 
-
         # --- Dead time from discharge windows ---
-        mask_puls = ged_pul.puls 
+        mask_puls = ged_pul.puls
         mask_puls_no_dis = ged_pul.puls & ~is_dis.is_delayed_discharge
-        
+
         length = len(ak.flatten(ak.where(mask_puls)))
         length_no_dis = len(ak.flatten(ak.where(mask_puls_no_dis)))
-        
+
         # pulser period is assumed to be of 20 s
-        livetime_total = length * 20  
-        livetime_no_dis = length_no_dis * 20  
-        
+        livetime_total = length * 20
+        livetime_no_dis = length_no_dis * 20
+
         dead_time_s = livetime_total - livetime_no_dis
-        dead_time_pct = (dead_time_s / livetime_total * 100) if livetime_total > 0 else 0.0
-        
+        dead_time_pct = (
+            (dead_time_s / livetime_total * 100) if livetime_total > 0 else 0.0
+        )
+
         shelf[f"{period}_{run}_dead_time_pct"] = dead_time_pct
         shelf[f"{period}_{run}_dead_time_s"] = dead_time_s
-        
+
         utils.logger.info(
             f"...dead time from discharges: {dead_time_s:.1f} s ({dead_time_pct:.4f} %)"
         )
@@ -711,7 +727,9 @@ def box_summary_plot(
 
     if not df["fwhm"].isna().all():
         fwhm_label = (
-            r"$\pm$FWHM/2" if info["title"] == "FEP_gain_stab" else r"$\pm$FWHM (threshold)"
+            r"$\pm$FWHM/2"
+            if info["title"] == "FEP_gain_stab"
+            else r"$\pm$FWHM (threshold)"
         )
         ax.bar(
             x,
@@ -768,12 +786,19 @@ def box_summary_plot(
     ax.set_title(f"{period} {run}")
 
     if info["title"] in ["baseln_stab"]:
-        ax.axhline(-10, ls="--", color="black", label=r"$\pm$" + f"{info["limits"][1]}% threshold")
+        ax.axhline(
+            -10,
+            ls="--",
+            color="black",
+            label=r"$\pm$" + f"{info["limits"][1]}% threshold",
+        )
         ax.axhline(10, ls="--", color="black")
         ax.axhspan(10, 500, color="gray", alpha=0.25)
         ax.axhspan(-10, -500, color="gray", alpha=0.25)
     if info["title"] in ["baseln_spike"]:
-        ax.axhline(50, ls="--", color="black", label=f"{info["limits"][1]} ADC upper threshold")
+        ax.axhline(
+            50, ls="--", color="black", label=f"{info["limits"][1]} ADC upper threshold"
+        )
         ax.axhspan(50, 500, color="gray", alpha=0.25)
 
     if info["title"] == "FEP_gain_stab":
@@ -788,7 +813,6 @@ def box_summary_plot(
         plt.ylim(-20, 20)
     if info["title"] in ["baseln_spike"]:
         plt.ylim(0, 100)
-
 
     # Create custom legend entries for usability colors
     legend_patches = []
@@ -932,11 +956,15 @@ def qc_average(
             fig, ax = plt.subplots(figsize=(12, 4), sharex=True)
             ax.set_title(f"period: {period} - run: {run} - passing {par}")
             dt_condition = False
-            if par == 'IsDischarge':
+            if par == "IsDischarge":
                 dt = shelf.get(f"{period}_{run}_dead_time_pct", None)
-                ax.set_title(f"period: {period} - run: {run} - passing {par} - tot dead time {dt:.3f}%")
-                dt_condition = bool(dt > utils.MTG_PLOT_INFO["tot_discharge_dead_time"]["limits"][1]) 
-                
+                ax.set_title(
+                    f"period: {period} - run: {run} - passing {par} - tot dead time {dt:.3f}%"
+                )
+                dt_condition = bool(
+                    dt > utils.MTG_PLOT_INFO["tot_discharge_dead_time"]["limits"][1]
+                )
+
             x_labels, xs, ys = [], [], []
             string_indices = {}
             ct = -1
@@ -971,7 +999,7 @@ def qc_average(
                             utils.MTG_PLOT_INFO[par]["title"],
                             not condition,
                         )
-                        
+
                         utils.update_evaluation_in_memory(
                             output,
                             det_name,
@@ -1008,7 +1036,11 @@ def qc_average(
                 )
 
             if par in ["IsDischarge", "IsSaturated"]:
-                upper_limit = ax.get_ylim()[1] if ax.get_ylim()[1] > 5 else utils.MTG_PLOT_INFO[par]["limits"][1]*1.1
+                upper_limit = (
+                    ax.get_ylim()[1]
+                    if ax.get_ylim()[1] > 5
+                    else utils.MTG_PLOT_INFO[par]["limits"][1] * 1.1
+                )
                 ax.axhspan(
                     utils.MTG_PLOT_INFO[par]["limits"][1],
                     upper_limit,
@@ -1024,7 +1056,7 @@ def qc_average(
 
             ax.legend(title=f"Last cycle: {last_cycle}")
             plt.tight_layout()
-                
+
             if par in ["IsDischarge", "IsSaturated"]:
                 plot_name = f"{period}_{run}_{utils.MTG_PLOT_INFO[par]["title"]}_avg"
             else:
@@ -1035,7 +1067,7 @@ def qc_average(
                 os.makedirs(pdf_dir, exist_ok=True)
                 pdf_name = os.path.join(pdf_dir, f"{plot_name}.pdf")
                 fig.savefig(pdf_name)
-            
+
             shelf[plot_name] = pickle.dumps(fig)
             plt.close(fig)
 
@@ -1164,7 +1196,11 @@ def qc_time_series(
                 ax.set_ylabel(f"{period} {run} - 1h {par} rate (mHz)")
                 fig.suptitle(f"{period} {run} - String: {string}")
                 if par in ["IsDischarge", "IsSaturated"]:
-                    upper_limit = ax.get_ylim()[1] if ax.get_ylim()[1] > 5 else utils.MTG_PLOT_INFO[par]["limits"][1]*1.1
+                    upper_limit = (
+                        ax.get_ylim()[1]
+                        if ax.get_ylim()[1] > 5
+                        else utils.MTG_PLOT_INFO[par]["limits"][1] * 1.1
+                    )
                     ax.axhspan(
                         utils.MTG_PLOT_INFO[par]["limits"][1],
                         upper_limit,
@@ -1179,18 +1215,16 @@ def qc_time_series(
                     )
                 ax.legend(title=f"Last cycle: {last_cycle}")
                 plt.tight_layout()
-                
+
                 if par in ["IsDischarge", "IsSaturated"]:
-                    plot_name = f"{period}_{run}_string{string}_{utils.MTG_PLOT_INFO[par]["title"]}" # "_rate" already in the title
+                    plot_name = f"{period}_{run}_string{string}_{utils.MTG_PLOT_INFO[par]["title"]}"  # "_rate" already in the title
                 else:
                     plot_name = f"{period}_{run}_string{string}_{par}_rate"
 
                 if save_pdf:
                     pdf_dir = os.path.join(end_folder, "pdf", f"st{string}")
                     os.makedirs(pdf_dir, exist_ok=True)
-                    pdf_name = os.path.join(
-                        pdf_dir, f"{plot_name}.pdf"
-                    )
+                    pdf_name = os.path.join(pdf_dir, f"{plot_name}.pdf")
                     fig.savefig(pdf_name)
 
                 # serialize+save plot
@@ -2631,7 +2665,7 @@ def plot_time_series(
                         #  - p08_string1_pos1_V02160A_param
                         #  - p08_string1_pos2_V02160B_param
                         #  - ...
-                        
+
     # parameters (bsln, gain, ...) variations over run
     utils.logger.debug("...inspecting gain/bsln/etc time series")
     info = utils.MTG_PLOT_INFO
@@ -2886,7 +2920,11 @@ def plot_time_series(
                                     ],
                                     color=info[inspected_parameter]["colors"][1],
                                     ls="-",
-                                    label=None if threshold[1] is not None else "Threshold",
+                                    label=(
+                                        None
+                                        if threshold[1] is not None
+                                        else "Threshold"
+                                    ),
                                 )
 
                         plt.ylabel(info[inspected_parameter]["ylabel"])

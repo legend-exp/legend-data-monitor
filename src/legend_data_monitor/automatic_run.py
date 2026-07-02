@@ -1,7 +1,7 @@
 import glob
+import importlib.resources
 import os
 import re
-import importlib.resources
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -105,11 +105,11 @@ def auto_run(
             ]
         },
     }
-    
+
     pkg = importlib.resources.files("legend_data_monitor")
     with open(pkg / "settings" / "geds-dict.yaml") as f:
         geds_dict = yaml.load(f, Loader=yaml.CLoader)
-        
+
     # define geds dict
     my_config = {
         "output": output_folder,
@@ -122,7 +122,7 @@ def auto_run(
             "runs": int(run.split("r")[-1]),
         },
         "saving": "append",
-        "subsystems": geds_dict
+        "subsystems": geds_dict,
     }
 
     # ===========================================================================================
@@ -132,7 +132,9 @@ def auto_run(
     phy_folder = os.path.join(
         output_folder, ref_version, "generated/plt/hit", data_type
     )
-    qcp_path = os.path.join(phy_folder, period, run, f"l200-{period}-{run}-qcp_summary.yaml")
+    qcp_path = os.path.join(
+        phy_folder, period, run, f"l200-{period}-{run}-qcp_summary.yaml"
+    )
     os.makedirs(os.path.join(phy_folder, period, run, "mtg/pdf"), exist_ok=True)
     if _qcp_file_is_populated(qcp_path):
         pass
@@ -198,7 +200,7 @@ def auto_run(
     new_files = sorted(new_files)
 
     if new_files:
-        last_cycle = new_files[-1].split('-')[-2]
+        last_cycle = new_files[-1].split("-")[-2]
         utils.logger.info(f"New files found: {' '.join(new_files)}")
 
         # create the file containing the keys with correct format to be later used by legend-data-monitor (it must be created every time with the new keys; NOT APPEND)
@@ -355,7 +357,7 @@ def _qcp_file_is_populated(filepath: str) -> bool:
             return True
     return False
 
-    
+
 def summary_plots(
     auto_dir_path: str,
     phy_mtg_data: str,
@@ -688,8 +690,20 @@ def qc_avg_series(
     )
 
     monitoring.qc_average(
-        auto_dir_path, output_folder, det_info, period, current_run, last_cycle, save_pdf
+        auto_dir_path,
+        output_folder,
+        det_info,
+        period,
+        current_run,
+        last_cycle,
+        save_pdf,
     )
     monitoring.qc_time_series(
-        auto_dir_path, output_folder, det_info, period, current_run, last_cycle, save_pdf
+        auto_dir_path,
+        output_folder,
+        det_info,
+        period,
+        current_run,
+        last_cycle,
+        save_pdf,
     )

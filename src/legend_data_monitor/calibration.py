@@ -660,9 +660,9 @@ def evaluate_psd_usability_and_plot(
         "c",
         protocol=pickle.HIGHEST_PROTOCOL,
     ) as shelf:
-        shelf[
-            f"{period}_string{location[0]}_pos{location[1]}_{det_name}_AoE_stab"
-        ] = serialized_plot
+        shelf[f"{period}_string{location[0]}_pos{location[1]}_{det_name}_AoE_stab"] = (
+            serialized_plot
+        )
 
     plt.close()
 
@@ -734,7 +734,9 @@ def check_psd(
             "Only one available calibration run. Save all entries as None and exit."
         )
         for det_name in detectors_name:
-            utils.update_evaluation_in_memory(psd_data, det_name, "cal", "AoE_stab", None)
+            utils.update_evaluation_in_memory(
+                psd_data, det_name, "cal", "AoE_stab", None
+            )
 
         with open(usability_map_file, "w") as f:
             yaml.dump(psd_data, f, sort_keys=False)
@@ -848,7 +850,7 @@ def fep_gain_variation(
             alpha=0.15,
             label="±1 std",
         )
-    
+
     ax.axhline(-2, ls="--", color="black", label=r"$\pm$2 keV threshold")
     ax.axhline(2, ls="--", color="black")
     ax.axhspan(2, 500, color="gray", alpha=0.25)
