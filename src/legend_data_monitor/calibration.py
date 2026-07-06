@@ -381,7 +381,6 @@ def load_fit_pars_from_yaml(
             continue
 
         run_data = utils.read_json_or_yaml(file_path)
-        time = file_path.split("-")[-2]
 
         for idx, det in enumerate(detectors_list):
             det_key = det if det in run_data else detectors_name[idx]

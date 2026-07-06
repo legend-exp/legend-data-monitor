@@ -790,14 +790,14 @@ def box_summary_plot(
             -10,
             ls="--",
             color="black",
-            label=r"$\pm$" + f"{info["limits"][1]}% threshold",
+            label=r"$\pm$" + f"{info['limits'][1]}% threshold",
         )
         ax.axhline(10, ls="--", color="black")
         ax.axhspan(10, 500, color="gray", alpha=0.25)
         ax.axhspan(-10, -500, color="gray", alpha=0.25)
     if info["title"] in ["baseln_spike"]:
         ax.axhline(
-            50, ls="--", color="black", label=f"{info["limits"][1]} ADC upper threshold"
+            50, ls="--", color="black", label=f"{info['limits'][1]} ADC upper threshold"
         )
         ax.axhspan(50, 500, color="gray", alpha=0.25)
 
@@ -1051,14 +1051,14 @@ def qc_average(
                     utils.MTG_PLOT_INFO[par]["limits"][1],
                     ls="--",
                     color="black",
-                    label=f"{utils.MTG_PLOT_INFO[par]["limits"][1]} mHz upper threshold",
+                    label=f"{utils.MTG_PLOT_INFO[par]['limits'][1]} mHz upper threshold",
                 )
 
             ax.legend(title=f"Last cycle: {last_cycle}")
             plt.tight_layout()
 
             if par in ["IsDischarge", "IsSaturated"]:
-                plot_name = f"{period}_{run}_{utils.MTG_PLOT_INFO[par]["title"]}_avg"
+                plot_name = f"{period}_{run}_{utils.MTG_PLOT_INFO[par]['title']}_avg"
             else:
                 plot_name = f"{period}_{run}_{par}_avg"
 
@@ -1211,13 +1211,13 @@ def qc_time_series(
                         utils.MTG_PLOT_INFO[par]["limits"][1],
                         ls="--",
                         color="black",
-                        label=f"{utils.MTG_PLOT_INFO[par]["limits"][1]} mHz upper threshold",
+                        label=f"{utils.MTG_PLOT_INFO[par]['limits'][1]} mHz upper threshold",
                     )
                 ax.legend(title=f"Last cycle: {last_cycle}")
                 plt.tight_layout()
 
                 if par in ["IsDischarge", "IsSaturated"]:
-                    plot_name = f"{period}_{run}_string{string}_{utils.MTG_PLOT_INFO[par]["title"]}"  # "_rate" already in the title
+                    plot_name = f"{period}_{run}_string{string}_{utils.MTG_PLOT_INFO[par]['title']}"  # "_rate" already in the title
                 else:
                     plot_name = f"{period}_{run}_string{string}_{par}_rate"
 
@@ -2729,7 +2729,7 @@ def plot_time_series(
                 f"l200-{period}-{current_run}-phy-monitoring",
             )
             utils.logger.debug(
-                f"...inspecting {info[inspected_parameter]["title"]} over {current_run}"
+                f"...inspecting {info[inspected_parameter]['title']} over {current_run}"
             )
 
             with shelve.open(
@@ -2955,14 +2955,14 @@ def plot_time_series(
 
                             pdf_name = os.path.join(
                                 mgt_folder,
-                                f"{period}_{current_run}_string{string}_pos{pos}_{channel_name}_{info[inspected_parameter]["title"]}.pdf",
+                                f"{period}_{current_run}_string{string}_pos{pos}_{channel_name}_{info[inspected_parameter]['title']}.pdf",
                             )
                             plt.savefig(pdf_name)
 
                         # serialize+save the plot
                         serialized_plot = pickle.dumps(plt.gcf())
                         shelf[
-                            f"{period}_{current_run}_string{string}_pos{pos}_{channel_name}_{info[inspected_parameter]["title"]}"
+                            f"{period}_{current_run}_string{string}_pos{pos}_{channel_name}_{info[inspected_parameter]['title']}"
                         ] = serialized_plot
                         plt.close(fig)
 

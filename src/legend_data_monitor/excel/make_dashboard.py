@@ -1,22 +1,3 @@
-"""Excel dashboard generator.
-
-Call ``make_excel(strings, periods, data, output_path)``.
-
-Inputs
-------
-strings : dict[int, list[tuple[str, float]]]
-    ``{string_number: [(ged_name, mass_g, cc4), ...]}`` - detectors in top-to-bottom order.
-
-periods : dict[str, list[tuple[str, str]]]
-    ``{period: [(run_type, run), ...]}`` - columns in display order.
-    The last run of each period should be cal-only (no trailing phy entry).
-
-data : dict[tuple, any]
-    ``{(string_num, ged_name, period, run, run_type, usability_type): value}``
-    where usability_type is ``"E"`` (energy scale) or ``"P"`` (PSD).
-    Missing keys are treated as None (blank cell).
-"""
-
 import colorsys
 
 import openpyxl
@@ -70,9 +51,7 @@ def is_detector_off(
     strings: dict,
     string_num: int,
 ) -> bool:
-    """
-    Check if a detector is marked as off; if so, return True.
-    """
+    """Check if a detector is marked as off; if so, return True."""
     e_value = data.get((string_num, ged_name, period, run, run_type, "E"))
     return e_value == "off"
 
@@ -566,32 +545,6 @@ _DETAIL_SHEETS: list[tuple[str, str, list]] = [
     ("(For experts) E-scale Cal part.", "cal", QCP_ESCALE_CHECKS),
     ("(For experts) PSD Cal part.", "cal", QCP_PSD_CHECKS),
 ]
-"""
-
-def _qcp_result(det_qcp: dict, run_type: str, is_first_cal_run: bool = False) -> tuple[str | None, list[str], bool]:
-    checks = QCP_CAL_CHECKS if run_type == "cal" else QCP_PHY_CHECKS
-    const_stab_excluded = False
-
-    # exclude const_stab for the first cal run
-    if run_type == "cal" and is_first_cal_run:
-        # Check if const_stab would have been in the checks
-        const_stab_in_checks = any(c[0] == "const_stab" for c in checks)
-        if const_stab_in_checks:
-            const_stab_excluded = True
-        checks = [c for c in checks if c[0] != "const_stab"]
-
-    section = det_qcp.get(run_type, {})
-    checks_non_null = {
-        k[0]: section[k[0]]
-        for k in checks
-        if k[0] in section and section[k[0]] is not None
-    }
-    if not checks_non_null:
-        return None, [], const_stab_excluded
-    failed = [k for k, v in checks_non_null.items() if v is False]
-    return ("fail" if failed else "pass"), failed, const_stab_excluded
-
-"""
 
 
 def _qcp_result(det_qcp: dict, run_type: str) -> tuple[str | None, list[str]]:
@@ -1050,8 +1003,8 @@ def add_legend_sheet(work_book, checks_config: dict) -> None:
     """
     Add a legend sheet explaining the different QCP check types.
 
-    Parameters:
-    -----------
+    Parameters
+    ----------
     work_book : openpyxl.Workbook
         The workbook to add the legend to
     checks_config : dict
@@ -1167,8 +1120,8 @@ def add_legend_sheet(work_book, checks_config: dict) -> None:
         row += 1
 
         if category in checks_config:
-            for check_name, label, _ in checks_config[category]:
-                # Get detailed info for this check
+            for check_name, _, _ in checks_config[category]:
+                # get info for this check
                 details = check_details.get(check_name, {})
 
                 # parameter name
@@ -1216,8 +1169,8 @@ def add_legend_sheet(work_book, checks_config: dict) -> None:
     legend_sheet.column_dimensions["D"].width = 35
 
     # text wrapping for all cells
-    for row in legend_sheet.iter_rows(min_row=1, max_row=row, min_col=1, max_col=8):
-        for cell in row:
+    for r in legend_sheet.iter_rows(min_row=1, max_row=row, min_col=1, max_col=8):
+        for cell in r:
             if cell.value and isinstance(cell.value, str) and len(cell.value) > 30:
                 cell.alignment = Alignment(wrap_text=True, vertical="center")
 
