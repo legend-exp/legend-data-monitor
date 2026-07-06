@@ -48,10 +48,16 @@ FEP_variation:
     - peru
     - saddlebrown
   percentage: false
-  title: "FEP_gain"
+  title: "FEP_gain_stab"
   limits:
     - null
     - null
+
+tot_discharge_dead_time:
+  title: "tot_discharge_dead_time"
+  limits:
+    - null
+    - 0.02
 
 IsDischarge:
   title: "discharge_rate"

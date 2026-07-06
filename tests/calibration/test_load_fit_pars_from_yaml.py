@@ -34,10 +34,12 @@ def fake_deep_get(monkeypatch):
     # mock deep_get
     def fake_get(d, keys, default=None):
         return {
-            "mean": 1.0,
-            "mean_err": 0.1,
-            "sigma": 0.5,
-            "sigma_err": 0.05,
+            "20000101T000000Z": {
+                "mean": 1.0,
+                "mean_err": 0.1,
+                "sigma": 0.5,
+                "sigma_err": 0.05,
+            }
         }
 
     monkeypatch.setattr("legend_data_monitor.utils.deep_get", fake_get)

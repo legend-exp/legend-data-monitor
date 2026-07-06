@@ -1960,6 +1960,14 @@ def get_start_key(auto_dir_path: str, data_type: str, period: str, current_run: 
 # -------------------------------------------------------------------------
 # Helper functions
 # -------------------------------------------------------------------------
+def get_vals(df, ch):
+    """Safely extract non-nan values for a channel, returning empty array if unavailable."""
+    if df.empty or ch not in df.columns:
+        return np.array([])
+    vals = df[ch].values
+    return vals[~np.isnan(vals)]
+
+
 def load_and_filter(store, key: str, mask=None):
     """Load a given key from a HDF file and applies a mask."""
     if key not in store.keys():
@@ -1982,7 +1990,7 @@ def load_yaml_or_default(path: str, detectors: dict) -> dict:
                     "fwhm_ok": None,
                     "FEP_gain_stab": None,
                     "const_stab": None,
-                    "PSD": None,
+                    "AoE_stab": None,
                     "escale_fwhm_FEP": None,
                     "escale_fwhm_583": None,
                     "escale_FEP_pos": None,

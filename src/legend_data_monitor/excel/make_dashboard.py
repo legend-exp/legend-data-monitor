@@ -1,22 +1,3 @@
-"""Excel dashboard generator.
-
-Call ``make_excel(strings, periods, data, output_path)``.
-
-Inputs
-------
-strings : dict[int, list[tuple[str, float]]]
-    ``{string_number: [(ged_name, mass_g, cc4), ...]}`` - detectors in top-to-bottom order.
-
-periods : dict[str, list[tuple[str, str]]]
-    ``{period: [(run_type, run), ...]}`` - columns in display order.
-    The last run of each period should be cal-only (no trailing phy entry).
-
-data : dict[tuple, any]
-    ``{(string_num, ged_name, period, run, run_type, usability_type): value}``
-    where usability_type is ``"E"`` (energy scale) or ``"P"`` (PSD).
-    Missing keys are treated as None (blank cell).
-"""
-
 import colorsys
 
 import openpyxl
@@ -70,9 +51,7 @@ def is_detector_off(
     strings: dict,
     string_num: int,
 ) -> bool:
-    """
-    Check if a detector is marked as off; if so, return True.
-    """
+    """Check if a detector is marked as off; if so, return True."""
     e_value = data.get((string_num, ged_name, period, run, run_type, "E"))
     return e_value == "off"
 
@@ -535,24 +514,27 @@ QCP_NULL_FILL = "E8E8E8"  # grey  - no data
 
 
 QCP_CAL_CHECKS = [
-    ("FEP_gain_stab", "FEP stab", "F6D7B8"),
-    ("fwhm_ok", "FWHM", "F6D7B8"),
-    ("npeak", "Npeak", "F6D7B8"),
-    ("const_stab", "Const", "F6D7B8"),
+    ("FEP_gain_stab", "FEP_gain_stab", "F6D7B8"),
+    ("fwhm_ok", "fwhm_ok", "F6D7B8"),
+    ("npeak", "npeak", "F6D7B8"),
+    ("const_stab", "const_stab", "F6D7B8"),
 ]
 QCP_PHY_CHECKS = [
-    ("baseln_spike", "BL spike", "FFD0E8"),
-    ("baseln_stab", "BL stab", "FFD0E8"),
-    ("pulser_stab", "Pulser", "FFD0E8"),
+    ("baseln_spike", "baseln_spike", "FFD0E8"),
+    ("baseln_stab", "baseln_stab", "FFD0E8"),
+    ("pulser_stab", "pulser_stab", "FFD0E8"),
+    ("saturated_rate", "saturated_rate", "FFD0E8"),
+    ("discharge_rate", "discharge_rate", "FFD0E8"),
+    ("tot_discharge_dead_time", "tot_discharge_dead_time", "FFD0E8"),
 ]
 QCP_ESCALE_CHECKS = [
-    ("escale_fwhm_FEP", "FWHM 2615 keV", "D9E1F2"),
-    ("escale_fwhm_583", "FWHM 583 keV", "D9E1F2"),
-    ("escale_FEP_pos", "FEP position", "D9E1F2"),
-    ("escale_SEP_residual", "SEP residual", "D9E1F2"),
+    ("escale_fwhm_FEP", "escale_fwhm_FEP", "D9E1F2"),
+    ("escale_fwhm_583", "escale_fwhm_583", "D9E1F2"),
+    ("escale_FEP_pos", "escale_FEP_pos", "D9E1F2"),
+    ("escale_SEP_residual", "escale_SEP_residual", "D9E1F2"),
 ]
 QCP_PSD_CHECKS = [
-    ("PSD", "A/E variations", "95B3DE"),
+    ("AoE_stab", "AoE_stab", "95B3DE"),
 ]
 
 # Registry of detail sheets: (sheet_name, run_type_filter, checks).
@@ -563,32 +545,6 @@ _DETAIL_SHEETS: list[tuple[str, str, list]] = [
     ("(For experts) E-scale Cal part.", "cal", QCP_ESCALE_CHECKS),
     ("(For experts) PSD Cal part.", "cal", QCP_PSD_CHECKS),
 ]
-"""
-
-def _qcp_result(det_qcp: dict, run_type: str, is_first_cal_run: bool = False) -> tuple[str | None, list[str], bool]:
-    checks = QCP_CAL_CHECKS if run_type == "cal" else QCP_PHY_CHECKS
-    const_stab_excluded = False
-
-    # exclude const_stab for the first cal run
-    if run_type == "cal" and is_first_cal_run:
-        # Check if const_stab would have been in the checks
-        const_stab_in_checks = any(c[0] == "const_stab" for c in checks)
-        if const_stab_in_checks:
-            const_stab_excluded = True
-        checks = [c for c in checks if c[0] != "const_stab"]
-
-    section = det_qcp.get(run_type, {})
-    checks_non_null = {
-        k[0]: section[k[0]]
-        for k in checks
-        if k[0] in section and section[k[0]] is not None
-    }
-    if not checks_non_null:
-        return None, [], const_stab_excluded
-    failed = [k for k, v in checks_non_null.items() if v is False]
-    return ("fail" if failed else "pass"), failed, const_stab_excluded
-
-"""
 
 
 def _qcp_result(det_qcp: dict, run_type: str) -> tuple[str | None, list[str]]:
@@ -866,7 +822,7 @@ def _make_qcp_detail_sheet(
         ("GED", 2),
         ("Mass [g]", 3),
         ("CC4 ID", 4),
-        ("Check", 5),
+        ("Parameter", 5),
     ]:
         cell = work_sheet.cell(row=2, column=col, value=label)
         cell.font = Font(bold=True, size=11)
@@ -898,7 +854,7 @@ def _make_qcp_detail_sheet(
     work_sheet.column_dimensions["B"].width = 10
     work_sheet.column_dimensions["C"].width = 8
     work_sheet.column_dimensions["D"].width = 8
-    work_sheet.column_dimensions["E"].width = 16
+    work_sheet.column_dimensions["E"].width = 20
     for col in col_index.values():
         work_sheet.column_dimensions[get_column_letter(col)].width = 7
 
@@ -1043,6 +999,182 @@ def _make_qcp_detail_sheet(
     work_sheet.freeze_panes = "F3"
 
 
+def add_legend_sheet(work_book, checks_config: dict) -> None:
+    """
+    Add a legend sheet explaining the different QCP check types.
+
+    Parameters
+    ----------
+    work_book : openpyxl.Workbook
+        The workbook to add the legend to
+    checks_config : dict
+        Dictionary with categories and their checks
+    """
+    legend_sheet = work_book.create_sheet("Info", 0)
+
+    check_details = {
+        # cal checks
+        "FEP_gain_stab": {
+            "category": "cal",
+            "description": "FEP stability check: variation of full-energy peak position at 2615 keV during calibration (10-minute bins).",
+            "pass_criteria": "Pass if within ±2 keV.",
+        },
+        "fwhm_ok": {
+            "category": "cal",
+            "description": "Energy resolution check: successful reconstruction of energy resolution at Qββ (2039 keV).",
+            "pass_criteria": "Pass if there are no issues in the fit.",
+        },
+        "npeak": {
+            "category": "cal",
+            "description": "Peak fitting check: successful fit of calibration peaks at 583 keV and 2615 keV.",
+            "pass_criteria": "Pass if 583 keV and 2615 keV peaks are properly fitted.",
+        },
+        "const_stab": {
+            "category": "cal",
+            "description": "Gain constant stability check: monitors gain constant stability during the period.",
+            "pass_criteria": "Pass if within ±2 keV.",
+        },
+        # phy checks
+        "baseln_spike": {
+            "category": "phy",
+            "description": "Baseline RMS check: hourly baseline noise level for tagged pulser events.",
+            "pass_criteria": "Pass if < 50 ADC.",
+        },
+        "baseln_stab": {
+            "category": "phy",
+            "description": "Baseline variation check: hourly relative baseline variation for tagged pulser events.",
+            "pass_criteria": "Pass if within ±10%.",
+        },
+        "pulser_stab": {
+            "category": "phy",
+            "description": "Gain stability check: hourly relative calibrated gain variation (after CTC correction) at Qββ (2039 keV) for tagged pulser events.",
+            "pass_criteria": "Pass if within ±FWHM/2.",
+        },
+        "discharge_rate": {
+            "category": "phy",
+            "description": "Discharge rate check: average rate of discharges.",
+            "pass_criteria": "Pass if below 5 mHz.",
+        },
+        "saturated_rate": {
+            "category": "phy",
+            "description": "Saturated events rate check: average rate of saturated events.",
+            "pass_criteria": "Pass if below 1 mHz.",
+        },
+        "tot_discharge_dead_time": {
+            "category": "phy",
+            "description": "Total discharge dead time: dead time introduced in the array by discharges, accounting for a 10ms recovery window for each tagged discharge.",
+            "pass_criteria": "Pass if total discharge dead time is below 0.02%.",
+        },
+    }
+
+    category_info = {
+        "cal": {
+            "title": "Calibration Checks",
+            "description": "Quality checks performed during weekly calibration runs to verify detector response and energy calibration stability.",
+            "color": "F6D7B8",
+        },
+        "phy": {
+            "title": "Physics Checks",
+            "description": "Quality checks performed during physics runs to monitor detector stability.",
+            "color": "FFD0E8",
+        },
+    }
+
+    # flags
+    status_info = {
+        "[green]": {
+            "color": QCP_TRUE_FILL,
+            "meaning": '"pass": all checks passed successfully - exclude these cases from the report',
+        },
+        "[white]": {
+            "color": WHITE,
+            "meaning": "Detector was OFF during this run or the specific parameter was not checked by definition - exclude these cases from the report",
+        },
+        "[red]": {
+            "color": QCP_FALSE_FILL,
+            "meaning": '"fail": one or more checks failed - report these cases',
+        },
+        "[grey]": {
+            "color": QCP_NULL_FILL,
+            "meaning": "No data available for this check (ie routines failed during data processing); quality unchecked - report these cases",
+        },
+    }
+
+    title_cell = legend_sheet.cell(
+        row=1, column=1, value="Info on parameters and performed checks"
+    )
+    title_cell.font = Font(bold=True, size=16)
+    legend_sheet.merge_cells("A1:D1")
+
+    row = 3
+    for category, info in category_info.items():
+        header_cell = legend_sheet.cell(row=row, column=1, value=info["title"])
+        header_cell.font = Font(bold=True, size=12)
+        header_cell.fill = _fill("DCDCDC")
+        legend_sheet.merge_cells(f"A{row}:D{row}")
+        row += 1
+
+        desc_cell = legend_sheet.cell(row=row, column=1, value=info["description"])
+        desc_cell.font = Font(size=10, italic=True)
+        legend_sheet.merge_cells(f"A{row}:D{row}")
+        row += 1
+
+        if category in checks_config:
+            for check_name, _, _ in checks_config[category]:
+                # get info for this check
+                details = check_details.get(check_name, {})
+
+                # parameter name
+                param_cell = legend_sheet.cell(row=row, column=2, value=check_name)
+                param_cell.font = Font(bold=True, size=9)
+
+                # description
+                desc_text = details.get("description", "No description available")
+                desc_cell = legend_sheet.cell(row=row, column=3, value=desc_text)
+                desc_cell.font = Font(size=9)
+                desc_cell.alignment = Alignment(wrap_text=True)
+
+                # pass criteria
+                criteria_text = details.get("pass_criteria", "No criteria specified")
+                criteria_cell = legend_sheet.cell(
+                    row=row, column=4, value=f"{criteria_text}"
+                )
+                criteria_cell.font = Font(size=9, bold=True, color="0066CC")
+                criteria_cell.alignment = Alignment(wrap_text=True)
+
+                row += 1
+        row += 1
+
+    # status colors
+    row += 1
+    status_title = legend_sheet.cell(row=row, column=1, value="Colour coding info")
+    status_title.font = Font(bold=True, size=12)
+    status_title.fill = _fill("DCDCDC")
+    legend_sheet.merge_cells(f"A{row}:D{row}")
+    row += 1
+
+    for status, info in status_info.items():
+        name_cell = legend_sheet.cell(row=row, column=2, value=status)
+        name_cell.fill = _fill(info["color"])
+        name_cell.font = Font(size=9)
+
+        meaning_cell = legend_sheet.cell(row=row, column=3, value=info["meaning"])
+        meaning_cell.font = Font(size=9)
+        legend_sheet.merge_cells(f"C{row}:D{row}")
+        row += 1
+
+    legend_sheet.column_dimensions["A"].width = 5
+    legend_sheet.column_dimensions["B"].width = 25
+    legend_sheet.column_dimensions["C"].width = 50
+    legend_sheet.column_dimensions["D"].width = 35
+
+    # text wrapping for all cells
+    for r in legend_sheet.iter_rows(min_row=1, max_row=row, min_col=1, max_col=8):
+        for cell in r:
+            if cell.value and isinstance(cell.value, str) and len(cell.value) > 30:
+                cell.alignment = Alignment(wrap_text=True, vertical="center")
+
+
 def make_qcp_sheets_detailed(
     wb_path: str,
     strings: dict,
@@ -1052,6 +1184,13 @@ def make_qcp_sheets_detailed(
 ) -> None:
     """Add per-check detail sheets to an existing workbook, one sheet per entry in _DETAIL_SHEETS."""
     wb = load_workbook(wb_path)
+
+    checks_config = {
+        "cal": QCP_CAL_CHECKS,
+        "phy": QCP_PHY_CHECKS,
+    }
+    add_legend_sheet(wb, checks_config)
+
     for sheet_name, run_type_filter, checks in _DETAIL_SHEETS:
         _make_qcp_detail_sheet(
             wb,

@@ -1,4 +1,5 @@
 import glob
+import importlib.resources
 import os
 import re
 from pathlib import Path
@@ -105,6 +106,10 @@ def auto_run(
         },
     }
 
+    pkg = importlib.resources.files("legend_data_monitor")
+    with open(pkg / "settings" / "geds-dict.yaml") as f:
+        geds_dict = yaml.load(f, Loader=yaml.CLoader)
+
     # define geds dict
     my_config = {
         "output": output_folder,
@@ -117,121 +122,7 @@ def auto_run(
             "runs": int(run.split("r")[-1]),
         },
         "saving": "append",
-        "subsystems": {
-            "geds": {
-                "Baselines (dsp/baseline) in pulser events": {
-                    "parameters": "baseline",
-                    "event_type": "pulser",
-                    "plot_structure": "per string",
-                    "resampled": "only",
-                    "plot_style": "vs time",
-                    "AUX_ratio": True,
-                    "variation": True,
-                    "time_window": "10T",
-                },
-                "Mean baselines (dsp/bl_mean) in pulser events": {
-                    "parameters": "bl_mean",
-                    "event_type": "pulser",
-                    "plot_structure": "per string",
-                    "resampled": "only",
-                    "plot_style": "vs time",
-                    "AUX_ratio": True,
-                    "variation": True,
-                    "time_window": "10T",
-                },
-                "trapTmax gain (dsp/trapTmax) in pulser events": {
-                    "parameters": "trapTmax",
-                    "event_type": "pulser",
-                    "plot_structure": "per string",
-                    "resampled": "only",
-                    "plot_style": "vs time",
-                    "AUX_ratio": True,
-                    "variation": True,
-                    "time_window": "10T",
-                },
-                "tp_0_est gain (dsp/tp_0_est) in pulser events": {
-                    "parameters": "tp_0_est",
-                    "event_type": "pulser",
-                    "plot_structure": "per string",
-                    "resampled": "only",
-                    "plot_style": "vs time",
-                    "AUX_ratio": True,
-                    "variation": True,
-                    "time_window": "10T",
-                },
-                "Uncalibrated gain (dsp/trapEmax) in pulser events": {
-                    "parameters": "trapEmax",
-                    "event_type": "pulser",
-                    "plot_structure": "per string",
-                    "resampled": "only",
-                    "plot_style": "vs time",
-                    "AUX_ratio": True,
-                    "variation": True,
-                    "time_window": "10T",
-                },
-                "Calibrated gain (hit/trapEmax_ctc_cal) in physics events": {
-                    "parameters": "trapEmax_ctc_cal",
-                    "event_type": "phy",
-                    "plot_structure": "per string",
-                    "resampled": "only",
-                    "plot_style": "vs time",
-                    "variation": True,
-                    "time_window": "10T",
-                },
-                "Calibrated gain (hit/trapEmax_ctc_cal) in pulser events": {
-                    "parameters": "trapEmax_ctc_cal",
-                    "event_type": "pulser",
-                    "plot_structure": "per string",
-                    "resampled": "only",
-                    "plot_style": "vs time",
-                    "variation": True,
-                    "time_window": "10T",
-                },
-                "Noise (dsp/bl_std) in pulser events": {
-                    "parameters": "bl_std",
-                    "event_type": "pulser",
-                    "plot_structure": "per string",
-                    "resampled": "only",
-                    "plot_style": "vs time",
-                    "AUX_ratio": True,
-                    "variation": True,
-                    "time_window": "10T",
-                },
-                "A/E (from dsp) in pulser events": {
-                    "parameters": "AoE_Custom",
-                    "event_type": "pulser",
-                    "plot_structure": "per string",
-                    "resampled": "only",
-                    "plot_style": "vs time",
-                    "variation": True,
-                    "time_window": "10T",
-                },
-                "Quality cuts and classifiers in physics events": {
-                    "parameters": "quality_cuts",
-                    "event_type": "phy",
-                    "qc_flags": True,
-                    "qc_classifiers": True,
-                },
-                "QC classifiers in all events": {
-                    "parameters": "quality_cuts",
-                    "event_type": "all",
-                    "qc_flags": False,
-                    "qc_classifiers": True,
-                },
-                "QC classifiers in pulser events": {
-                    "parameters": "quality_cuts",
-                    "event_type": "pulser",
-                    "qc_flags": False,
-                    "qc_classifiers": True,
-                },
-                "QC classifiers in FCbsln events": {
-                    "parameters": "quality_cuts",
-                    "event_type": "FCbsln",
-                    "qc_flags": False,
-                    "qc_classifiers": True,
-                },
-            }
-        },
+        "subsystems": geds_dict,
     }
 
     # ===========================================================================================
@@ -241,13 +132,13 @@ def auto_run(
     phy_folder = os.path.join(
         output_folder, ref_version, "generated/plt/hit", data_type
     )
-    os.makedirs(os.path.join(phy_folder, period, run), exist_ok=True)
-    if os.path.isfile(
-        os.path.join(phy_folder, period, run, f"l200-{period}-{run}-qcp_summary.yaml")
-    ):
+    qcp_path = os.path.join(
+        phy_folder, period, run, f"l200-{period}-{run}-qcp_summary.yaml"
+    )
+    os.makedirs(os.path.join(phy_folder, period, run, "mtg/pdf"), exist_ok=True)
+    if _qcp_file_is_populated(qcp_path):
         pass
     else:
-        os.makedirs(os.path.join(phy_folder, period, run, "mtg/pdf"), exist_ok=True)
         utils.logger.info("...inspecting calibration data!")
         check_calib(
             auto_dir_path=auto_dir_path,
@@ -296,7 +187,7 @@ def auto_run(
 
     # If new files are found, check if they are ok or not
     if new_files:
-        pattern = r"\\d+"
+        pattern = r"\d+"
         correct_files = []
 
         for new_file in new_files:
@@ -309,6 +200,7 @@ def auto_run(
     new_files = sorted(new_files)
 
     if new_files:
+        last_cycle = new_files[-1].split("-")[-2]
         utils.logger.info(f"New files found: {' '.join(new_files)}")
 
         # create the file containing the keys with correct format to be later used by legend-data-monitor (it must be created every time with the new keys; NOT APPEND)
@@ -383,7 +275,7 @@ def auto_run(
 
         # define dataset depending on the (latest) monitored period/run
         avail_runs = sorted(os.listdir(os.path.join(mtg_folder, period)))
-        avail_runs = [ar for ar in avail_runs if re.fullmatch(r"r\\d{3}", ar)]
+        avail_runs = [ar for ar in avail_runs if re.fullmatch(r"r\d{3}", ar)]
         dataset = {period: avail_runs}
         if dataset[period] != []:
             # per-period & per-run monitoring plots
@@ -402,12 +294,11 @@ def auto_run(
                 runs=avail_runs,
                 pswd_email=pswd_email,
                 last_checked=last_checked,
+                last_cycle=last_cycle,
                 data_type=data_type,
                 partition=partition,
                 escale_val=escale_val,
                 save_pdf=save_pdf,
-                # zoom=False,  # Optional
-                # quadratic=False,  # Optional
             )
             utils.logger.info("...done!")
 
@@ -419,6 +310,7 @@ def auto_run(
                 start_key=start_key,
                 period=period,
                 current_run=run,
+                last_cycle=last_cycle,
                 save_pdf=save_pdf,
             )
             utils.logger.info("...done!")
@@ -451,6 +343,21 @@ def auto_run(
         )
 
 
+def _qcp_file_is_populated(filepath: str) -> bool:
+    """Return True if the qcp summary file exists and has at least one non-null cal entry."""
+    if not os.path.isfile(filepath):
+        return False
+    with open(filepath) as f:
+        data = yaml.safe_load(f)
+    if not data:
+        return False
+    for det_data in data.values():
+        cal = det_data.get("cal", {})
+        if any(v is not None for v in cal.values()):
+            return True
+    return False
+
+
 def summary_plots(
     auto_dir_path: str,
     phy_mtg_data: str,
@@ -461,6 +368,7 @@ def summary_plots(
     runs: list,
     pswd_email: str,
     last_checked: str,
+    last_cycle: str,
     data_type: str = "phy",
     partition: bool = False,
     escale_val: float = 2039.0,
@@ -491,6 +399,8 @@ def summary_plots(
         Password to access the legend.data.monitoring@gmail.com account for sending alert messages.
     last_checked : str
         Timestamp of the last check.
+    last_cycle : str
+        Last cycle of the inspect list; format: YYYYMMDDThhmmssZ.
     data_type : str
         Data type to load; default: 'phy'.
     partition : bool
@@ -521,6 +431,7 @@ def summary_plots(
         save_pdf,
         escale_val,
         last_checked,
+        last_cycle,
         partition,
         quadratic,
         zoom,
@@ -572,6 +483,7 @@ def summary_plots(
             pars_dict,
             det_info,
             results[k],
+            last_cycle,
             utils.MTG_PLOT_INFO[k],
             output_folder,
             data_type,
@@ -599,6 +511,7 @@ def summary_plots(
             start_key,
             period,
             current_run,
+            last_cycle,
             det_info,
             save_pdf,
         )
@@ -610,6 +523,7 @@ def summary_plots(
             start_key,
             period,
             current_run,
+            last_cycle,
             det_info,
             save_pdf,
         )
@@ -695,7 +609,6 @@ def check_calib(
             det_info,
             save_pdf,
         )
-
         calibration.check_psd(
             auto_dir_path,
             cal_path,
@@ -749,6 +662,7 @@ def qc_avg_series(
     start_key: str,
     period: str,
     current_run: str,
+    last_cycle: str,
     save_pdf: bool = False,
 ):
     """
@@ -766,6 +680,8 @@ def qc_avg_series(
         Period to inspect.
     current_run : str
         Run under inspection.
+    last_cycle : str
+        Last cycle of the inspect list; format: YYYYMMDDThhmmssZ.
     save_pdf : bool
         True if you want to save pdf files too; default: False.
     """
@@ -774,8 +690,20 @@ def qc_avg_series(
     )
 
     monitoring.qc_average(
-        auto_dir_path, output_folder, det_info, period, current_run, save_pdf
+        auto_dir_path,
+        output_folder,
+        det_info,
+        period,
+        current_run,
+        last_cycle,
+        save_pdf,
     )
     monitoring.qc_time_series(
-        auto_dir_path, output_folder, det_info, period, current_run, save_pdf
+        auto_dir_path,
+        output_folder,
+        det_info,
+        period,
+        current_run,
+        last_cycle,
+        save_pdf,
     )

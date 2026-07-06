@@ -381,14 +381,19 @@ def load_fit_pars_from_yaml(
             continue
 
         run_data = utils.read_json_or_yaml(file_path)
-        time = file_path.split("-")[-2]
 
         for idx, det in enumerate(detectors_list):
             det_key = det if det in run_data else detectors_name[idx]
 
-            pars = utils.deep_get(
-                run_data or {}, [det_key, "results", "aoe", "1000-1300keV", time], {}
+            aoe_times = utils.deep_get(
+                run_data or {}, [det_key, "results", "aoe", "1000-1300keV"], {}
             )
+            if not aoe_times:
+                pars = {}
+            else:
+                # take whichever time key
+                time_key = next(iter(aoe_times))
+                pars = aoe_times[time_key]
 
             results.setdefault(detectors_name[idx], {})[run_str] = {
                 "mean": pars.get("mean"),
@@ -639,7 +644,7 @@ def evaluate_psd_usability_and_plot(
         plt.savefig(
             os.path.join(
                 pdf_folder,
-                f"{period}_string{location[0]}_pos{location[1]}_{det_name}_PSDusability.pdf",
+                f"{period}_string{location[0]}_pos{location[1]}_{det_name}_AoE_stab.pdf",
             ),
             bbox_inches="tight",
         )
@@ -654,15 +659,15 @@ def evaluate_psd_usability_and_plot(
         "c",
         protocol=pickle.HIGHEST_PROTOCOL,
     ) as shelf:
-        shelf[
-            f"{period}_string{location[0]}_pos{location[1]}_{det_name}_PSDusability"
-        ] = serialized_plot
+        shelf[f"{period}_string{location[0]}_pos{location[1]}_{det_name}_AoE_stab"] = (
+            serialized_plot
+        )
 
     plt.close()
 
     # update psd status
     utils.update_evaluation_in_memory(
-        psd_data, det_name, "cal", "PSD", eval_result["status"]
+        psd_data, det_name, "cal", "AoE_stab", eval_result["status"]
     )
 
 
@@ -728,7 +733,9 @@ def check_psd(
             "Only one available calibration run. Save all entries as None and exit."
         )
         for det_name in detectors_name:
-            utils.update_evaluation_in_memory(psd_data, det_name, "cal", "PSD", None)
+            utils.update_evaluation_in_memory(
+                psd_data, det_name, "cal", "AoE_stab", None
+            )
 
         with open(usability_map_file, "w") as f:
             yaml.dump(psd_data, f, sort_keys=False)
@@ -839,31 +846,20 @@ def fep_gain_variation(
             (stats["mean"] - stats["std"] - baseline) / baseline * 2039,
             (stats["mean"] + stats["std"] - baseline) / baseline * 2039,
             color="red",
-            alpha=0.2,
+            alpha=0.15,
             label="±1 std",
         )
 
-    fwhm = (
-        (pars or {}).get("results")
-        or {}.get("ecal")
-        or {}.get("cuspEmax_ctc_cal")
-        or {}.get("eres_linear")
-        or {}.get("Qbb_fwhm_in_kev")
-    )
-    if isinstance(fwhm, (int, float)) and not np.isnan(fwhm):
-        if fwhm < 5:
-            plt.ylim(-5, 5)
+    ax.axhline(-2, ls="--", color="black", label=r"$\pm$2 keV threshold")
+    ax.axhline(2, ls="--", color="black")
+    ax.axhspan(2, 500, color="gray", alpha=0.25)
+    ax.axhspan(-2, -500, color="gray", alpha=0.25)
+    plt.ylim(-10, 10)
 
-        plt.axhline(0, ls="--", color="black")
-        plt.axhline(-fwhm / 2, ls="-", color="blue")
-        plt.axhline(
-            fwhm / 2, ls="-", color="blue", label=f"±FWHM/2 = ±{fwhm/2:.2f} keV"
-        )
-
-    plt.legend(loc="lower left", title=f"Min. counts = {min_counts}")
-    plt.xlabel("time [s]")
-    plt.ylabel("FEP gain variation [keV]")
+    plt.xlabel("Time (s)")
+    plt.ylabel("FEP gain variation (keV)")
     plt.title(f"{period} {run} string {string} position {position} {ged}")
+    plt.legend(loc="lower left", title=f"Minimum counts = {min_counts}")
     plt.tight_layout()
 
     if save_pdf:
@@ -872,14 +868,14 @@ def fep_gain_variation(
         plt.savefig(
             os.path.join(
                 pdf_folder,
-                f"{period}_{run}_string{string}_pos{position}_{ged}_FEP_gain_variation.pdf",
+                f"{period}_{run}_string{string}_pos{position}_{ged}_FEP_gain_stab.pdf",
             ),
             bbox_inches="tight",
         )
 
     # store the serialized plot in a shelve object under key
     serialized_plot = pickle.dumps(plt.gcf())
-    shelf[f"{period}_{run}_str{string}_pos{position}_{ged}_FEP_gain_variation"] = (
+    shelf[f"{period}_{run}_str{string}_pos{position}_{ged}_FEP_gain_stab"] = (
         serialized_plot
     )
     plt.close()
@@ -1087,6 +1083,7 @@ def check_calibration(
         pars,
         det_info,
         fep_mean_results,
+        None,
         utils.MTG_PLOT_INFO["FEP_variation"],
         output_folder,
         "cal",
@@ -1263,6 +1260,7 @@ def check_calibration_lac_ssc(
         pars,
         det_info,
         fep_mean_results,
+        None,
         utils.MTG_PLOT_INFO["FEP_variation"],
         output_folder,
         data_type,
