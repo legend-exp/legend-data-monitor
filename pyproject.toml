@@ -36,7 +36,7 @@ classifiers = [
 requires-python = ">=3.9"
 
 dependencies = [
-    "pygama",
+    "pygama==2.4.1",
     "pylegendmeta >=0.9",
     "seaborn",
     "openpyxl",
