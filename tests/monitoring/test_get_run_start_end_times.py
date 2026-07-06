@@ -63,9 +63,7 @@ def test_normal_case(monkeypatch, fake_sto, tmp_path):
     monkeypatch.setattr(
         os,
         "listdir",
-        lambda path: (
-            ["r002"] if str(path).endswith("p01") else [file1, file2]
-        ),
+        lambda path: (["r002"] if str(path).endswith("p01") else [file1, file2]),
     )
     monkeypatch.setattr(os.path, "isdir", lambda path: True)
 
