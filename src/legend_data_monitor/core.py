@@ -1,4 +1,5 @@
 import os
+import re
 import subprocess
 import sys
 
@@ -315,6 +316,7 @@ def make_plots(config: dict, plt_path: str, saving: str):
     # get data for these parameters and time range given in the dataset
     # (if no parameters given to plot, baseline and wfmax will always be loaded to flag pulser events anyway)
     subsystems["pulser"].get_data(parameters)
+    utils.logger.debug(subsystems["pulser"].data)
 
     # -------------------------------------------------------------------------
     # flag events - FC baseline
@@ -326,6 +328,7 @@ def make_plots(config: dict, plt_path: str, saving: str):
     subsystems["FCbsln"].flag_pulser_events(subsystems["pulser"])
     subsystems["FCbsln"].flag_fcbsln_only_events()
     subsystems["FCbsln"].data.drop(columns={"flag_pulser"})
+    utils.logger.debug(subsystems["FCbsln"].data)
 
     # -------------------------------------------------------------------------
     # flag events - muon
@@ -333,6 +336,7 @@ def make_plots(config: dict, plt_path: str, saving: str):
     subsystems["muon"] = subsystem.Subsystem("muon", dataset=config["dataset"])
     parameters = utils.get_all_plot_parameters("muon", config)
     subsystems["muon"].get_data(parameters)
+    utils.logger.debug(subsystems["muon"].data)
 
     # -------------------------------------------------------------------------
     # What subsystems do we want to plot?
@@ -363,6 +367,8 @@ def make_plots(config: dict, plt_path: str, saving: str):
                 "pulser01ana",
             )
 
+        utils.logger.debug(subsystems[system].data)
+
         # -------------------------------------------------------------------------
         # flag events (FOR ALL SYSTEMS)
         # -------------------------------------------------------------------------
@@ -375,6 +381,7 @@ def make_plots(config: dict, plt_path: str, saving: str):
 
         # remove timestamps for given detectors (moved here cause otherwise timestamps for flagging don't match)
         subsystems[system].remove_timestamps(utils.REMOVE_KEYS)
+        utils.logger.debug(subsystems[system].data)
 
         # -------------------------------------------------------------------------
         # make subsystem plots
@@ -397,9 +404,16 @@ def make_plots(config: dict, plt_path: str, saving: str):
             plt_path,
             saving,
         )
-        del subsystems[system]
 
-    # flush and remove the handler
+    # flush and remove the handler before cleaning
     file_handler.flush()
     utils.logger.removeHandler(file_handler)
     file_handler.close()
+    # safely clean the log file
+    with open(log_file) as f:
+        log_text = f.read()
+
+    pattern = re.compile(r"\033\[[0-9;]+m")
+    clean_text = pattern.sub("", log_text)
+    with open(log_file, "a") as f:
+        f.write(clean_text)

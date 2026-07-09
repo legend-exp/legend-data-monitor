@@ -381,8 +381,6 @@ def plot_par_vs_par(
 #         # sometimes e.g. A/E is always 0.0 => mean = 0 => var = NaN => x_min = NaN => cannot plot range [nan, nan]
 #         # anynan = anynan or np.isnan(nbins[-1])
 
-#     print(nbins)
-#     print(ranges)
 #     # if not anynan:
 #     h, xedges, yedges, image = ax.hist2d(data_channel[plot_info["parameters"][0]], data_channel[plot_info["parameters"][1]], range=ranges, bins=nbins)
 

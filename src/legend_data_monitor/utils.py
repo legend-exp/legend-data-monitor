@@ -10,6 +10,7 @@ from collections import defaultdict
 from datetime import datetime, timedelta
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from pathlib import Path
 
 import h5py
 import lh5
@@ -354,6 +355,33 @@ def get_query_timerange(**kwargs):
         return
 
     return time_range
+
+
+def get_run_start_timestamp(auto_dir_path: str, period: str, run: str, data_type: str):
+    """
+    Get first timestamp of a specific run of a give period.
+
+    Parameters
+    ----------
+    auto_dir_path : str
+        Path to tmp-auto public data files (eg /data2/public/prodenv/prod-blind/tmp-auto).
+    period : str
+        Period to inspect.
+    run : str
+        Run under inspection.
+    data_type : str
+        Data type to load; default: 'phy'.
+    """
+    tiers, _ = get_tiers_pars_folders(auto_dir_path)
+    
+    for tier in tiers:
+        folder = os.path.join(tier, data_type, period, run)
+        if os.path.exists(folder):
+            dsp_files = os.listdir(folder)
+            break
+
+    timestamp = sorted(dsp_files)[0].split("-")[-2]
+    return timestamp
 
 
 def dataset_validity_check(data_info: dict):
@@ -740,6 +768,7 @@ def get_run_name(config: dict, user_time_range: dict) -> str:
         end_timestamp = max(user_time_range["timestamp"])
 
     run_list = []
+    pattern = re.compile(r"^\d{8}T\d{6}Z$")
 
     # start to look for timestamps inside subfolders
     def search_for_timestamp(folder):
@@ -749,6 +778,8 @@ def get_run_name(config: dict, user_time_range: dict) -> str:
             if os.path.isdir(subfolder_path):
                 files = sorted(glob.glob(os.path.join(subfolder_path, "*")))
                 for i, file in enumerate(files):
+                    if not bool(pattern.match(get_timestamp(file))): continue
+                        
                     if (
                         get_timestamp(files[i - 1])
                         <= start_timestamp
@@ -758,7 +789,7 @@ def get_run_name(config: dict, user_time_range: dict) -> str:
                         <= end_timestamp
                         <= get_timestamp(file)
                     ):
-                        run_id = file.split("/")[-2]
+                        run_id = file.split("/")[-1].split("-")[2]
                         # avoid duplicates
                         if run_id not in run_list:
                             run_list.append(run_id)
@@ -1262,7 +1293,7 @@ def convert_to_camel_case(string: str, char: str) -> str:
 
 
 def get_output_path(config: dict):
-    """Get output path provided a 'dataset' from the config file. The path will be used to save and store pdfs/hdf/etc files."""
+    """Get output path provided a 'dataset' from the config file. The path will be used to save and store PDF/HDF/etc files."""
     try:
         data_types = (
             [config["dataset"]["type"]]
@@ -1509,7 +1540,7 @@ def check_threshold(
         Dictionary containing summary cal and phy info.
     """
     # no available FWHM to compare gain variations with
-    if parameter == "pulser_stab" and not output[channel_name]["cal"]["fwhm_ok"]:
+    if parameter == "pulser_stab" and (np.isnan(threshold[0]) or np.isnan(threshold[1])):
         update_evaluation_in_memory(output, channel_name, "phy", parameter, False)
         return
 
@@ -1926,25 +1957,22 @@ def build_runinfo(path: str, version: str, proc_folder: str, output: str | None)
     with open(save_location, "w") as fp:
         yaml.dump(run_info, fp, default_flow_style=False, sort_keys=False)
 
-
+    
 def get_start_key(auto_dir_path: str, data_type: str, period: str, current_run: str):
-    primary_path = os.path.join(
-        auto_dir_path, "generated/tier/dsp", data_type, period, current_run
-    )
-    fallback_path = os.path.join(
-        auto_dir_path, "generated/tier/dsp/cal", period, current_run
-    )
-
-    if os.path.exists(primary_path):
-        run_path = primary_path
-    elif os.path.exists(fallback_path):
-        run_path = fallback_path
-    else:
+    candidate_paths = [
+        Path(auto_dir_path) / "generated/tier/dsp" / data_type / period / current_run,
+        Path(auto_dir_path) / "generated/tier/dsp/cal" / period / current_run,
+        Path(auto_dir_path) / "generated/tier/pht" / data_type / period / current_run,
+        Path(auto_dir_path) / "generated/tier/pht/cal" / period / current_run,
+    ]
+    run_path = next((p for p in candidate_paths if p.exists()), None)
+    
+    if run_path is None:
         raise FileNotFoundError(
-            f"Neither path exists: {primary_path} or {fallback_path}"
+            "None of the candidate paths exist:\n"
+            + "\n".join(str(p) for p in candidate_paths)
         )
-
-    # get files and validate
+    
     files = os.listdir(run_path)
     if not files:
         raise ValueError(f"No files found in {run_path}")
@@ -1957,17 +1985,49 @@ def get_start_key(auto_dir_path: str, data_type: str, period: str, current_run: 
         raise ValueError(f"Filename '{first_file}' doesn't have expected format")
 
 
+def get_runinfo(lmeta_path: str, filename: str = "runinfo"):
+    """Load the proper runinfo object as JSON/YAML at the proper location. 
+
+    Parameters
+    ----------
+    lmeta_path : str
+        Path to legend-metadata.
+    filename : str
+        Name of the file to retrieve (default: 'runinfo'). Different files can be retrieved, eg 'validity'.
+    """
+    runinfo_path = None
+
+    for subdir in ["datasets", "dataprod", "dataprod/config"]:
+        files = glob.glob(os.path.join(lmeta_path, subdir, f"{filename}.*"))
+        if files:
+            runinfo_path = files[0]
+            break
+    
+    if runinfo_path is None:
+        raise FileNotFoundError(f"No {filename} file found in {lmeta_path}")
+    
+    return read_json_or_yaml(runinfo_path)
+
+def get_statuses_and_validity(inputs_path: str):
+    """Load the proper validity object and statuses dict."""
+    base = Path(inputs_path)
+    
+    dataprod_dir = base / "dataprod" / "config"
+    fallback_dir = base / "datasets" / "statuses"
+    
+    statuses_dir = dataprod_dir if dataprod_dir.exists() else fallback_dir
+  
+    statuses = TextDB(str(statuses_dir))
+    if "analysis" in statuses.keys():
+        statuses = statuses["analysis"]
+
+    validity = get_runinfo(base, filename="validity")
+
+    return statuses, validity
+
 # -------------------------------------------------------------------------
 # Helper functions
 # -------------------------------------------------------------------------
-def get_vals(df, ch):
-    """Safely extract non-nan values for a channel, returning empty array if unavailable."""
-    if df.empty or ch not in df.columns:
-        return np.array([])
-    vals = df[ch].values
-    return vals[~np.isnan(vals)]
-
-
 def load_and_filter(store, key: str, mask=None):
     """Load a given key from a HDF file and applies a mask."""
     if key not in store.keys():
@@ -1990,7 +2050,7 @@ def load_yaml_or_default(path: str, detectors: dict) -> dict:
                     "fwhm_ok": None,
                     "FEP_gain_stab": None,
                     "const_stab": None,
-                    "AoE_stab": None,
+                    "PSD": None,
                     "escale_fwhm_FEP": None,
                     "escale_fwhm_583": None,
                     "escale_FEP_pos": None,
@@ -2000,8 +2060,6 @@ def load_yaml_or_default(path: str, detectors: dict) -> dict:
                     "pulser_stab": None,
                     "baseln_stab": None,
                     "baseln_spike": None,
-                    "discharge_rate": None,
-                    "saturated_rate": None,
                 },
             }
             for ged in detectors
@@ -2012,6 +2070,18 @@ def load_yaml_or_default(path: str, detectors: dict) -> dict:
             return yaml.load(f, Loader=yaml.CLoader) or default_output(detectors)
 
     return default_output(detectors)
+
+
+def get_json_or_yaml_candidate(file: str):
+    candidates = [f"{file}.json", f"{file}.jsonl", f"{file}.yaml", f"{file}.yml"]
+
+    for fname in candidates:
+        if os.path.isfile(fname):
+            return read_json_or_yaml(fname)
+    
+    raise FileNotFoundError(
+        f"No JSON/YAML file found. Tried: {', '.join(candidates)}"
+    )
 
 
 def read_json_or_yaml(file_path: str):
@@ -2026,8 +2096,12 @@ def read_json_or_yaml(file_path: str):
     with open(file_path) as f:
         if file_path.endswith((".yaml", ".yml")):
             data_dict = yaml.load(f, Loader=yaml.CLoader)
+        elif file_path.endswith(".jsonl"):
+            with open(file_path) as f:
+                return [json.loads(line) for line in f if line.strip()]
         elif file_path.endswith(".json"):
-            data_dict = json.load(f)
+            with open(file_path) as f:
+                return json.load(f)
         else:
             logger.error(
                 "\033[91mUnsupported file format: expected .json or .yaml/.yml. Exit here\033[0m"
