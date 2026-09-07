@@ -787,13 +787,13 @@ def get_pivot(
                 if len(channels) == 1:
                     channel = channels[0]
                     new_var_data[channel] = (
-                        all_abs_data[channel] / new_mean[channel][0] - 1
+                        all_abs_data[channel] / new_mean[channel].iloc[0] - 1
                     ) * 100
                 # more channels (geds)
                 else:
                     for channel in channels:
                         new_var_data[channel] = (
-                            all_abs_data[channel] / new_mean[channel][0] - 1
+                            all_abs_data[channel] / new_mean[channel].iloc[0] - 1
                         ) * 100
 
                 # Write the combined DataFrame to the HDF5 file

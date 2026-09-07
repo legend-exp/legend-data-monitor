@@ -58,7 +58,7 @@ def get_periods(key: str, datasets_path: Path) -> dict[str, list[tuple[str, str]
     return periods
 
 
-def get_geds(key: str, datasets_path: Path) -> dict[int, list[tuple[str, float]]]:
+def get_geds(key: str, datasets_path: Path, cluster: str) -> dict[int, list[tuple[str, float]]]:
     runlists_path = os.path.join(datasets_path, "runlists.yaml")
     with open(runlists_path) as f:
         runlists = yaml.load(f, Loader=yaml.CLoader)
@@ -71,7 +71,7 @@ def get_geds(key: str, datasets_path: Path) -> dict[int, list[tuple[str, float]]
     first_run = expand_run_list(runs_key["cal"][periods[0]])[0]
 
     if periods[0] not in runinfo:
-        correct_runinfo(datasets_path, runinfo, periods[0], first_run)
+        correct_runinfo(datasets_path, runinfo, periods[0], first_run, cluster)
 
     timestamp = runinfo[periods[0]][first_run]["cal"]["start_key"]
     meta = LegendMetadata()
@@ -130,7 +130,7 @@ def get_runs_for_a_period(
     return {period: pairs}
 
 
-def generate_dashboard(auto_dir_path: str, period: str, output: str) -> None:
+def generate_dashboard(auto_dir_path: str, period: str, output: str, cluster: str) -> None:
     """
     Generate the LEGEND usability dashboard for one period.
 
@@ -142,12 +142,14 @@ def generate_dashboard(auto_dir_path: str, period: str, output: str) -> None:
         Period to process, eg p16
     output: str
         Directory to write sheet_{period}.xlsx into
+    cluster: str
+        Cluster used to run the scripts (either 'nersc' or 'lngs')
     """
     strings_info = get_strings_info(auto_dir_path, period)
 
     periods = get_runs_for_a_period(auto_dir_path, output, period)
     usability = get_usability_data(
-        strings_info, periods, Path(os.path.join(auto_dir_path, "inputs/datasets"))
+        strings_info, periods, Path(os.path.join(auto_dir_path, "inputs/datasets")), cluster,
     )
 
     output_path = str(

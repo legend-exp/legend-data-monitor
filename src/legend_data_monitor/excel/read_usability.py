@@ -107,14 +107,14 @@ def write_runinfo(datasets, runinfo):
         yaml.safe_dump(runinfo, yamlfile)
 
 
-def data(typ, tier, run, period, prod_cycle="auto/latest", server="nersc"):
-    if server == "nersc":
+def data(typ, tier, run, period, cluster, prod_cycle="auto/latest"):
+    if cluster == "nersc":
         return sorted(
             glob.glob(
                 f"/global/cfs/cdirs/m2676/data/lngs/l200/public/prodenv/prod-blind/{prod_cycle}/generated/tier/{tier}/{typ}/{period}/{run}/*"
             )
         )
-    elif server == "lngs":
+    if cluster == "lngs":
         return sorted(
             glob.glob(
                 f"/data2/public/prodenv/prod-blind/{prod_cycle}/generated/tier/{tier}/{typ}/{period}/{run}/*"
@@ -122,8 +122,8 @@ def data(typ, tier, run, period, prod_cycle="auto/latest", server="nersc"):
         )
 
 
-def get_run_start_timestamp(period, run, run_type):
-    dsp_files = data(run_type, "dsp", run, period, prod_cycle="auto/latest")
+def get_run_start_timestamp(period, run, run_type, cluster):
+    dsp_files = data(run_type, "dsp", run, period, cluster, prod_cycle="auto/latest")
     timestamp = dsp_files[0].split("-")[-2]
     return timestamp
 
@@ -162,13 +162,13 @@ def correct_runinfo(datasets, run_info, period, run):
     for key in ["cal", "fft", "pzc"]:
         if key not in run_info[period][run].keys():
             run_info[period][run][key] = {
-                "start_key": get_run_start_timestamp(period, run, "cal")
+                "start_key": get_run_start_timestamp(period, run, "cal", cluster)
             }
 
     if "phy" not in run_info[period][run].keys():
         if len(data("phy", "dsp", run, period, "auto/latest")) > 0:
             run_info[period][run]["phy"] = {
-                "start_key": get_run_start_timestamp(period, run, "phy"),
+                "start_key": get_run_start_timestamp(period, run, "phy", cluster),
                 "livetime_in_s": get_live_time(period, run)[0],
             }
     write_runinfo(datasets, run_info)
@@ -205,6 +205,7 @@ def get_usability_data(
     strings: dict,
     periods: dict,
     datasets: str,
+    cluster: str,
     alter_mode: bool = False,
 ) -> dict:
     """
@@ -252,7 +253,7 @@ def get_usability_data(
                     correct_runinfo(datasets, runinfo, period, run)
                 timestamp = run_info[run_type]["start_key"]
             else:
-                timestamp = get_run_start_timestamp(period, run, run_type)
+                timestamp = get_run_start_timestamp(period, run, run_type, cluster)
             snapshot = statuses.on(timestamp)
 
             for ged, string_num in ged_to_string.items():

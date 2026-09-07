@@ -710,8 +710,8 @@ def make_qcp_sheet(
                         failed = []
                     else:
                         det_qcp = (
-                            qcp_data.get(period, {}).get(run, {}).get(ged_name, {})
-                        )
+                            qcp_data.get(period, {}).get(run) or {}
+                        ).get(ged_name) or {}
 
                         result, failed = _qcp_result(det_qcp, run_type)
 
@@ -951,8 +951,9 @@ def _make_qcp_detail_sheet(
                             fill_hex, display = WHITE, None
                         else:
                             det_qcp = (
-                                qcp_data.get(period, {}).get(run, {}).get(ged_name, {})
-                            )
+                                qcp_data.get(period, {}).get(run) or {}
+                            ).get(ged_name) or {}                            
+
                             value = det_qcp.get(run_type_filter, {}).get(yaml_key)
 
                             # check if this is the first cal run and the check is const_stab

@@ -297,7 +297,7 @@ def qc_ft_failure_rates(
 
                 # Take channel data and resample to hourly counts
                 data = df_clean[ch].copy()
-                hourly_counts = data.resample("1H").sum()
+                hourly_counts = data.resample("1h").sum()
 
                 # convert to mHz: (counts / 3600 sec) * 1000
                 hourly_rate = hourly_counts / 3600 * 1000
@@ -364,6 +364,10 @@ def qc_and_evt_summary_plots(
             glob.glob(f"{auto_dir_path}/generated/tier/pet/phy/{period}/{run}/*.lh5")
         )
 
+    if not evt_files_phy: 
+        utils.logger.info("...no evt/pet data available, skipt!")
+        return
+
     # energies  = read_as("evt/geds", evt_files_phy, 'ak', field_mask=['energy'])
     ged_pul = read_as(
         "evt/coincident", evt_files_phy, "ak", field_mask=["geds", "puls"]
@@ -404,7 +408,7 @@ def qc_and_evt_summary_plots(
     df = pd.DataFrame(y)
     df["timestamp"] = pd.to_datetime(df["timestamp"], unit="s")
     df.set_index("timestamp", inplace=True)
-    daily_cnt = df.resample("H").sum()
+    daily_cnt = df.resample("h").sum()
 
     # Folders
     end_folder = os.path.join(output_folder, period, run, "mtg")
@@ -420,7 +424,7 @@ def qc_and_evt_summary_plots(
     )
     df_all["timestamp"] = pd.to_datetime(df_all["timestamp"], unit="s")
     df_all.set_index("timestamp", inplace=True)
-    total_forced = df_all.resample("H").size()  # counts/hour, all strings
+    total_forced = df_all.resample("h").size()  # counts/hour, all strings
     avg_total_forced_mhz = (total_forced.mean() / 3600) * 1000
     on_mass = 0
 
@@ -533,8 +537,8 @@ def qc_and_evt_summary_plots(
         ts_survived = pd.to_datetime(forced.timestamp[mask_survived], unit="s")
         df_all = pd.DataFrame({"count": 1}, index=ts_all)
         df_survived = pd.DataFrame({"count": 1}, index=ts_survived)
-        total_forced = df_all.resample("H").sum()["count"]
-        surviving = df_survived.resample("H").sum()["count"]
+        total_forced = df_all.resample("h").sum()["count"]
+        surviving = df_survived.resample("h").sum()["count"]
         surviving_frac = surviving / total_forced * 100
 
         fig, ax = plt.subplots(figsize=(12, 6))
@@ -591,7 +595,7 @@ def qc_and_evt_summary_plots(
             if s.empty:
                 continue
             freq, bin_edges = np.histogram(
-                s, bins=pd.date_range(start=s.min(), end=s.max(), freq="H")
+                s, bins=pd.date_range(start=s.min(), end=s.max(), freq="h")
             )
             ax.stairs(freq / 3600 * 1000 / on_mass, bin_edges, label=label, color=color)
 
@@ -783,7 +787,7 @@ def box_summary_plot(
         ax.text(left, label_y, f"String {s}", rotation=90)
 
     ax.set_ylabel(info["ylabel"])
-    ax.set_title(f"{period} {run}")
+    ax.set_title(f"{info['plot_title']} - {period} - {run}")
 
     if info["title"] in ["baseln_stab"]:
         ax.axhline(
@@ -957,7 +961,7 @@ def qc_average(
             ax.set_title(f"period: {period} - run: {run} - passing {par}")
             dt_condition = False
             if par == "IsDischarge":
-                dt = shelf.get(f"{period}_{run}_dead_time_pct", None)
+                dt = shelf.get(f"{period}_{run}_dead_time_pct", 0)
                 ax.set_title(
                     f"period: {period} - run: {run} - passing {par} - tot dead time {dt:.3f}%"
                 )
@@ -1182,7 +1186,7 @@ def qc_time_series(
                     diff = (time_max - time_min).total_seconds()
 
                     true_rate_mHz = round(true_count / diff * 1000, 2)
-                    hourly_rate = data.resample("1H").sum() / 3600 * 1000
+                    hourly_rate = data.resample("1h").sum() / 3600 * 1000
 
                     color = next(color_cycle)
                     hourly_rate.plot(
@@ -2931,7 +2935,7 @@ def plot_time_series(
 
                         plt.ylabel(info[inspected_parameter]["ylabel"])
                         fig.suptitle(
-                            f"period: {period} - string: {string} - position: {pos} - ged: {channel_name}"
+                            f"period: {period} - run: {current_run} - string: {string} - position: {pos} - ged: {channel_name}"
                         )
 
                         if zoom is True:

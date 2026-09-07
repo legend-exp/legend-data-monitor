@@ -724,7 +724,7 @@ def get_seconds(time_window: str):
     1800
     """
     # correspondence of symbol to seconds, T = minutes
-    str_to_seconds = {"S": 1, "T": 60, "H": 60 * 60, "D": 24 * 60 * 60}
+    str_to_seconds = {"S": 1, "s": 1, "T": 60, "min": 60, "h": 60 * 60, "H": 60 * 60, "D": 24 * 60 * 60, "d": 24 * 60 * 60}
     # unit of this time window
     time_unit = time_window[-1]
 

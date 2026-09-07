@@ -143,7 +143,7 @@ def auto_run(
         phy_folder, period, run, f"l200-{period}-{run}-qcp_summary.yaml"
     )
     os.makedirs(os.path.join(phy_folder, period, run, "mtg/pdf"), exist_ok=True)
-    if _qcp_file_is_populated(qcp_path):
+    if _qcp_file_is_populated(qcp_path, "cal"):
         pass
     else:
         utils.logger.info("...inspecting calibration data!")
@@ -157,7 +157,9 @@ def auto_run(
             partition=partition,
             save_pdf=save_pdf,
         )
-        utils.logger.info("...done!")
+
+    # check for rerunning monitpring plots; data loading will be skipped if no new data were found
+    remonitor = not _qcp_file_is_populated(qcp_path, "phy")
 
     # ===========================================================================================
     # Get not-analyzed files
@@ -186,6 +188,7 @@ def auto_run(
     new_files = []
 
     # Compare the timestamps of files and find new files
+    last_cycle = sorted(current_files)[-1].split("-")[-2]
     for file in current_files:
         file_path = os.path.join(source_dir, file)
         current_timestamp = os.path.getmtime(file_path)
@@ -207,7 +210,6 @@ def auto_run(
     new_files = sorted(new_files)
 
     if new_files:
-        last_cycle = new_files[-1].split("-")[-2]
         utils.logger.info(f"New files found: {' '.join(new_files)}")
 
         # create the file containing the keys with correct format to be later used by legend-data-monitor (it must be created every time with the new keys; NOT APPEND)
@@ -271,6 +273,7 @@ def auto_run(
             except Exception as e:
                 utils.logger.error(f"Failed to retrieve Slow Control data: {e}")
 
+    if new_files or remonitor:
         # ===========================================================================================
         # Generate Monitoring Summary Plots
         # ===========================================================================================
@@ -333,7 +336,7 @@ def auto_run(
         data_type,
         period,
     )
-    generate_dashboard(auto_dir_path, period, output)
+    generate_dashboard(auto_dir_path, period, output, cluster)
     utils.logger.debug(f"Generated summary excel workbook at {output}")
 
     # Update the last checked timestamp
@@ -350,8 +353,8 @@ def auto_run(
         )
 
 
-def _qcp_file_is_populated(filepath: str) -> bool:
-    """Return True if the qcp summary file exists and has at least one non-null cal entry."""
+def _qcp_file_is_populated(filepath: str, data_type: str) -> bool:
+    """Return True if the qcp summary file exists and has at least one non-null data (cal, phy)entry."""
     if not os.path.isfile(filepath):
         return False
     with open(filepath) as f:
@@ -359,8 +362,8 @@ def _qcp_file_is_populated(filepath: str) -> bool:
     if not data:
         return False
     for det_data in data.values():
-        cal = det_data.get("cal", {})
-        if any(v is not None for v in cal.values()):
+        en = det_data.get(data_type, {})
+        if any(v is not None for v in en.values()):
             return True
     return False
 
