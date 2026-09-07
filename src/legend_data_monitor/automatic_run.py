@@ -11,6 +11,30 @@ from . import calibration, core, monitoring, utils
 from .excel.core import generate_dashboard
 
 
+# helper functions
+def get_file_signature(file_path):
+    """Return a signature that changes when a file is modified."""
+    stat = os.stat(file_path)
+    return {
+        "mtime_ns": stat.st_mtime_ns,
+        "size": stat.st_size,
+    }
+
+
+def load_file_manifest(manifest_path):
+    if not os.path.exists(manifest_path):
+        return {}
+
+    with open(manifest_path) as f:
+        return yaml.safe_load(f) or {}
+
+
+def save_file_manifest(manifest_path, manifest):
+    with open(manifest_path, "w") as f:
+        yaml.safe_dump(manifest, f, sort_keys=True)
+
+
+# main code
 def auto_run(
     cluster,
     ref_version,
@@ -162,60 +186,92 @@ def auto_run(
     remonitor = not _qcp_file_is_populated(qcp_path, "phy")
 
     # ===========================================================================================
-    # Get not-analyzed files
+    # Get new and reprocessed files
     # ===========================================================================================
 
-    # File to store the timestamp of the last check
     rsync_path = os.path.join(
         output_folder, ref_version, "generated", "tmp", "mtg", period, run
     )
     os.makedirs(rsync_path, exist_ok=True)
-    timestamp_file = os.path.join(rsync_path, "last_checked_timestamp.txt")
 
-    # Read the last checked timestamp
-    last_checked = None
-    if os.path.exists(timestamp_file):
-        with open(timestamp_file) as file:
-            last_checked = file.read().strip()
+    # File to store the snapshot of the last check
+    timestamp_file = os.path.join(rsync_path, "last_checked.txt")
+    manifest_path = os.path.join(rsync_path, "file_manifest.yaml")
+    # Load any previous snapshot
+    previous_manifest = load_file_manifest(manifest_path)
 
-    # Get the current timestamp
+    current_files = {}
+    pattern = r"\d+"
+
+    for file in os.listdir(source_dir):
+        file_path = os.path.join(source_dir, file)
+
+        if not os.path.isfile(file_path):
+            continue
+
+        # keep only fully processed files
+        matches = re.findall(pattern, file)
+        if len(matches) != 6:
+            continue
+
+        current_files[file] = get_file_signature(file_path)
+
+    new_files = []
+    modified_files = []
+    for file, signature in current_files.items():
+        if file not in previous_manifest:
+            new_files.append(file)
+        elif signature != previous_manifest[file]:
+            modified_files.append(file)
+
+    deleted_files = [file for file in previous_manifest if file not in current_files]
+
+    utils.logger.info(
+        f"New files: {len(new_files)}, "
+        f"modified files: {len(modified_files)}, "
+        f"deleted files: {len(deleted_files)}"
+    )
+
+    if modified_files:
+        utils.logger.warning(
+            "Previously monitored files were reprocessed: " + " ".join(modified_files)
+        )
+
     if not os.path.isdir(source_dir):
         utils.logger.debug(f"Error: folder '{source_dir}' does not exist.")
         exit()
     else:
         utils.logger.debug(f"Found folder {source_dir}")
-    current_files = os.listdir(source_dir)
-    new_files = []
 
-    # Compare the timestamps of files and find new files
-    last_cycle = sorted(current_files)[-1].split("-")[-2]
-    for file in current_files:
-        file_path = os.path.join(source_dir, file)
-        current_timestamp = os.path.getmtime(file_path)
-        if last_checked is None or current_timestamp > float(last_checked):
-            new_files.append(file)
+    if modified_files:
+        # at least one file that monitoring already loaded has changed
+        full_reload = True
+        files_to_process = sorted(current_files)
+        utils.logger.warning("Reprocessed files detected. Reloading ALL files.")
+    elif new_files:
+        full_reload = False
+        files_to_process = sorted(new_files)
+        utils.logger.info(f"New files found: {' '.join(files_to_process)}")
+    else:
+        full_reload = False
+        files_to_process = []
+        utils.logger.debug("No new or reprocessed files were detected.")
 
-    # If new files are found, check if they are ok or not
-    if new_files:
-        pattern = r"\d+"
-        correct_files = []
+    if full_reload:
+        my_config["saving"] = "overwrite"
+    last_cycle = files_to_process[-1].split("-")[-2] if files_to_process else None
+    last_checked = None
+    if os.path.exists(timestamp_file):
+        with open(timestamp_file) as file:
+            last_checked = file.read().strip()
 
-        for new_file in new_files:
-            matches = re.findall(pattern, new_file)
-            # get only files with correct ending (and discard the ones that are still under processing)
-            if len(matches) == 6:
-                correct_files.append(new_file)
-
-        new_files = correct_files
-    new_files = sorted(new_files)
-
-    if new_files:
-        utils.logger.info(f"New files found: {' '.join(new_files)}")
+    if files_to_process:
+        utils.logger.info(f"New files found: {' '.join(files_to_process)}")
 
         # create the file containing the keys with correct format to be later used by legend-data-monitor (it must be created every time with the new keys; NOT APPEND)
         utils.logger.debug("Creating the file containing the keys to inspect...")
         with open(os.path.join(rsync_path, "new_keys.filekeylist"), "w") as f:
-            for new_file in new_files:
+            for new_file in files_to_process:
                 new_file = new_file.split("-tier")[0]
                 f.write(new_file + "\n")
         utils.logger.debug("...done!")
@@ -273,7 +329,7 @@ def auto_run(
             except Exception as e:
                 utils.logger.error(f"Failed to retrieve Slow Control data: {e}")
 
-    if new_files or remonitor:
+    if files_to_process or remonitor:
         # ===========================================================================================
         # Generate Monitoring Summary Plots
         # ===========================================================================================
@@ -325,9 +381,6 @@ def auto_run(
             )
             utils.logger.info("...done!")
 
-    else:
-        utils.logger.debug("No new files were detected.")
-
     # create dashboard file
     output = os.path.join(
         output_folder,
@@ -338,19 +391,7 @@ def auto_run(
     )
     generate_dashboard(auto_dir_path, period, output, cluster)
     utils.logger.debug(f"Generated summary excel workbook at {output}")
-
-    # Update the last checked timestamp
-    with open(timestamp_file, "w") as file:
-        file.write(
-            str(
-                os.path.getmtime(
-                    max(
-                        [os.path.join(source_dir, file) for file in current_files],
-                        key=os.path.getmtime,
-                    )
-                )
-            )
-        )
+    save_file_manifest(manifest_path, current_files)
 
 
 def _qcp_file_is_populated(filepath: str, data_type: str) -> bool:
