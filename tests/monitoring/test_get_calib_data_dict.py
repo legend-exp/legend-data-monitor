@@ -59,23 +59,37 @@ def test_get_calib_data_dict(calib_data_empty):
     ]
 
     with (
-        patch("legend_data_monitor.monitoring.utils.get_json_or_yaml_candidate",
-            return_value=fake_validity),
-        patch("legend_data_monitor.monitoring.get_calibration_file",
-            return_value=fake_pars_dict),
-        patch("legend_data_monitor.monitoring.extract_fep_peak",
-            return_value=(10.0, 0.1, 0.5, 0.01)),
-        patch("legend_data_monitor.monitoring.extract_resolution_at_q_bb",
-            return_value=(2.5, 3.5)),
-        patch("legend_data_monitor.monitoring.evaluate_fep_cal",
-            return_value=(100.0, 1.0)),
-        patch("legend_data_monitor.monitoring.get_run_start_end_times",
+        patch(
+            "legend_data_monitor.monitoring.utils.get_json_or_yaml_candidate",
+            return_value=fake_validity,
+        ),
+        patch(
+            "legend_data_monitor.monitoring.get_calibration_file",
+            return_value=fake_pars_dict,
+        ),
+        patch(
+            "legend_data_monitor.monitoring.extract_fep_peak",
+            return_value=(10.0, 0.1, 0.5, 0.01),
+        ),
+        patch(
+            "legend_data_monitor.monitoring.extract_resolution_at_q_bb",
+            return_value=(2.5, 3.5),
+        ),
+        patch(
+            "legend_data_monitor.monitoring.evaluate_fep_cal", return_value=(100.0, 1.0)
+        ),
+        patch(
+            "legend_data_monitor.monitoring.get_run_start_end_times",
             return_value=(
                 pd.Timestamp("2020-01-01"),
                 pd.Timestamp("2020-01-02"),
-            )),
+            ),
+        ),
         patch("os.path.exists", return_value=True),
-        patch("os.listdir", return_value=["l200-p01-r001-phy-20200101T000000Z-tier_phy.lh5"]),
+        patch(
+            "os.listdir",
+            return_value=["l200-p01-r001-phy-20200101T000000Z-tier_phy.lh5"],
+        ),
     ):
         calib_data = get_calib_data_dict(
             calib_data_empty,
@@ -110,23 +124,38 @@ def test_channel_name_used_if_not_ch_key(calib_data_empty):
     ]
 
     with (
-        patch("legend_data_monitor.monitoring.utils.get_json_or_yaml_candidate",
-            return_value=fake_validity),
-        patch("legend_data_monitor.monitoring.get_calibration_file",
-            return_value=fake_pars_dict),
-        patch("legend_data_monitor.monitoring.extract_fep_peak",
-            return_value=(np.nan, np.nan, np.nan, np.nan)),
-        patch("legend_data_monitor.monitoring.extract_resolution_at_q_bb",
-            return_value=(np.nan, np.nan)),
-        patch("legend_data_monitor.monitoring.evaluate_fep_cal",
-            return_value=(np.nan, np.nan)),
-        patch("legend_data_monitor.monitoring.get_run_start_end_times",
+        patch(
+            "legend_data_monitor.monitoring.utils.get_json_or_yaml_candidate",
+            return_value=fake_validity,
+        ),
+        patch(
+            "legend_data_monitor.monitoring.get_calibration_file",
+            return_value=fake_pars_dict,
+        ),
+        patch(
+            "legend_data_monitor.monitoring.extract_fep_peak",
+            return_value=(np.nan, np.nan, np.nan, np.nan),
+        ),
+        patch(
+            "legend_data_monitor.monitoring.extract_resolution_at_q_bb",
+            return_value=(np.nan, np.nan),
+        ),
+        patch(
+            "legend_data_monitor.monitoring.evaluate_fep_cal",
+            return_value=(np.nan, np.nan),
+        ),
+        patch(
+            "legend_data_monitor.monitoring.get_run_start_end_times",
             return_value=(
                 pd.Timestamp("2020-01-01"),
                 pd.Timestamp("2020-01-01"),
-            )),
+            ),
+        ),
         patch("os.path.exists", return_value=True),
-        patch("os.listdir", return_value=["l200-p01-r001-phy-20200101T000000Z-tier_phy.lh5"]),
+        patch(
+            "os.listdir",
+            return_value=["l200-p01-r001-phy-20200101T000000Z-tier_phy.lh5"],
+        ),
     ):
         calib_data = get_calib_data_dict(
             calib_data_empty,
