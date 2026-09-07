@@ -365,7 +365,7 @@ def qc_and_evt_summary_plots(
         )
 
     if not evt_files_phy: 
-        utils.logger.info("...no evt/pet data available, skipt!")
+        utils.logger.info("...no evt/pet data available, skip!")
         return
 
     # energies  = read_as("evt/geds", evt_files_phy, 'ak', field_mask=['energy'])

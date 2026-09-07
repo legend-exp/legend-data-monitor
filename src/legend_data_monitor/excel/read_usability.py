@@ -153,7 +153,7 @@ def get_live_time(period, run):
     return (live_time, min_time, max_time)
 
 
-def correct_runinfo(datasets, run_info, period, run):
+def correct_runinfo(datasets, run_info, period, run, cluster):
     if period not in run_info.keys():
         run_info[period] = {}
     if run not in run_info[period].keys():
@@ -244,13 +244,13 @@ def get_usability_data(
         for run_type, run in cols:
             if alter_mode:
                 if period not in runinfo:
-                    correct_runinfo(datasets, runinfo, period, run)
+                    correct_runinfo(datasets, runinfo, period, run, cluster)
                 if run not in runinfo[period]:
                     # try set this in the run info
-                    correct_runinfo(datasets, runinfo, period, run)
+                    correct_runinfo(datasets, runinfo, period, run, cluster)
                 run_info = runinfo[period][run]
                 if run_type not in run_info:
-                    correct_runinfo(datasets, runinfo, period, run)
+                    correct_runinfo(datasets, runinfo, period, run, cluster)
                 timestamp = run_info[run_type]["start_key"]
             else:
                 timestamp = get_run_start_timestamp(period, run, run_type, cluster)
