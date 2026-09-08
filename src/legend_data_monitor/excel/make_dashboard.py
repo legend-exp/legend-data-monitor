@@ -1221,7 +1221,7 @@ def make_qcp_sheets_detailed(
 SHIFTLOG_EVENT_STYLES = {
     "reprocessing": {"fill": "FCE4D6", "font_color": "D41E35"},
     "new_failure": {"fill": "FFF2CC", "font_color": "994908"},
-    "first_failure": {"fill": "DDEBF7", "font_color": "143859"},
+    "first_failure": {"fill": "E7F1F9", "font_color": "143859"},
 }
 
 
@@ -1475,7 +1475,14 @@ def get_threshold_log_entry(
 
     for ged, det_data in output.items():
         data_dict = det_data.get(key, {})
-        failed = [k for k, v in data_dict.items() if v is False]
+        # exclude escale checks from shifter logs
+        failed = [
+            k
+            for k, v in data_dict.items()
+            if v is False
+            and not (key == "cal" and k.startswith("escale_")) 
+            and not (key == "cal" and k.startswith("AoE_stab")) 
+        ]
 
         if failed:
             failing_detectors.append(ged)
