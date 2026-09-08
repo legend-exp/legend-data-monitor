@@ -7,7 +7,12 @@ from legendmeta import LegendMetadata
 
 from legend_data_monitor import utils
 
-from .make_dashboard import make_excel, make_qcp_sheet, make_qcp_sheets_detailed
+from .make_dashboard import (
+    add_shift_log_sheet,
+    make_excel,
+    make_qcp_sheet,
+    make_qcp_sheets_detailed,
+)
 from .read_qcp import get_qcp_data
 from .read_usability import correct_runinfo, get_usability_data
 
@@ -133,7 +138,12 @@ def get_runs_for_a_period(
 
 
 def generate_dashboard(
-    auto_dir_path: str, period: str, output: str, cluster: str
+    auto_dir_path: str,
+    period: str,
+    current_run: str,
+    output: str,
+    threshold_entries,
+    cluster: str,
 ) -> None:
     """
     Generate the LEGEND usability dashboard for one period.
@@ -144,8 +154,12 @@ def generate_dashboard(
         Path to tmp-auto public data files (eg /data2/public/prodenv/prod-blind/tmp-auto).
     period: str
         Period to process, eg p16
+    current_run: str
+        Run to process, eg r001
     output: str
         Directory to write sheet_{period}.xlsx into
+    threshold_entries:
+        Dictionary of failing detectors for building summary log sheet
     cluster: str
         Cluster used to run the scripts (either 'nersc' or 'lngs')
     """
@@ -163,11 +177,15 @@ def generate_dashboard(
         os.path.join(output, f"l200-{period}-auto_latest-qcp_summary.xlsx")
     )
 
-    make_excel(strings_info, periods, usability, output_path)
+    make_excel(strings_info, periods, usability, output_path)  # usability
 
     qcp_data = get_qcp_data(output, periods)
     make_qcp_sheet(output_path, strings_info, periods, qcp_data, usability)
     make_qcp_sheets_detailed(output_path, strings_info, periods, qcp_data, usability)
+
+    add_shift_log_sheet(
+        output_path, period, current_run, threshold_entries
+    )  # log summary
 
 
 def get_strings_info(auto_dir_path: str, period: str) -> dict:

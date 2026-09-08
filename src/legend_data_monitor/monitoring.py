@@ -94,6 +94,9 @@ def qc_distributions(
         shelve.open(shelve_path, "c", protocol=pickle.HIGHEST_PROTOCOL) as shelf,
         pd.HDFStore(my_file, "r") as store,
     ):
+        if "/IsPhysics_TrapemaxCtcCal" not in store:
+            return
+
         df_energy_IsPhysics = store["/IsPhysics_TrapemaxCtcCal"]
         df_energy_IsPhysics = filter_series_by_ignore_keys(
             df_energy_IsPhysics, utils.IGNORE_KEYS, period
@@ -682,7 +685,6 @@ def box_summary_plot(
     run_to_apply :
         Run to apply (eg see ssc data).
     """
-    utils.logger.debug("...making summary box plots for %s", info["title"])
     detectors = det_info["detectors"]
     plot_data = []
     for ged, item in results.items():
@@ -718,6 +720,10 @@ def box_summary_plot(
                 "usability": meta_info.get("usability", None),
             }
         )
+
+    if not plot_data:
+        return
+    utils.logger.debug("...making summary box plots for %s", info["title"])
 
     df_plot = pd.DataFrame(plot_data)
     # sort by string, and then position

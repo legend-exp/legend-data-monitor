@@ -2,6 +2,7 @@ import glob
 import importlib.resources
 import os
 import re
+from datetime import datetime, timezone
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -9,6 +10,9 @@ import yaml
 
 from . import calibration, core, monitoring, utils
 from .excel.core import generate_dashboard
+from .excel.make_dashboard import get_threshold_log_entry
+
+RUN_TIMESTAMP = None
 
 
 # helper functions
@@ -34,6 +38,19 @@ def save_file_manifest(manifest_path, manifest):
         yaml.safe_dump(manifest, f, sort_keys=True)
 
 
+def load_shift_log(shift_log_path):
+    if not os.path.exists(shift_log_path):
+        return []
+
+    with open(shift_log_path) as f:
+        return yaml.safe_load(f) or []
+
+
+def save_shift_log(shift_log_path, entries):
+    with open(shift_log_path, "w") as f:
+        yaml.safe_dump(entries, f, sort_keys=False)
+
+
 # main code
 def auto_run(
     cluster,
@@ -52,6 +69,9 @@ def auto_run(
     data_type,
 ):
     """Inspect LEGEND HDF5 (LH5) processed data (and Slow Control data from lngs-login cluster) for a specific period and run (if specified; otherwise the latest being processed are used); plots and summary files are saved; automatic alert emails are sent."""
+    global RUN_TIMESTAMP
+    RUN_TIMESTAMP = datetime.now(timezone.utc).strftime("%Y-%m-%d, %H:%M")
+
     auto_dir = (
         "/global/cfs/cdirs/m2676/data/lngs/l200/public/prodenv/prod-blind/"
         if cluster == "nersc"
@@ -167,11 +187,13 @@ def auto_run(
         phy_folder, period, run, f"l200-{period}-{run}-qcp_summary.yaml"
     )
     os.makedirs(os.path.join(phy_folder, period, run, "mtg/pdf"), exist_ok=True)
+    cal_threshold_entry = None
+    phy_threshold_entry = None
     if _qcp_file_is_populated(qcp_path, "cal"):
         pass
     else:
         utils.logger.info("...inspecting calibration data!")
-        check_calib(
+        cal_threshold_entry = check_calib(
             auto_dir_path=auto_dir_path,
             output_folder=phy_folder,
             period=period,
@@ -350,7 +372,7 @@ def auto_run(
                 sorted(os.listdir(os.path.join(search_directory, avail_runs[0])))[0]
             ).split("-")[4]
 
-            summary_plots(
+            phy_threshold_entry = summary_plots(
                 auto_dir_path=auto_dir_path,
                 phy_mtg_data=mtg_folder,
                 output_folder=mtg_folder,
@@ -389,9 +411,47 @@ def auto_run(
         data_type,
         period,
     )
-    generate_dashboard(auto_dir_path, period, output, cluster)
+
+    # combine previous history with events from this check
+    shift_log_path = os.path.join(
+        output_folder,
+        ref_version,
+        "generated",
+        "tmp",
+        "mtg",
+        period,
+        "shift_log.yaml",
+    )
+    previous_shift_log = load_shift_log(shift_log_path)
+
+    current_entries = []
+
+    if cal_threshold_entry is not None:
+        run_e, timestamp_e, detectors_e = cal_threshold_entry
+        event_type = classify_event(run_e, previous_shift_log, full_reload)
+        current_entries.append((run_e, "cal", event_type, timestamp_e, detectors_e))
+
+    if phy_threshold_entry is not None:
+        run_e, timestamp_e, detectors_e = phy_threshold_entry
+        event_type = classify_event(run_e, previous_shift_log, full_reload)
+        current_entries.append((run_e, "phy", event_type, timestamp_e, detectors_e))
+
+    threshold_entries = previous_shift_log + current_entries
+    save_shift_log(shift_log_path, threshold_entries)
+
+    generate_dashboard(
+        auto_dir_path,
+        period,
+        run,
+        output,
+        threshold_entries,
+        cluster,
+    )
+
     utils.logger.debug(f"Generated summary excel workbook at {output}")
+
     save_file_manifest(manifest_path, current_files)
+    utils.logger.debug("Saved timestamp/size of loaded files")
 
 
 def _qcp_file_is_populated(filepath: str, data_type: str) -> bool:
@@ -407,6 +467,30 @@ def _qcp_file_is_populated(filepath: str, data_type: str) -> bool:
         if any(v is not None for v in en.values()):
             return True
     return False
+
+
+def classify_event(run, previous_shift_log, full_reload):
+    """Decide the shift-log event type for a new threshold entry."""
+    if full_reload:
+        return "reprocessing"
+    has_prior_entry_for_run = any(entry[0] == run for entry in previous_shift_log)
+    return "new_failure" if has_prior_entry_for_run else "first_failure"
+
+
+def merge_threshold_entries(entries):
+    """Merge entries sharing the same (run, timestamp) into one, unioning detector lists."""
+    merged = {}
+    order = []
+    for run, timestamp, detectors in entries:
+        key = (run, timestamp)
+        if key not in merged:
+            merged[key] = []
+            order.append(key)
+        for det in detectors.split(", "):
+            det = det.strip()
+            if det and det not in merged[key]:
+                merged[key].append(det)
+    return [(run, timestamp, ", ".join(merged[key])) for run, timestamp in order]
 
 
 def summary_plots(
@@ -542,6 +626,15 @@ def summary_plots(
             run_to_apply=run_to_apply,
         )
 
+    threshold_entry = get_threshold_log_entry(
+        output_folder=output_folder,
+        period=period,
+        run=current_run,
+        run_timestamp=RUN_TIMESTAMP,
+        key="phy",
+        detectors=det_info["detectors"],
+    )
+
     utils.check_cal_phy_thresholds(
         output_folder,
         period,
@@ -578,6 +671,8 @@ def summary_plots(
             det_info,
             save_pdf,
         )
+
+    return threshold_entry
 
 
 def check_calib(
@@ -697,6 +792,15 @@ def check_calib(
             f"...we do not inspect PSD time stability in {data_type} data"
         )
 
+    threshold_entry = get_threshold_log_entry(
+        output_folder=output_folder,
+        period=period,
+        run=current_run,
+        run_timestamp=RUN_TIMESTAMP,
+        key="cal",
+        detectors=det_info["detectors"],
+    )
+
     utils.check_cal_phy_thresholds(
         output_folder,
         period,
@@ -705,6 +809,7 @@ def check_calib(
         det_info["detectors"],
         pswd_email,
     )
+    return threshold_entry
 
 
 def qc_avg_series(

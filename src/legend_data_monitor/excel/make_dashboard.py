@@ -1,4 +1,6 @@
 import colorsys
+import os
+from datetime import datetime, timezone
 
 import openpyxl
 from openpyxl import load_workbook
@@ -6,6 +8,8 @@ from openpyxl.comments import Comment
 from openpyxl.formatting.rule import FormulaRule
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
+
+from legend_data_monitor import utils
 
 # One hex color per period label; add entries for new periods as needed.
 PREFERRED_PERIOD_COLOURS: dict[str, str] = {
@@ -86,11 +90,22 @@ def _fill(hex_color: str) -> PatternFill:
     return PatternFill("solid", fgColor=hex_color)
 
 
-def _border(left=None, right=None, top=None, bottom=None) -> Border:
+def _border(
+    left=None,
+    right=None,
+    top=None,
+    bottom=None,
+    color="D9D9D9",
+) -> Border:
     def s(style):
-        return Side(style=style) if style else Side()
+        return Side(style=style, color=color) if style else Side()
 
-    return Border(left=s(left), right=s(right), top=s(top), bottom=s(bottom))
+    return Border(
+        left=s(left),
+        right=s(right),
+        top=s(top),
+        bottom=s(bottom),
+    )
 
 
 def add_summary_rows(
@@ -565,7 +580,7 @@ def make_qcp_sheet(
     data: dict,
 ) -> None:
     """
-    Add a 'QCP Summary' sheet to an existing workbook at wb_path.
+    Add a 'QCP Summary' sheet to an existing workbook at work_book_path.
 
     One row per detector.  Columns:
     cal r000, phy r000, cal r001, phy r001, ...
@@ -574,7 +589,7 @@ def make_qcp_sheet(
 
     Parameters
     ----------
-    wb_path  : path to an existing .xlsx file (produced by make_excel)
+    work_book_path  : path to an existing .xlsx file (produced by make_excel)
     strings  : same dict passed to make_excel
     periods  : same dict passed to make_excel
     qcp_data : {period: {run: {detector: {"cal": {...}, "phy": {...}}}}}
@@ -1173,14 +1188,14 @@ def add_legend_sheet(work_book, checks_config: dict) -> None:
 
 
 def make_qcp_sheets_detailed(
-    wb_path: str,
+    work_book_path: str,
     strings: dict,
     periods: dict,
     qcp_data: dict,
     data: dict,
 ) -> None:
     """Add per-check detail sheets to an existing workbook, one sheet per entry in _DETAIL_SHEETS."""
-    wb = load_workbook(wb_path)
+    wb = load_workbook(work_book_path)
 
     checks_config = {
         "cal": QCP_CAL_CHECKS,
@@ -1199,4 +1214,278 @@ def make_qcp_sheets_detailed(
             qcp_data,
             data,
         )
-    wb.save(wb_path)
+    wb.save(work_book_path)
+
+
+# summary sheet
+SHIFTLOG_EVENT_STYLES = {
+    "reprocessing": {"fill": "FCE4D6", "font_color": "D41E35"},
+    "new_failure": {"fill": "FFF2CC", "font_color": "994908"},
+    "first_failure": {"fill": "DDEBF7", "font_color": "143859"},
+}
+
+
+def add_shift_log_sheet(
+    work_book_path: str,
+    period: str,
+    current_run: str,
+    threshold_entries: list[tuple[str, str, str, str, str]] | None = None,
+) -> None:
+    """
+    Add a sheet to an existing workbook produced by make_excel.
+
+    period: period under inspection, eg r001
+    current_run: run under inspection, eg r001
+    threshold_entries: chronological (oldest first) list failures and relative info
+    """
+    work_book = load_workbook(work_book_path)
+    work_sheet = work_book.create_sheet("Shift Log", 0)
+
+    # Title
+    row = 1
+    cell = work_sheet.cell(
+        row=row,
+        column=1,
+        value="The log is updated every 6 hours. All times are UTC+00:00. The Current Status shows when the latest check was performed, the run under inspection, and a summary message.",
+    )
+    cell.font = Font(bold=False, italic=True, size=10)
+    row += 1
+
+    cell = work_sheet.cell(
+        row=row,
+        column=1,
+        value="Use the following legend to navigate the Change Log. Only new failures and plot regenerations since the previous check are reported in the Change Log below.",
+    )
+    cell.font = Font(bold=False, italic=True, size=10)
+    row += 1
+
+    # Event key
+    event_key = {
+        "Reprocessing": (
+            "Monitoring plots and failure tracking restarted from the start of the run "
+            "under inspection after original files were regenerated (e.g. after calibration fix)."
+        ),
+        "New failure(s)": ("Detector(s) newly failing since the previous check."),
+        "First failures of run": ("First failure(s) recorded after a new run began."),
+    }
+
+    event_key_style = {
+        "Reprocessing": "reprocessing",
+        "New failure(s)": "new_failure",
+        "First failures of run": "first_failure",
+    }
+
+    for event, description in event_key.items():
+
+        style = SHIFTLOG_EVENT_STYLES[event_key_style[event]]
+
+        cell = work_sheet.cell(
+            row=row,
+            column=1,
+            value=event,
+        )
+        cell.font = Font(
+            size=10,
+        )
+        cell.fill = _fill(style["fill"])
+
+        cell = work_sheet.cell(
+            row=row,
+            column=2,
+            value=description,
+        )
+        cell.font = Font(
+            size=10,
+            italic=True,
+        )
+
+        row += 1
+
+    # Current status
+    row += 1
+    cell = work_sheet.cell(
+        row=row,
+        column=1,
+        value="Current Status",
+    )
+    cell.font = Font(bold=True, size=16)
+    row += 1
+
+    is_alert = bool(threshold_entries)
+    summary_font = Font(
+        bold=True,
+        size=10,
+        color=(
+            SHIFTLOG_EVENT_STYLES["reprocessing"]["font_color"]
+            if is_alert
+            else "15701B"
+        ),
+    )
+    summary_text = (
+        "New detector failures detected since the previous check. See the Change Log below."
+        if is_alert
+        else "Currently no new failures since last time (but pay attention you did not miss some earlier failures)"
+    )
+    work_sheet.cell(row=row, column=1, value="Summary:").font = Font(
+        bold=True,
+        size=10,
+    )
+    c = work_sheet.cell(row=row, column=2, value=summary_text)
+    c.font = summary_font
+    row += 1
+
+    running_time = datetime.now(timezone.utc).strftime("%Y-%m-%d, %H:%M")
+    current_status = {
+        "Period-run under inspection:": f"{period}-{current_run}",
+        "Status log generated at:": running_time,
+    }
+    for label, value in current_status.items():
+        work_sheet.cell(row=row, column=1, value=label).font = Font(bold=True, size=10)
+        work_sheet.cell(row=row, column=2, value=value).font = Font(size=10)
+        row += 1
+
+    row += 2
+
+    cell = work_sheet.cell(
+        row=row,
+        column=1,
+        value="Change Log",
+    )
+    cell.font = Font(bold=True, size=16)
+    row += 1
+    header_row = row
+    for i, h in enumerate(
+        ["Check time", "Run", "Failing detectors (cal)", "Failing detectors (phy)"],
+        start=1,
+    ):
+        cell = work_sheet.cell(row=header_row, column=i, value=h)
+        cell.font = Font(bold=True, size=11)
+        cell.fill = _fill("DCDCDC")
+        cell.border = _border(
+            left="medium",
+            right="medium",
+            top="medium",
+            bottom="medium",
+        )
+
+    row = header_row + 1
+
+    display_entries = {}
+
+    for run, data_type, event_type, time, detectors in threshold_entries or []:
+        key = (run, time)
+
+        if key not in display_entries:
+            display_entries[key] = {
+                "run": run,
+                "time": time,
+                "cal": "",
+                "phy": "",
+                "event_type": event_type,
+            }
+
+        display_entries[key][data_type] = detectors
+
+        # reprocessing should take priority if Cal/Phy have different events
+        if event_type == "reprocessing":
+            display_entries[key]["event_type"] = "reprocessing"
+        elif (
+            event_type == "new_failure"
+            and display_entries[key]["event_type"] == "first_failure"
+        ):
+            display_entries[key]["event_type"] = "new_failure"
+
+    for entry in reversed(list(display_entries.values())):
+
+        style = SHIFTLOG_EVENT_STYLES[entry["event_type"]]
+        fill = _fill(style["fill"])
+        font = Font(size=10)
+
+        values = [
+            entry["time"],
+            entry["run"],
+            entry["cal"],
+            entry["phy"],
+        ]
+
+        for column, value in enumerate(values, start=1):
+            cell = work_sheet.cell(
+                row=row,
+                column=column,
+                value=value,
+            )
+            cell.font = font
+            cell.fill = fill
+            cell.border = _border(
+                left="thin",
+                right="thin",
+                top="thin",
+                bottom="thin",
+                color="D9D9D9",
+            )
+
+        row += 1
+
+    # Column widths
+    work_sheet.column_dimensions["A"].width = 23  # Timestamp
+    work_sheet.column_dimensions["B"].width = 12  # Run
+    work_sheet.column_dimensions["C"].width = 60  # Failing detectors
+    work_sheet.column_dimensions["D"].width = 60  # Failing detectors
+
+    # Wrap long text
+    for row_cells in work_sheet.iter_rows(
+        min_row=header_row + 1,
+        max_row=work_sheet.max_row,
+        min_col=1,
+        max_col=4,
+    ):
+        for cell in row_cells:
+            cell.alignment = Alignment(
+                vertical="top",
+                wrap_text=True,
+            )
+
+    work_sheet.freeze_panes = work_sheet.cell(
+        row=header_row + 1,
+        column=1,
+    ).coordinate
+
+    work_book.save(work_book_path)
+
+
+def get_threshold_log_entry(
+    output_folder: str,
+    period: str,
+    run: str,
+    run_timestamp,
+    key: str,
+    detectors: list,
+):
+    usability_map_file = os.path.join(
+        output_folder,
+        period,
+        run,
+        f"l200-{period}-{run}-qcp_summary.yaml",
+    )
+
+    output = utils.load_yaml_or_default(usability_map_file, detectors)
+
+    failing_detectors = []
+    failed_details = []
+
+    for ged, det_data in output.items():
+        data_dict = det_data.get(key, {})
+        failed = [k for k, v in data_dict.items() if v is False]
+
+        if failed:
+            failing_detectors.append(ged)
+            failed_details.append(f"{ged} ({key}): {', '.join(failed)}")
+
+    if not failing_detectors:
+        return None
+
+    return (
+        run,
+        run_timestamp,
+        ", ".join(failing_detectors),
+    )
