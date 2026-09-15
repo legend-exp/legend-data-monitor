@@ -2068,9 +2068,9 @@ def get_pulser_data(
 
         low_lim = 4.8e4
         upp_lim = 5.0e4
-        mask = (ser_pul_tp0est > low_lim) & (ser_pul_tp0est < upp_lim)
+        mask = (ser_pul_tp0est > low_lim) & (ser_pul_tp0est < upp_lim) & (~ser_pul_tp0est.isna())
         ser_pul_tp0est_new = ser_pul_tp0est[mask]
-
+        
         if not ser_pul_tp0est_new.empty:
             valid_idx = ser_ged_cusp.index.intersection(ser_pul_tp0est_new.index)
             ser_ged_cusp = ser_ged_cusp.reindex(valid_idx)

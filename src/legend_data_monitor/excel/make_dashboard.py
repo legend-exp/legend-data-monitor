@@ -1,3 +1,4 @@
+from collections import defaultdict
 import colorsys
 import os
 from datetime import datetime, timezone
@@ -259,9 +260,9 @@ def make_excel(
 
     Parameters
     ----------
-    strings     : see module docstring - detector layout per string
-    periods     : see module docstring - (run_type, run) columns per period
-    data        : see module docstring - usability values
+    strings     : detector layout per string
+    periods     : (run_type, run) columns per period
+    data        : usability values
     output_path : path to write the .xlsx file
     livetimes   : optional {(period, run): livetime_in_seconds} - if supplied,
                   summary exposure rows are appended below the detector data
@@ -1226,14 +1227,17 @@ SHIFTLOG_EVENT_STYLES = {
 
 
 def add_shift_log_sheet(
+    strings: dict,
     work_book_path: str,
     period: str,
     current_run: str,
-    threshold_entries: list[tuple[str, str, str, str, str]] | None = None,
+    threshold_entries: list[tuple[str, str, str, str, str, list[str]]] | None = None,
 ) -> None:
     """
     Add a sheet to an existing workbook produced by make_excel.
 
+    strings: detector layout per string
+    work_book_path: path to an existing .xlsx file (produced by make_excel)
     period: period under inspection, eg r001
     current_run: run under inspection, eg r001
     threshold_entries: chronological (oldest first) list failures and relative info
@@ -1344,7 +1348,8 @@ def add_shift_log_sheet(
         work_sheet.cell(row=row, column=2, value=value).font = Font(size=10)
         row += 1
 
-    row += 2
+    # Change log
+    row += 1
 
     cell = work_sheet.cell(
         row=row,
@@ -1353,12 +1358,22 @@ def add_shift_log_sheet(
     )
     cell.font = Font(bold=True, size=16)
     row += 1
+
     header_row = row
-    for i, h in enumerate(
-        ["Check time", "Run", "Failing detectors (cal)", "Failing detectors (phy)"],
-        start=1,
-    ):
-        cell = work_sheet.cell(row=header_row, column=i, value=h)
+
+    headers = [
+        "Check time",
+        "Run",
+        "Cal. failures",
+        "Phy. failures",
+    ]
+
+    for i, h in enumerate(headers, start=1):
+        cell = work_sheet.cell(
+            row=header_row,
+            column=i,
+            value=h,
+        )
         cell.font = Font(bold=True, size=11)
         cell.fill = _fill("DCDCDC")
         cell.border = _border(
@@ -1370,61 +1385,119 @@ def add_shift_log_sheet(
 
     row = header_row + 1
 
-    display_entries = {}
-
-    for run, data_type, event_type, time, detectors in threshold_entries or []:
-        key = (run, time)
-
-        if key not in display_entries:
-            display_entries[key] = {
-                "run": run,
-                "time": time,
-                "cal": "",
-                "phy": "",
-                "event_type": event_type,
-            }
-
-        display_entries[key][data_type] = detectors
-
-        # reprocessing should take priority if Cal/Phy have different events
-        if event_type == "reprocessing":
-            display_entries[key]["event_type"] = "reprocessing"
-        elif (
-            event_type == "new_failure"
-            and display_entries[key]["event_type"] == "first_failure"
-        ):
-            display_entries[key]["event_type"] = "new_failure"
-
-    for entry in reversed(list(display_entries.values())):
-
-        style = SHIFTLOG_EVENT_STYLES[entry["event_type"]]
-        fill = _fill(style["fill"])
-        font = Font(size=10)
-
-        values = [
-            entry["time"],
-            entry["run"],
-            entry["cal"],
-            entry["phy"],
-        ]
-
-        for column, value in enumerate(values, start=1):
-            cell = work_sheet.cell(
-                row=row,
-                column=column,
-                value=value,
+    tot_dets = len([
+        det
+        for group in strings.values()
+        for det, _, _ in group
+    ])
+    
+    # Sort newest check first
+    sorted_entries = sorted(
+        threshold_entries or [],
+        key=lambda entry: datetime.strptime(
+            entry[1],
+            "%Y-%m-%d, %H:%M",
+        ),
+        reverse=True,
+    )
+    
+    # Group entries belonging to the same run and check time
+    grouped_entries = defaultdict(lambda: {"cal": [], "phy": []})
+    
+    for (
+        run,
+        check_time,
+        event_type,
+        data_type,
+        check_name,
+        failing_detectors,
+    ) in sorted_entries:
+    
+        grouped_entries[(run, check_time)][data_type].append(
+            (
+                event_type,
+                check_name,
+                failing_detectors,
             )
-            cell.font = font
-            cell.fill = fill
-            cell.border = _border(
-                left="thin",
-                right="thin",
-                top="thin",
-                bottom="thin",
-                color="D9D9D9",
+        )
+
+    first_entry = True
+
+    for (run, check_time), entries in grouped_entries.items():
+
+        # Use running_time only for the newest check
+        time_value = running_time if first_entry else check_time
+        first_entry = False
+
+        max_checks = max(len(entries["cal"]), len(entries["phy"]))
+        row_start = row
+
+        for i in range(max_checks):
+            cal_entry = entries["cal"][i] if i < len(entries["cal"]) else None
+            phy_entry = entries["phy"][i] if i < len(entries["phy"]) else None
+
+            def _text_and_comment(entry):
+                if entry is None:
+                    return "", None
+                event_type, check_name, failing_detectors = entry
+                n = len(failing_detectors)
+                word = "detector" if n == 1 else "detectors"
+                text = f"{n}/{tot_dets} {word} failed {check_name}"
+                comment_text = (
+                    f"{check_name} - Affected detectors ({n}):\n"
+                    + ", ".join(failing_detectors)
+                )
+                return text, comment_text
+
+            cal_text, cal_comment = _text_and_comment(cal_entry)
+            phy_text, phy_comment = _text_and_comment(phy_entry)
+
+            values = [
+                time_value if i == 0 else "",
+                run if i == 0 else "",
+                cal_text,
+                phy_text,
+            ]
+
+            # style from whichever entry exists on this row
+            event_type = (cal_entry or phy_entry)[0]
+            style = SHIFTLOG_EVENT_STYLES[event_type]
+            fill = _fill(style["fill"])
+            font = Font(size=10)
+
+            for column, value in enumerate(values, start=1):
+                cell = work_sheet.cell(row=row, column=column, value=value)
+                cell.font = font
+                cell.fill = fill
+                cell.border = _border(
+                    left="thin",
+                    right="thin",
+                    top="thin",
+                    bottom="thin",
+                    color="D9D9D9",
+                )
+                cell.alignment = Alignment(vertical="top", wrap_text=True)
+
+            if cal_comment:
+                work_sheet.cell(row=row, column=3).comment = Comment(
+                    cal_comment, "LEGEND monitoring"
+                )
+            if phy_comment:
+                work_sheet.cell(row=row, column=4).comment = Comment(
+                    phy_comment, "LEGEND monitoring"
+                )
+
+            row += 1
+
+        # merge Check time / Run vertically over this run's check rows
+        if max_checks > 1:
+            work_sheet.merge_cells(
+                start_row=row_start, start_column=1, end_row=row - 1, end_column=1
+            )
+            work_sheet.merge_cells(
+                start_row=row_start, start_column=2, end_row=row - 1, end_column=2
             )
 
-        row += 1
 
     # Column widths
     work_sheet.column_dimensions["A"].width = 23  # Timestamp
@@ -1470,29 +1543,41 @@ def get_threshold_log_entry(
 
     output = utils.load_yaml_or_default(usability_map_file, detectors)
 
-    failing_detectors = []
-    failed_details = []
+    entries = []
 
-    for ged, det_data in output.items():
-        data_dict = det_data.get(key, {})
-        # exclude escale checks from shifter logs
-        failed = [
-            k
-            for k, v in data_dict.items()
-            if v is False
-            and not (key == "cal" and k.startswith("escale_")) 
-            and not (key == "cal" and k.startswith("AoE_stab")) 
+    for check_name in sorted(
+        {
+            check
+            for ged, det_data in output.items()
+            for check, value in det_data.get(key, {}).items()
+            if value is False
+        }
+    ):
+
+        # exclude escale and AoE stability checks from shifter logs
+        if key == "cal" and (
+            check_name.startswith("escale_")
+            or check_name.startswith("AoE_stab")
+        ):
+            continue
+
+        failing_detectors = [
+            ged
+            for ged, det_data in output.items()
+            if det_data.get(key, {}).get(check_name) is False
         ]
 
-        if failed:
-            failing_detectors.append(ged)
-            failed_details.append(f"{ged} ({key}): {', '.join(failed)}")
+        if not failing_detectors:
+            continue
 
-    if not failing_detectors:
-        return None
+        entries.append(
+            (
+                run,
+                run_timestamp,
+                key,
+                check_name,
+                failing_detectors,
+            )
+        )
 
-    return (
-        run,
-        run_timestamp,
-        ", ".join(failing_detectors),
-    )
+    return entries

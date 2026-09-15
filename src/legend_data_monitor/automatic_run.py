@@ -426,17 +426,60 @@ def auto_run(
 
     current_entries = []
 
-    if cal_threshold_entry is not None:
-        run_e, timestamp_e, detectors_e = cal_threshold_entry
-        event_type = classify_event(run_e, previous_shift_log, full_reload)
-        current_entries.append((run_e, "cal", event_type, timestamp_e, detectors_e))
-
-    if phy_threshold_entry is not None:
-        run_e, timestamp_e, detectors_e = phy_threshold_entry
-        event_type = classify_event(run_e, previous_shift_log, full_reload)
-        current_entries.append((run_e, "phy", event_type, timestamp_e, detectors_e))
+    if cal_threshold_entry:
+        for (
+            run_e,
+            timestamp_e,
+            key_e,
+            check_name_e,
+            detectors_e,
+        ) in cal_threshold_entry:
+    
+            event_type = classify_event(
+                run_e,
+                previous_shift_log,
+                full_reload,
+            )
+    
+            current_entries.append(
+                (
+                    run_e,
+                    timestamp_e,
+                    event_type,
+                    key_e,
+                    check_name_e,
+                    detectors_e,
+                )
+            )
+    
+    if phy_threshold_entry:
+        for (
+            run_e,
+            timestamp_e,
+            key_e,
+            check_name_e,
+            detectors_e,
+        ) in phy_threshold_entry:
+    
+            event_type = classify_event(
+                run_e,
+                previous_shift_log,
+                full_reload,
+            )
+    
+            current_entries.append(
+                (
+                    run_e,
+                    timestamp_e,
+                    event_type,
+                    key_e,
+                    check_name_e,
+                    detectors_e,
+                )
+            )
 
     threshold_entries = previous_shift_log + current_entries
+
     save_shift_log(shift_log_path, threshold_entries)
 
     generate_dashboard(
