@@ -454,7 +454,7 @@ def render_run_plots(
     if not os.path.isfile(v2_file):
         logger.warning("no contract-v2 file to render PNGs from: %s", v2_file)
         return []
-    detector_map = pd.read_hdf(v2_file, "detector_map")
+    detector_map = contract_reader.read_frame(v2_file, "detector_map")
     saved = []
     for flag, param, unit in HEADLINE_PNG_KEYS:
         try:
