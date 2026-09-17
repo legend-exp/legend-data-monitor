@@ -12,6 +12,7 @@ import numpy as np
 import pandas as pd
 
 from .. import logs, utils
+from ..contract import reader as contract_reader
 from ..monitoring import apply_monitoring_style, period_contract_path
 
 E_583 = 583.191
@@ -29,7 +30,7 @@ def _load_detector_map(output_folder, period, run, data_type, logger):
         output_folder, period, run, f"l200-{period}-{run}-{data_type}-geds-schema2.hdf"
     )
     try:
-        return pd.read_hdf(path, "detector_map")
+        return contract_reader.read_frame(path, "detector_map")
     except (KeyError, OSError):
         _warn(logger, f"no detector_map readable at {path}")
         return None
@@ -444,7 +445,7 @@ def plot_escale_panels(
     apply_monitoring_style()
     path = period_contract_path(output_folder, period, data_type)
     try:
-        frame = pd.read_hdf(path, f"escale/{run}")
+        frame = contract_reader.read_frame(path, f"escale/{run}")
     except (KeyError, OSError):
         _warn(logger, f"no escale/{run} frame in {path}; skipping escale figures")
         return []
@@ -678,7 +679,7 @@ def plot_psd_stability(
 
     saved = []
     for det_name in detectors:
-        frame = pd.read_hdf(path, f"psd_stability/{run}/{det_name}").sort_values("run")
+        frame = contract_reader.read_frame(path, f"psd_stability/{run}/{det_name}").sort_values("run")
         run_labels = list(frame["run"])
         mean_vals = frame["mean"].to_numpy(dtype=float)
         sigma_vals = frame["sigma"].to_numpy(dtype=float)
