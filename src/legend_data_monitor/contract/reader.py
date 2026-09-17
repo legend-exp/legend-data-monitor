@@ -47,6 +47,25 @@ def read_binned_series(file_path: str, flag: str, param: str, cadence: str):
 
 
 def read_frame(file_path: str, key: str) -> pd.DataFrame:
+    """
+    Read one frame-valued contract key.
+
+    Frames inside contract files are stored as pandas HDF today; consumers go
+    through here so that storage can change without touching them. v1
+    monitoring files are not contract files: read those with ``pd.read_hdf``.
+
+    Parameters
+    ----------
+    file_path : str
+        Contract file (run ``-schema2.hdf`` or period ``-monitoring.hdf``).
+    key : str
+        Frame key (``detector_map``, ``escale/<run>``, ...).
+
+    Returns
+    -------
+    pandas.DataFrame
+        The stored frame.
+    """
     return pd.read_hdf(file_path, key=key)
 
 

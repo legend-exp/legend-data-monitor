@@ -520,7 +520,7 @@ def render_run_plots(
     saved = []
     detector_map = None
     if os.path.isfile(v2_file):
-        detector_map = pd.read_hdf(v2_file, "detector_map")
+        detector_map = contract_reader.read_frame(v2_file, "detector_map")
         for flag, param, unit in HEADLINE_PNG_KEYS:
             try:
                 binned = contract_reader.read_binned_series(
@@ -541,7 +541,7 @@ def render_run_plots(
                 )
 
     if os.path.isfile(spms_file):
-        spms_map = pd.read_hdf(spms_file, "detector_map")
+        spms_map = contract_reader.read_frame(spms_file, "detector_map")
         for flag, param, unit in SPMS_HEADLINE_PNG_KEYS:
             try:
                 binned = contract_reader.read_binned_series(
