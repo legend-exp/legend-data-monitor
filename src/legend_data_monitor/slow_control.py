@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 
 import pandas as pd
 from legendmeta import LegendSlowControlDB
@@ -202,8 +202,12 @@ def get_plotting_info(
     )
 
     # Convert first_tstmp and last_tstmp to datetime objects in the UTC timezone
-    first_tstmp = datetime.strptime(first_tstmp, "%Y%m%dT%H%M%SZ").replace(tzinfo=UTC)
-    last_tstmp = datetime.strptime(last_tstmp, "%Y%m%dT%H%M%SZ").replace(tzinfo=UTC)
+    first_tstmp = datetime.strptime(first_tstmp, "%Y%m%dT%H%M%SZ").replace(
+        tzinfo=timezone.utc
+    )
+    last_tstmp = datetime.strptime(last_tstmp, "%Y%m%dT%H%M%SZ").replace(
+        tzinfo=timezone.utc
+    )
 
     # Filter the DataFrame based on the time interval, starting to look from the latest entry ('reversed(...)')
     times = list(get_table_info["tstamp"].unique())

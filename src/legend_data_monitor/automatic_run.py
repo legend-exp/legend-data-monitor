@@ -184,14 +184,18 @@ def auto_run(
         # keep only files with correct ending (discard ones still under processing)
         new_files = sorted(f for f in new_files if len(re.findall(r"\d+", f)) == 6)
 
-    last_cycle = new_files[-1].split("-")[-2] if new_files else None
+    last_cycle = sorted(current_files)[-1].split("-")[-2] if current_files else None
+
+    # no phy entries yet means the monitoring plots never ran for this run, so
+    # redo them even when no new files arrived
+    remonitor = not _qcp_file_is_populated(qcp_path, "phy")
 
     # ===========================================================================================
     # Task definitions
     # ===========================================================================================
 
     def task_check_calibration(logger=None):
-        if _qcp_file_is_populated(qcp_path):
+        if _qcp_file_is_populated(qcp_path, "cal"):
             utils.logger.info("...qcp summary already populated, skipping")
             return
         utils.logger.info("...inspecting calibration data!")
@@ -489,6 +493,10 @@ def auto_run(
             task_list.append(tasks.Task("render_plots", task_render_plots, period, run))
         if cluster == "lngs" and get_sc is True:
             task_list.append(tasks.Task("slow_control", task_slow_control, period, run))
+
+    # the summary plots also redo a run whose monitoring never produced phy
+    # entries, so they are not gated on new data alone
+    if new_files or remonitor:
         task_list.append(
             tasks.Task("phy_summary_plots", task_phy_summary_plots, period, run)
         )
@@ -639,8 +647,22 @@ def render_run_plots(
 _render_headline_pngs = render_run_plots
 
 
-def _qcp_file_is_populated(filepath: str) -> bool:
-    """Return True if the qcp summary file exists and has at least one non-null cal entry."""
+def _qcp_file_is_populated(filepath: str, data_type: str) -> bool:
+    """
+    Return True if the qcp summary has at least one non-null entry of this type.
+
+    Parameters
+    ----------
+    filepath : str
+        Path to the qcp summary file.
+    data_type : str
+        Run type to inspect, ``cal`` or ``phy``.
+
+    Returns
+    -------
+    bool
+        True if the file exists and holds a non-null entry for `data_type`.
+    """
     if not Path(filepath).is_file():
         return False
     with open(filepath) as f:
@@ -648,8 +670,8 @@ def _qcp_file_is_populated(filepath: str) -> bool:
     if not data:
         return False
     for det_data in data.values():
-        cal = det_data.get("cal", {})
-        if any(v is not None for v in cal.values()):
+        entries = det_data.get(data_type, {})
+        if any(v is not None for v in entries.values()):
             return True
     return False
 

@@ -148,7 +148,10 @@ def retrieve_scdb(config: str, port: int, pswd: str):
     output_folder = str(Path(run_dir).parent.parent)
     period = config["dataset"]["period"]
     runs = utils.get_query_timerange(dataset=config["dataset"]).get("run", [])
-    if len(runs) != 1: raise errors.ConfigError("retrieve_scdb requires exactly one run in config['dataset']['runs']")
+    if len(runs) != 1:
+        raise errors.ConfigError(
+            "retrieve_scdb requires exactly one run in config['dataset']['runs']"
+        )
     run = runs[0]
     # -------------------------------------------------------------------------
     # Load and save data

@@ -36,7 +36,7 @@ def plot_vs_time(
     # -------------------------------------------------------------------------
 
     # need to plot this way, and not data_position.plot(...) because the datetime column is of type Timestamp
-    # plotting this way, to_pydatetime() converts it to type datetime which is needed for DateFormatter
+    # plotting this way, so matplotlib gets the datetime64 array DateFormatter needs
     # changing the type of the column itself with the table does not work
     data_channel = data_channel.sort_values("datetime")
 
@@ -54,7 +54,7 @@ def plot_vs_time(
     if plot_info["resampled"] != "only":
         parameter_array = np.array(data_channel[plot_info["parameter"]])
         ax.plot(
-            np.array(data_channel["datetime"].dt.to_pydatetime()),
+            data_channel["datetime"].to_numpy(),
             parameter_array[:, None],
             zorder=0,
             color=all_col,
@@ -85,7 +85,7 @@ def plot_vs_time(
 
             parameter_array = np.array(resampled[plot_info["parameter"]])
             ax.plot(
-                resampled["datetime"].dt.to_pydatetime(),
+                resampled["datetime"].to_numpy(),
                 parameter_array[:, None],
                 color=res_col,
                 zorder=1,
@@ -110,7 +110,7 @@ def plot_vs_time(
                 )
 
                 ax.fill_between(
-                    resampled["datetime"].dt.to_pydatetime(),
+                    resampled["datetime"].to_numpy(),
                     resampled[plot_info["parameter"]] - new_dataframe["std"],
                     resampled[plot_info["parameter"]] + new_dataframe["std"],
                     alpha=0.25,
@@ -287,7 +287,7 @@ def plot_scatter(
 ):
     # plot data
     ax.scatter(
-        np.array(data_channel["datetime"].dt.to_pydatetime()),
+        data_channel["datetime"].to_numpy(),
         data_channel[plot_info["parameter"]],
         color=color,
         # useful if there are overlapping points (but more difficult to see light colour points...)
@@ -447,9 +447,7 @@ def plot_heatmap(
     # make sure the datetime column is in UTC (tz-aware input stays aware)
     new_df["datetime"] = pd.to_datetime(new_df["datetime"], utc=True)
     # convert to numeric values for plotting
-    x_values = pd.to_numeric(
-        new_df["datetime"].dt.tz_convert("UTC").dt.to_pydatetime()
-    ).values
+    x_values = new_df["datetime"].dt.tz_convert("UTC").astype("int64").to_numpy()
     y_values = new_df[plot_info["parameter"]]
     # plot data
     h, xedges, yedges = np.histogram2d(
