@@ -46,8 +46,9 @@ def func(a, b):
   `run.py` is the sole exit-code owner (0 ok, 1 task failure, 2 config/env error).
 - Root `issues.py` / `tasks.py` are re-export shims — edit `contract/issues.py` /
   `orchestration/tasks.py` instead.
-- Before touching `monitoring.py`, `calibration.py`, or `contract/`, read
-  `REFACTOR_STATUS.md` (running record of the refactor + remaining backlog).
+- The v1 pandas writer (`save_data.save_hdf` pivots) still runs alongside the
+  contract writer. Retiring it -- and with it the `-schema2` infix and the
+  plotting/save_hdf coupling -- waits on every consumer reading v2.
 
 ## Gotchas
 
