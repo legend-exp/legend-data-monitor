@@ -4,11 +4,11 @@ import matplotlib
 
 matplotlib.use("Agg")
 
-import numpy as np  # noqa: E402
-import pandas as pd  # noqa: E402
-from matplotlib.backends.backend_pdf import PdfPages  # noqa: E402
+import numpy as np
+import pandas as pd
+from matplotlib.backends.backend_pdf import PdfPages
 
-from legend_data_monitor import analysis_data, plotting  # noqa: E402
+from legend_data_monitor import analysis_data, plotting
 
 
 def _spms_frame():

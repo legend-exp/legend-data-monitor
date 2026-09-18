@@ -6,7 +6,7 @@ Pure consumers of the frames written by ``calibration.write_escale_summary``
 PDF names and directories replicate the legacy ``savefig`` calls verbatim.
 """
 
-import os
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -26,8 +26,11 @@ def _warn(logger, msg):
 
 def _load_detector_map(output_folder, period, run, data_type, logger):
     """Read /detector_map from the run contract, or None when unavailable."""
-    path = os.path.join(
-        output_folder, period, run, f"l200-{period}-{run}-{data_type}-geds-schema2.hdf"
+    path = str(
+        Path(output_folder)
+        / period
+        / run
+        / f"l200-{period}-{run}-{data_type}-geds-schema2.hdf"
     )
     try:
         return contract_reader.read_frame(path, "detector_map")
@@ -69,7 +72,7 @@ def _series(frame, parameter, peak=None):
     if peak is not None:
         peaks = pd.to_numeric(sel["peak"], errors="coerce").to_numpy(dtype=float)
         sel = sel[np.isclose(peaks, peak, atol=1e-6)]
-    return dict(zip(sel["period_run"], sel["value"]))
+    return dict(zip(sel["period_run"], sel["value"], strict=True))
 
 
 def _aligned(all_keys, mapping):
@@ -372,17 +375,16 @@ def _save_figure(fig, pdf_dir, pdf_name, save_pdf, png_dir, logger, **savefig_kw
     """Save one figure as PDF (legacy path) and/or PNG; return saved paths."""
     saved = []
     if save_pdf:
-        os.makedirs(pdf_dir, exist_ok=True)
-        pdf_path = os.path.abspath(os.path.join(pdf_dir, pdf_name))
+        Path(pdf_dir).mkdir(parents=True, exist_ok=True)
+        pdf_path = str((Path(pdf_dir) / pdf_name).absolute())
         fig.savefig(pdf_path, **savefig_kwargs)
         if logger is not None:
             logs.log_saved_plot(logger, pdf_path)
         saved.append(pdf_path)
     if png_dir is not None:
-        os.makedirs(png_dir, exist_ok=True)
-        png_path = os.path.abspath(
-            os.path.join(png_dir, pdf_name[: -len(".pdf")] + ".png")
-        )
+        Path(png_dir).mkdir(parents=True, exist_ok=True)
+        png_name = pdf_name[: -len(".pdf")] + ".png"
+        png_path = str((Path(png_dir) / png_name).absolute())
         fig.savefig(png_path, **savefig_kwargs)
         if logger is not None:
             logs.log_saved_plot(logger, png_path)
@@ -476,7 +478,7 @@ def plot_escale_panels(
         )
         saved += _save_figure(
             fig,
-            os.path.join(output_folder, period, "mtg/pdf", f"st{string}"),
+            str(Path(output_folder) / period / "mtg/pdf" / f"st{string}"),
             f"{period}_string{string}_pos{position}_{det_name}_ESCALEusability.pdf",
             save_pdf,
             png_dir,
@@ -661,7 +663,7 @@ def plot_psd_stability(
 
     apply_monitoring_style()
     path = period_contract_path(output_folder, period, data_type)
-    if not os.path.isfile(path):
+    if not Path(path).is_file():
         _warn(logger, f"no period contract file at {path}; skipping PSD figures")
         return []
     prefix = f"/psd_stability/{run}/"
@@ -706,7 +708,7 @@ def plot_psd_stability(
         )
         saved += _save_figure(
             fig,
-            os.path.join(output_folder, period, "mtg", "pdf", f"st{location[0]}"),
+            str(Path(output_folder) / period / "mtg" / "pdf" / f"st{location[0]}"),
             f"{period}_string{location[0]}_pos{location[1]}_{det_name}_AoE_stab.pdf",
             save_pdf,
             png_dir,

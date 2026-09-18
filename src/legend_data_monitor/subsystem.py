@@ -1,7 +1,6 @@
 import os
-import typing
 from datetime import datetime
-from typing import Union
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -208,7 +207,7 @@ class Subsystem:
         # have something before get_data() is called just in case
         self.data = pd.DataFrame()
 
-    def get_data(self, parameters: typing.Union[str, list_of_str, tuple_of_str] = ()):
+    def get_data(self, parameters: str | list_of_str | tuple_of_str = ()):
         """
         Get data for requested parameters and "prime" it to be ready for analysis.
 
@@ -529,9 +528,7 @@ class Subsystem:
             self.flag_muon_events()
         utils.logger.info("... flagge pulser | FC bsl | muon events")
 
-    def include_aux(
-        self, params: Union[str, list], dataset: dict, plot: dict, aux_ch: str
-    ):
+    def include_aux(self, params: str | list, dataset: dict, plot: dict, aux_ch: str):
         """Include in a new column data coming from PULS01ANA aux channel, to either compute a ratio or a difference with data coming from the inspected subsystem."""
         # auxiliary channel of reference (fixed for the moment)
         aux_channel = "pulser01ana"
@@ -780,8 +777,8 @@ class Subsystem:
         # load full channel map of this exp and period (and version)
         # -------------------------------------------------------------------------
 
-        map_file = os.path.join(
-            self.path, self.version, "inputs/hardware/configuration/channelmaps"
+        map_file = str(
+            Path(self.path) / self.version / "inputs/hardware/configuration/channelmaps"
         )
         full_channel_map = TextDB(map_file).on(timestamp=self.first_timestamp)
 
@@ -992,7 +989,7 @@ class Subsystem:
 
         self.channel_map = self.channel_map.reset_index()
 
-    def get_parameters_for_dataloader(self, parameters: typing.Union[str, list_of_str]):
+    def get_parameters_for_dataloader(self, parameters: str | list_of_str):
         """
         Construct list of parameters to query from the DataLoader.
 
@@ -1035,8 +1032,8 @@ class Subsystem:
 
         params: list of parameters to load
         """
-        tiers, _ = utils.get_tiers_pars_folders(os.path.join(self.path, self.version))
-        data_dir = os.path.join(self.path, self.version, "generated", "tier")
+        tiers, _ = utils.get_tiers_pars_folders(str(Path(self.path) / self.version))
+        data_dir = str(Path(self.path) / self.version / "generated" / "tier")
 
         if tier_key == "dsp":
             tier_folder = tiers[0]
@@ -1051,7 +1048,9 @@ class Subsystem:
 
         if self.partition:
             # check if the psp/pht folder exists (ie is not empty)
-            if os.path.isdir(tier_folder_part) and os.listdir(tier_folder_part):
+            if Path(tier_folder_part).is_dir() and [
+                p.name for p in Path(tier_folder_part).iterdir()
+            ]:
                 if tier_key == "dsp":
                     tier_key_new = "psp"
                 if tier_key == "hit":
@@ -1061,12 +1060,12 @@ class Subsystem:
                 param_tiers["tier"] = param_tiers["tier"].replace(
                     tier_key, tier_key_new
                 )
-                data_dir = os.path.join(
-                    tier_folder_part.split("generated")[0], "generated", "tier"
+                data_dir = str(
+                    Path(tier_folder_part.split("generated")[0]) / "generated" / "tier"
                 )
             else:
-                data_dir = os.path.join(
-                    tier_folder.split("generated")[0], "generated", "tier"
+                data_dir = str(
+                    Path(tier_folder.split("generated")[0]) / "generated" / "tier"
                 )
 
         # which of these are requested by user

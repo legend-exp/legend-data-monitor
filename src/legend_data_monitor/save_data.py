@@ -1,4 +1,4 @@
-import os
+from pathlib import Path
 
 import h5py
 from pandas import DataFrame, concat, read_hdf
@@ -522,7 +522,7 @@ def get_pivot(
         return
 
     saved_keys = []
-    if os.path.exists(file_path):
+    if Path(file_path).exists():
         with h5py.File(file_path, "r") as file:
             saved_keys = list(file.keys())
     if key_name not in saved_keys or kind == "mean":
@@ -555,5 +555,5 @@ def get_pivot(
 
 def check_existence_and_overwrite(file: str):
     """Check for the existence of a file, and if it exists removes it."""
-    if os.path.exists(file):
-        os.remove(file)
+    if Path(file).exists():
+        Path(file).unlink()

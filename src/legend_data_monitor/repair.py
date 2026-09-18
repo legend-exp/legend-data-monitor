@@ -13,6 +13,7 @@ import importlib.resources
 import os
 import re
 import shutil
+from pathlib import Path
 
 import pandas as pd
 import yaml
@@ -29,12 +30,12 @@ PROD_ROOTS = {
 
 def chunk_lists(generated_path: str, period: str, run: str) -> list:
     """Return the run's chunk key lists in processing order (whole list if unsplit)."""
-    mtg = os.path.join(generated_path, "generated", "tmp", "mtg", period, run)
-    parts = glob.glob(os.path.join(mtg, "new_keys_part_*.filekeylist"))
+    mtg = str(Path(generated_path) / "generated" / "tmp" / "mtg" / period / run)
+    parts = glob.glob(str(Path(mtg) / "new_keys_part_*.filekeylist"))
     if parts:
         return sorted(parts, key=lambda p: int(re.findall(r"part_(\d+)", p)[0]))
-    whole = os.path.join(mtg, "new_keys.filekeylist")
-    return [whole] if os.path.exists(whole) else []
+    whole = str(Path(mtg) / "new_keys.filekeylist")
+    return [whole] if Path(whole).exists() else []
 
 
 def config_entries(parameter: str, subsystem: str = "geds") -> dict:
@@ -72,10 +73,10 @@ def transplant_keys(target: str, source: str, keys: list) -> None:
             frame = pd.read_hdf(source, key=key)
             options = {} if key.endswith("_info") else utils.HDF_COMPRESSION
             frame.to_hdf(tmp, key=key, mode="a", **options)
-        os.replace(tmp, target)
+        Path(tmp).replace(target)
     except BaseException:
-        if os.path.exists(tmp):
-            os.remove(tmp)
+        if Path(tmp).exists():
+            Path(tmp).unlink()
         raise
 
 
@@ -116,7 +117,7 @@ def repair_parameter(
     """
     from . import core
 
-    generated_path = os.path.join(output_folder, ref_version)
+    generated_path = str(Path(output_folder) / ref_version)
     chunks = chunk_lists(generated_path, period, run)
     if not chunks:
         raise errors.ConfigError(f"no chunk lists recorded for {period}-{run}")
@@ -124,10 +125,10 @@ def repair_parameter(
     if not entries:
         raise errors.ConfigError(f"no plot-config entry loads {parameter!r}")
 
-    scratch = os.path.join(generated_path, "generated", "tmp", "repair", period, run)
+    scratch = str(Path(generated_path) / "generated" / "tmp" / "repair" / period / run)
     shutil.rmtree(scratch, ignore_errors=True)
     # the pipeline's make_dir is not recursive: the version path must pre-exist
-    os.makedirs(os.path.join(scratch, ref_version), exist_ok=True)
+    Path(str(Path(scratch) / ref_version)).mkdir(parents=True, exist_ok=True)
     config = {
         "output": scratch,
         "dataset": {
@@ -147,16 +148,16 @@ def repair_parameter(
     for chunk in chunks:
         core.auto_control_plots(config, chunk, "", {}, render=False)
 
-    run_dir = os.path.join(generated_path, "generated/plt/hit", data_type, period, run)
-    scratch_dir = os.path.join(
-        scratch, ref_version, "generated/plt/hit", data_type, period, run
+    run_dir = str(Path(generated_path) / "generated/plt/hit" / data_type / period / run)
+    scratch_dir = str(
+        Path(scratch) / ref_version / "generated/plt/hit" / data_type / period / run
     )
     camel = utils.convert_to_camel_case(parameter, "_")
     replaced = []
     for subsystem in ("geds", "pulser01ana"):
         name = f"{experiment}-{period}-{run}-{data_type}-{subsystem}.hdf"
-        source, target = os.path.join(scratch_dir, name), os.path.join(run_dir, name)
-        if not (os.path.exists(source) and os.path.exists(target)):
+        source, target = str(Path(scratch_dir) / name), str(Path(run_dir) / name)
+        if not (Path(source).exists() and Path(target).exists()):
             continue
         keys = family_keys(source, camel)
         transplant_keys(target, source, keys)
@@ -168,7 +169,7 @@ def repair_parameter(
         generated_path,
         period,
         run,
-        metadata_path=os.path.join(prod_root, ref_version, "inputs"),
+        metadata_path=str(Path(prod_root) / ref_version / "inputs"),
         data_type=data_type,
         experiment=experiment,
         keys=replaced,
@@ -213,14 +214,15 @@ def refresh_contract(
     n_keys : int
         Number of v1 keys refreshed, summed over the subsystem files present.
     """
-    generated_path = os.path.join(output_folder, ref_version)
-    run_dir = os.path.join(generated_path, "generated/plt/hit", data_type, period, run)
+    generated_path = str(Path(output_folder) / ref_version)
+    run_dir = str(Path(generated_path) / "generated/plt/hit" / data_type / period / run)
     n_keys = 0
     for subsystem in schema.SUBSYSTEMS:
-        v1_file = os.path.join(
-            run_dir, schema.run_file_name(period, run, data_type, subsystem, experiment)
+        v1_file = str(
+            Path(run_dir)
+            / schema.run_file_name(period, run, data_type, subsystem, experiment)
         )
-        if not os.path.exists(v1_file):
+        if not Path(v1_file).exists():
             continue
         with pd.HDFStore(v1_file, "r") as store:
             keys = [k.lstrip("/") for k in store.keys() if not k.endswith("_info")]
@@ -228,7 +230,7 @@ def refresh_contract(
             generated_path,
             period,
             run,
-            metadata_path=os.path.join(prod_root, ref_version, "inputs"),
+            metadata_path=str(Path(prod_root) / ref_version / "inputs"),
             data_type=data_type,
             experiment=experiment,
             keys=keys,

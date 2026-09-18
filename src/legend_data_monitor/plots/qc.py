@@ -9,7 +9,7 @@ verbatim; they are a frozen interface consumed by a cloud-upload script.
 
 import itertools
 import math
-import os
+from pathlib import Path
 
 import h5py
 import numpy as np
@@ -59,11 +59,11 @@ _THRESHOLDED_FLAGS = ("IsDischarge", "IsSaturated")
 
 
 def _run_contract_path(output_folder, period, run, data_type):
-    return os.path.join(
-        output_folder,
-        period,
-        run,
-        f"l200-{period}-{run}-{data_type}-geds-schema2.hdf",
+    return str(
+        Path(output_folder)
+        / period
+        / run
+        / f"l200-{period}-{run}-{data_type}-geds-schema2.hdf"
     )
 
 
@@ -72,7 +72,7 @@ def _load_detector_map(output_folder, period, run, data_type, detector_map, logg
     if detector_map is not None:
         return detector_map
     path = _run_contract_path(output_folder, period, run, data_type)
-    if not os.path.isfile(path):
+    if not Path(path).is_file():
         logger.warning("no run contract file at %s; cannot map detectors", path)
         return None
     try:
@@ -105,13 +105,13 @@ def _save_figure(fig, pdf_dir, stem, save_pdf, png_dir, logger, **savefig_kwargs
     """Save a figure as PDF (frozen legacy name) and optional PNG; return paths."""
     paths = []
     if save_pdf:
-        os.makedirs(pdf_dir, exist_ok=True)
-        path = os.path.abspath(os.path.join(pdf_dir, f"{stem}.pdf"))
+        Path(pdf_dir).mkdir(parents=True, exist_ok=True)
+        path = str((Path(pdf_dir) / f"{stem}.pdf").absolute())
         logs.save_figure(fig, path, logger, **savefig_kwargs)
         paths.append(path)
     if png_dir is not None:
-        os.makedirs(png_dir, exist_ok=True)
-        path = os.path.abspath(os.path.join(png_dir, f"{stem}.png"))
+        Path(png_dir).mkdir(parents=True, exist_ok=True)
+        path = str((Path(png_dir) / f"{stem}.png").absolute())
         logs.save_figure(fig, path, logger, **savefig_kwargs)
         paths.append(path)
     return paths
@@ -207,7 +207,7 @@ def plot_qc_rate_series(
     apply_monitoring_style()
     logger = logger or utils.logger
     path = period_contract_path(output_folder, period, data_type)
-    if not os.path.isfile(path):
+    if not Path(path).is_file():
         logger.warning("no period contract file at %s; nothing to draw", path)
         return []
     detector_map = _load_detector_map(
@@ -252,8 +252,8 @@ def plot_qc_rate_series(
                 stem = f"{period}_{run}_string{string}_{utils.MTG_PLOT_INFO[flag]['title']}"
             else:
                 stem = f"{period}_{run}_string{string}_{flag}_rate"
-            pdf_dir = os.path.join(
-                output_folder, period, run, "mtg", "pdf", f"st{string}"
+            pdf_dir = str(
+                Path(output_folder) / period / run / "mtg" / "pdf" / f"st{string}"
             )
             saved += _save_figure(fig, pdf_dir, stem, save_pdf, png_dir, logger)
             plt.close(fig)
@@ -382,7 +382,7 @@ def plot_qc_average(
     apply_monitoring_style()
     logger = logger or utils.logger
     path = period_contract_path(output_folder, period, data_type)
-    if not os.path.isfile(path):
+    if not Path(path).is_file():
         logger.warning("no period contract file at %s; nothing to draw", path)
         return []
     try:
@@ -419,7 +419,7 @@ def plot_qc_average(
             stem = f"{period}_{run}_{utils.MTG_PLOT_INFO[flag]['title']}_avg"
         else:
             stem = f"{period}_{run}_{flag}_avg"
-        pdf_dir = os.path.join(output_folder, period, run, "mtg", "pdf")
+        pdf_dir = str(Path(output_folder) / period / run / "mtg" / "pdf")
         saved += _save_figure(fig, pdf_dir, stem, save_pdf, png_dir, logger)
         plt.close(fig)
     return saved
@@ -550,7 +550,7 @@ def plot_classifier_distributions(
     apply_monitoring_style()
     logger = logger or utils.logger
     contract_file = _run_contract_path(output_folder, period, run, data_type)
-    if not os.path.isfile(contract_file):
+    if not Path(contract_file).is_file():
         logger.warning("no run contract file at %s; nothing to draw", contract_file)
         return []
     detector_map = _load_detector_map(
@@ -601,8 +601,8 @@ def plot_classifier_distributions(
                     period, run, par, string, dets, edges, counts_by_flag, par_fracs
                 )
                 stem = f"{period}_{run}_string{string}_{par}"
-                pdf_dir = os.path.join(
-                    output_folder, period, run, "mtg", "pdf", f"st{string}"
+                pdf_dir = str(
+                    Path(output_folder) / period / run / "mtg" / "pdf" / f"st{string}"
                 )
                 saved += _save_figure(
                     fig,

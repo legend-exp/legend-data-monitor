@@ -6,7 +6,7 @@ dashboard may read files without importing this package.
 """
 
 import json
-import os
+from pathlib import Path
 
 import boost_histogram as bh
 import h5py
@@ -72,7 +72,7 @@ def read_frame(file_path: str, key: str) -> pd.DataFrame:
 def read_manifest(
     dir_path: str, period: str, run: str, experiment: str = "l200"
 ) -> dict:
-    path = os.path.join(dir_path, schema.manifest_name(period, run, experiment))
+    path = Path(dir_path) / schema.manifest_name(period, run, experiment)
     with open(path) as f:
         return json.load(f)
 

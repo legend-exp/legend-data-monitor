@@ -1,5 +1,3 @@
-from typing import Union
-
 import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
 import numpy as np
@@ -733,7 +731,7 @@ def plot_array(data_analysis: DataFrame, plot_info: dict, pdf: PdfPages):
     labels = data_analysis.groupby("channel").first()[["name", "location", "position"]]
     labels["channel"] = labels.index
     labels["label"] = labels[["location", "position", "channel", "name"]].apply(
-        lambda x: f"p{x['position']}-ch{str(x['channel'])}-{x['name']}",
+        lambda x: f"p{x['position']}-ch{x['channel']!s}-{x['name']}",
         axis=1,
     )
     # put it in the table
@@ -937,7 +935,7 @@ def get_fwhm_for_fixed_ch(data_channel: DataFrame, parameter: str) -> float:
         return 0
 
 
-def plot_limits(ax: plt.Axes, params: list, limits: Union[list, dict]):
+def plot_limits(ax: plt.Axes, params: list, limits: list | dict):
     """Plot limits (if present) on the plot. The multi-params case is carefully handled."""
     # one parameter case
     if (isinstance(params, list) and len(params) == 1) or isinstance(params, str):

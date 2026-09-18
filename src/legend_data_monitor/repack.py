@@ -19,6 +19,7 @@ This module brings existing files over without re-running the pipeline: a
 import glob
 import os
 import shutil
+from pathlib import Path
 
 import h5py
 import numpy as np
@@ -56,7 +57,7 @@ def repack_pandas_hdf(path: str) -> tuple:
     once it is complete *and* smaller -- a file already in the current layout
     is left exactly as it was.
     """
-    before = os.path.getsize(path)
+    before = Path(path).stat().st_size
     if _pandas_hdf_is_current(path):
         return before, before
     # pid-unique so concurrent invocations cannot clobber each other's tmp
@@ -78,15 +79,15 @@ def repack_pandas_hdf(path: str) -> tuple:
                     frame = frame.astype({column: "float32" for column in wide})
                 options = utils.HDF_COMPRESSION
             frame.to_hdf(tmp, key=key, mode="a", **options)
-        after = os.path.getsize(tmp)
+        after = Path(tmp).stat().st_size
         if after >= before:
-            os.remove(tmp)
+            Path(tmp).unlink()
             return before, before
-        os.replace(tmp, path)
+        Path(tmp).replace(path)
         return before, after
     except BaseException:
-        if os.path.exists(tmp):
-            os.remove(tmp)
+        if Path(tmp).exists():
+            Path(tmp).unlink()
         raise
 
 
@@ -98,8 +99,8 @@ def repack_run(
     experiment: str = "l200",
 ) -> dict:
     """Repack every HDF output of one run; return ``{path: (before, after)}``."""
-    run_dir = os.path.join(generated_path, "generated/plt/hit", data_type, period, run)
-    pattern = os.path.join(run_dir, f"{experiment}-{period}-{run}-{data_type}-*.hdf")
+    run_dir = str(Path(generated_path) / "generated/plt/hit" / data_type / period / run)
+    pattern = str(Path(run_dir) / f"{experiment}-{period}-{run}-{data_type}-*.hdf")
     results = {}
     for path in sorted(glob.glob(pattern)):
         if path.endswith("-schema2.hdf"):
@@ -110,13 +111,13 @@ def repack_run(
         if after == before:
             utils.logger.info(
                 "%s already in the current layout (%.2f GB)",
-                os.path.basename(path),
+                Path(path).name,
                 before / 2**30,
             )
         else:
             utils.logger.info(
                 "repacked %s: %.2f -> %.2f GB (%.1fx)",
-                os.path.basename(path),
+                Path(path).name,
                 before / 2**30,
                 after / 2**30,
                 before / max(after, 1),
@@ -189,27 +190,27 @@ def strip_transport_pivots(
     sizes : tuple
         ``(before, after)`` file size in bytes; equal when nothing was done.
     """
-    run_dir = os.path.join(generated_path, "generated/plt/hit", data_type, period, run)
+    run_dir = str(Path(generated_path) / "generated/plt/hit" / data_type / period / run)
     stem = f"{experiment}-{period}-{run}-{data_type}-{subsystem}"
-    v1_file = os.path.join(run_dir, f"{stem}.hdf")
-    contract_file = os.path.join(run_dir, f"{stem}-schema2.hdf")
-    if not os.path.exists(v1_file):
+    v1_file = str(Path(run_dir) / f"{stem}.hdf")
+    contract_file = str(Path(run_dir) / f"{stem}-schema2.hdf")
+    if not Path(v1_file).exists():
         utils.logger.warning("no v1 file at %s; nothing to strip", v1_file)
         return 0, 0
 
-    before = os.path.getsize(v1_file)
+    before = Path(v1_file).stat().st_size
     with pd.HDFStore(v1_file, "r") as store:
         keys = [key.lstrip("/") for key in store.keys()]
     doomed = _transport_keys(keys, subsystem)
     if not doomed:
-        utils.logger.info("%s carries no transport pivots", os.path.basename(v1_file))
+        utils.logger.info("%s carries no transport pivots", Path(v1_file).name)
         return before, before
 
     # the guard: every key being removed must already be binned in the contract
-    if not os.path.exists(contract_file):
+    if not Path(contract_file).exists():
         utils.logger.error(
             "refusing to strip %s: no contract file at %s",
-            os.path.basename(v1_file),
+            Path(v1_file).name,
             contract_file,
         )
         return before, before
@@ -218,7 +219,7 @@ def strip_transport_pivots(
     if missing:
         utils.logger.error(
             "refusing to strip %s: %d key(s) not in the contract (e.g. %s)",
-            os.path.basename(v1_file),
+            Path(v1_file).name,
             len(missing),
             missing[0],
         )
@@ -232,16 +233,16 @@ def strip_transport_pivots(
             frame = pd.read_hdf(v1_file, key=key)
             options = {} if key.endswith(_METADATA_SUFFIX) else utils.HDF_COMPRESSION
             frame.to_hdf(tmp, key=key, mode="a", **options)
-        after = os.path.getsize(tmp)
-        os.replace(tmp, v1_file)
+        after = Path(tmp).stat().st_size
+        Path(tmp).replace(v1_file)
     except BaseException:
-        if os.path.exists(tmp):
-            os.remove(tmp)
+        if Path(tmp).exists():
+            Path(tmp).unlink()
         raise
     utils.logger.info(
         "stripped %d transport pivot(s) from %s: %.2f -> %.2f GB",
         len(doomed),
-        os.path.basename(v1_file),
+        Path(v1_file).name,
         before / 2**30,
         after / 2**30,
     )
@@ -336,12 +337,12 @@ def _contract_hdf_is_current(path: str) -> bool:
     if wide:
         return False
     # narrowed but slacked (e.g. an interrupted earlier repack) still needs work
-    return os.path.getsize(path) < 1.15 * max(stored, 1)
+    return Path(path).stat().st_size < 1.15 * max(stored, 1)
 
 
 def repack_contract_hdf(path: str) -> tuple:
     """Repack one contract (schema2) file in place; return ``(before, after)``."""
-    before = os.path.getsize(path)
+    before = Path(path).stat().st_size
     if _contract_hdf_is_current(path):
         return before, before
     # narrow a scratch copy, never the original: a failure part-way must not
@@ -352,15 +353,15 @@ def repack_contract_hdf(path: str) -> tuple:
         shutil.copyfile(path, tmp)
         _narrow_contract_datasets(tmp)
         _compact(tmp, tmp2)
-        os.remove(tmp)
-        after = os.path.getsize(tmp2)
+        Path(tmp).unlink()
+        after = Path(tmp2).stat().st_size
         if after >= before:
-            os.remove(tmp2)
+            Path(tmp2).unlink()
             return before, before
-        os.replace(tmp2, path)
+        Path(tmp2).replace(path)
         return before, after
     except BaseException:
         for leftover in (tmp, tmp2):
-            if os.path.exists(leftover):
-                os.remove(leftover)
+            if Path(leftover).exists():
+                Path(leftover).unlink()
         raise
