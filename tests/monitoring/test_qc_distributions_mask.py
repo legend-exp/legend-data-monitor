@@ -47,7 +47,7 @@ def _write_v1(root, n=60):
 
 
 def _ignore_middle_third():
-    """An ignore-keys entry that really drops rows of the frames above."""
+    """Build an ignore-keys entry that really drops rows of the frames above."""
     return {
         PERIOD: {
             "start_keys": ["20260701T000900Z"],

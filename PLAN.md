@@ -38,7 +38,7 @@ Two known-unverified areas that real data will exercise for the first time: the 
    - issues: `generated/mon/issues/...` + ISSUE blocks if thresholds fired;
    - **timings** per task from orchestrator.log — first real-scale performance numbers (compare subjectively against the old production runtime).
 4. Triage failures. Expected hot spots, in order:
-   - `check_calibration` / `phy_summary_plots` / `qc_plots`: first-ever exercise of the cal/monitoring plot generators — failures land as contained error blocks and feed Phase 5c (see REFACTOR_STATUS.md "Remaining");
+   - `check_calibration` / `phy_summary_plots` / `qc_plots`: first-ever exercise of the cal/monitoring plot generators — failures land as contained error blocks and feed Phase 5c;
    - pandas-3-era alias/API issues in un-exercised paths;
    - memory in `contract/build.py` on big runs (`frame_to_binned` materializes n_events×n_det arrays; if a run OOMs, chunk per key — the writer API already supports incremental writes).
    Fix on the branch, push to the fork, `git pull` on the server, rerun.
@@ -77,14 +77,14 @@ noted for upstream; muon/spm have no data).
 3. `.venv/bin/dashboard <dev-config>` (or `panel serve`) on a chosen port; from the laptop: `ssh -L 5063:localhost:<port> lngs-login` and browse. Verify: phy view uses v2 (σ bands / min-max envelopes / cadence label on the x-axis) on runs with manifests, falls back to v1 elsewhere; Histogram view works (fed by the v2 `_dist` histograms); string/sort selectors from real metadata; SC overlay if the slow-control HDF exists.
 4. Sanity-compare a couple of runs against the production dashboard.
 
-**STATUS: performance + Phase-5c pass verified** (2026-08-18): p22/r012 rerun clean against the golden snapshot — exit 0, **3 h 11 m (was 5 h 00 m)**, peak RSS **17.3 GB (was 24 GB)**, 196/200 v1 keys byte-identical and all contract keys/manifest identical. The 4 differing keys are a **pre-existing data-corruption bug now fixed**: the DataLoader path wrote uninitialised memory (denormals ~1.5e-319) for 6 detectors that lack `is_valid_bl_poly_rms_classifier`; the direct loader yields NaN. Worth raising with the collaboration — that garbage also reached the old dashboard. See REFACTOR_STATUS.md for detail.
+**STATUS: performance + Phase-5c pass verified** (2026-08-18): p22/r012 rerun clean against the golden snapshot — exit 0, **3 h 11 m (was 5 h 00 m)**, peak RSS **17.3 GB (was 24 GB)**, 196/200 v1 keys byte-identical and all contract keys/manifest identical. The 4 differing keys are a **pre-existing data-corruption bug now fixed**: the DataLoader path wrote uninitialised memory (denormals ~1.5e-319) for 6 detectors that lack `is_valid_bl_poly_rms_classifier`; the direct loader yields NaN. Worth raising with the collaboration — that garbage also reached the old dashboard.
 
 **STATUS: baseline parameters fixed (2026-08-20)**: `get_pivot` misread
 `bl_mean`/`pz_mean` as run means (one row per chunk) — root cause of the empty
 "Baseline Mean" dashboard view, present in production v1 too. Fixed with an
 explicit role per call site; aux/variation keys now carry attrs; `_dist`
 histograms percentile-ranged; new `repair_param` regenerates a parameter for
-finished runs in ~30 min; p22 r000-r013 repaired (see REFACTOR_STATUS.md).
+finished runs in ~30 min; p22 r000-r013 repaired.
 Dashboard-side y-range/menu bugs handed to the dashboard session.
 
 **STATUS: Phase 5c complete (2026-08-20)**: generators are data-only; every
@@ -93,7 +93,7 @@ shifter PDF names preserved verbatim); shelve/pickle deleted package-wide
 (sole exception: the external dataflow shelve reader); `--write-shelves`
 removed and `--plots off` now truly data-only; `plot_run` regenerates the
 full figure set in seconds. Five latent legacy bugs fixed on the way (see
-REFACTOR_STATUS.md). Unblocks the dashboard cal-trend views.
+git history). Unblocks the dashboard cal-trend views.
 
 **STATUS: classifier pivots stripped (2026-08-20)**: the v1 file's 28 QC
 classifier pivots (1.61 GB of 2.2 GB) are removed once the contract holds
@@ -111,7 +111,7 @@ before).
 per run**, contract file **1.06 -> ~0.58 GB** and ~3x faster to inflate, peak
 RSS **2.3x lower** — verified value-for-value against the previous output
 (200/200 v1 keys and all 4006 contract datasets agree to float32 epsilon).
-Root causes and fixes in REFACTOR_STATUS.md; `legend-data-monitor repack`
+Root causes and fixes are in the git history; `legend-data-monitor repack`
 migrates runs produced before the change. The p22 backfill picks the new
 layout up from r008 onward; r000–r007 were repacked.
 
