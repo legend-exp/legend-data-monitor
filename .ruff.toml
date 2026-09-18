@@ -32,7 +32,9 @@ lint.extend-ignore = [
 lint.pydocstyle.convention = "numpy"
 # flake8 only ever linted .py files, so the example notebooks keep that scope
 extend-exclude = ["notebook"]
-target-version = "py311"
+# must match requires-python: on py311 ruff rewrites timezone.utc to
+# datetime.UTC (UP017), which does not exist on 3.10
+target-version = "py310"
 src = ["src"]
 
 [lint.per-file-ignores]

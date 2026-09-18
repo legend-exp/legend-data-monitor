@@ -24,7 +24,7 @@ scanner can associate plots with the task that produced them.
 
 import logging
 import traceback
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 LOG_FORMAT = "%(asctime)sZ %(levelname)s %(name)s %(message)s"
@@ -43,7 +43,7 @@ def log_tree_root(output_folder: str, invocation_key: str | None = None) -> str:
         given.
     """
     if invocation_key is None:
-        invocation_key = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+        invocation_key = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     root = Path(output_folder) / "generated/tmp/log" / invocation_key
     root.mkdir(parents=True, exist_ok=True)
     return str(root)

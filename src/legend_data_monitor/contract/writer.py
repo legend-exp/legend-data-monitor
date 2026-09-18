@@ -7,7 +7,7 @@ ranges are exported as *flagged* ranges in the manifest instead of dropped.
 """
 
 import json
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 import h5py
@@ -280,7 +280,7 @@ def write_manifest(
     manifest = {
         "schema_version": schema.SCHEMA_VERSION,
         "package_version": package_version,
-        "created_utc": datetime.now(UTC).isoformat(),
+        "created_utc": datetime.now(timezone.utc).isoformat(),
         "period": period,
         "run": run,
         "files": files,
