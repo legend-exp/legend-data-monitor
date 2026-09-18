@@ -144,12 +144,12 @@ def retrieve_scdb(config: str, port: int, pswd: str):
     # check validity of scdb settings
     utils.check_scdb_settings(config)
 
-    # the period contract file lives beside the run directories
     run_dir = str(Path(utils.get_output_path(config)).parent)
-    output_folder = str(Path(str(Path(run_dir).parent)).parent)
+    output_folder = str(Path(run_dir).parent.parent)
     period = config["dataset"]["period"]
-    run = f"r{int(config['dataset']['runs']):03d}"
-
+    runs = utils.get_query_timerange(dataset=config["dataset"]).get("run", [])
+    if len(runs) != 1: raise errors.ConfigError("retrieve_scdb requires exactly one run in config['dataset']['runs']")
+    run = runs[0]
     # -------------------------------------------------------------------------
     # Load and save data
     # -------------------------------------------------------------------------
