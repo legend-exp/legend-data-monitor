@@ -136,3 +136,21 @@ def test_fep_gain_pdf_name(tmp_path):
 def test_missing_inputs_are_not_fatal(tmp_path):
     assert stability.plot_stability_series(str(tmp_path), PERIOD, RUN) == []
     assert stability.plot_fep_gain(str(tmp_path), PERIOD, RUN) == []
+
+
+def test_png_output_is_written(tmp_path):
+    """The png branch builds its own filename; a Path/str mix-up broke it."""
+    _write_stability_inputs(tmp_path)
+    png_dir = tmp_path / "png"
+    paths = stability.plot_stability_series(
+        str(tmp_path),
+        PERIOD,
+        RUN,
+        detector_map=_detector_map(),
+        save_pdf=False,
+        png_dir=str(png_dir),
+    )
+    pngs = [p for p in paths if p.endswith(".png")]
+    assert pngs, "no png written"
+    assert all(os.path.isfile(p) for p in pngs)
+    assert not any(p.endswith(".pdf") for p in paths)

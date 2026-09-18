@@ -56,6 +56,8 @@ def run_tasks(tasks: list, log_root: str) -> tuple[list, int]:
         )
         try:
             task.func(logger=task_log)
+        # BaseException on purpose: a task must not take the run down with it.
+        # System-exiting exceptions are re-raised immediately below.
         except BaseException as exc:
             if isinstance(exc, (KeyboardInterrupt, SystemExit)):
                 raise

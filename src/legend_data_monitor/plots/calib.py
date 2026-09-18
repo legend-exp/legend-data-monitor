@@ -383,7 +383,8 @@ def _save_figure(fig, pdf_dir, pdf_name, save_pdf, png_dir, logger, **savefig_kw
         saved.append(pdf_path)
     if png_dir is not None:
         Path(png_dir).mkdir(parents=True, exist_ok=True)
-        png_path = str((Path(png_dir) / pdf_name[: -len(".pdf")] + ".png").absolute())
+        png_name = pdf_name[: -len(".pdf")] + ".png"
+        png_path = str((Path(png_dir) / png_name).absolute())
         fig.savefig(png_path, **savefig_kwargs)
         if logger is not None:
             logs.log_saved_plot(logger, png_path)

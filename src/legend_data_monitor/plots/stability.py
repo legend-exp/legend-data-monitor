@@ -99,7 +99,8 @@ def _save_figure(fig, pdf_dir, pdf_name, save_pdf, png_dir, log, **savefig_kwarg
         saved.append(path)
     if png_dir is not None:
         Path(png_dir).mkdir(parents=True, exist_ok=True)
-        path = str((Path(png_dir) / pdf_name[:-4] + ".png").absolute())
+        png_name = pdf_name[:-4] + ".png"
+        path = str((Path(png_dir) / png_name).absolute())
         fig.savefig(path, **savefig_kwargs)
         logs.log_saved_plot(log, path)
         saved.append(path)
