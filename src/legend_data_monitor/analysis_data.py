@@ -853,7 +853,7 @@ def get_aux_df(
         first_ch = aux_data.iloc[0]["channel"]
         aux_data = aux_data[aux_data["channel"] == first_ch]
         first_timestamp = utils.unix_timestamp_to_string(
-            aux_data["datetime"].dt.to_pydatetime()[0].timestamp()
+            np.array(aux_data["datetime"].dt.to_pydatetime())[0].timestamp()
         )
         if aux_ch == "pulser01ana":
             map_file = str(

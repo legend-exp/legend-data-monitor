@@ -85,7 +85,7 @@ def plot_vs_time(
 
             parameter_array = np.array(resampled[plot_info["parameter"]])
             ax.plot(
-                resampled["datetime"].dt.to_pydatetime(),
+                np.array(resampled["datetime"].dt.to_pydatetime()),
                 parameter_array[:, None],
                 color=res_col,
                 zorder=1,
@@ -110,7 +110,7 @@ def plot_vs_time(
                 )
 
                 ax.fill_between(
-                    resampled["datetime"].dt.to_pydatetime(),
+                    np.array(resampled["datetime"].dt.to_pydatetime()),
                     resampled[plot_info["parameter"]] - new_dataframe["std"],
                     resampled[plot_info["parameter"]] + new_dataframe["std"],
                     alpha=0.25,
@@ -448,7 +448,7 @@ def plot_heatmap(
     new_df["datetime"] = pd.to_datetime(new_df["datetime"], utc=True)
     # convert to numeric values for plotting
     x_values = pd.to_numeric(
-        new_df["datetime"].dt.tz_convert("UTC").dt.to_pydatetime()
+        np.array(new_df["datetime"].dt.tz_convert("UTC").dt.to_pydatetime())
     ).values
     y_values = new_df[plot_info["parameter"]]
     # plot data
