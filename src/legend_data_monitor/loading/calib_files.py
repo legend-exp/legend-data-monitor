@@ -16,30 +16,69 @@ from ..processing.series import compute_diff
 CALIB_RUNS = utils.CALIB_RUNS
 
 
-def get_energy_key(
-    ecal_results: dict,
-) -> dict:
+def find_energy_key(ecal_results: dict) -> tuple:
     """
-    Retrieve the energy calibration results from a given dictionary.
+    Find the energy-estimator entry of a calibration dictionary.
 
-    This function searches for specific keys ('cuspEmax_ctc_runcal' or 'cuspEmax_ctc_cal') in the input `ecal_results` dictionary.
-    It returns a sub-dictionary if one of the keys is found, otherwise an empty dictionary is returned.
+    The estimators are listed in ``settings/experiment.yaml`` in order of
+    preference (run calibration before the partition one); the first one
+    present wins.
 
     Parameters
     ----------
     ecal_results : dict
         Dictionary containing energy calibration results.
-    """
-    cut_dict = {}
-    for key in ["cuspEmax_ctc_runcal", "cuspEmax_ctc_cal"]:
-        if key in ecal_results:
-            cut_dict = ecal_results[key]
-            break
-    else:
-        utils.logger.debug("No cuspEmax key")
-        return cut_dict
 
-    return cut_dict
+    Returns
+    -------
+    tuple
+        ``(key, sub_dict)`` for the estimator found, ``(None, {})`` otherwise.
+    """
+    for key in utils.EXPERIMENT["energy"]["estimators"]:
+        if key in ecal_results:
+            return key, ecal_results[key]
+    utils.logger.debug("No energy estimator key in %s", list(ecal_results)[:5])
+    return None, {}
+
+
+def get_energy_key(ecal_results: dict) -> dict:
+    """
+    Retrieve the energy calibration results from a given dictionary.
+
+    Parameters
+    ----------
+    ecal_results : dict
+        Dictionary containing energy calibration results.
+
+    Returns
+    -------
+    dict
+        The estimator's sub-dictionary, empty when none is present.
+    """
+    return find_energy_key(ecal_results)[1]
+
+
+def uncalibrated_variable(estimator: str) -> str:
+    """
+    Return the uncalibrated variable a calibration expression is written in.
+
+    ``cuspEmax_ctc_cal`` and ``cuspEmax_ctc_runcal`` are both calibrations of
+    ``cuspEmax_ctc``, which is the name their ``expression`` binds.
+
+    Parameters
+    ----------
+    estimator : str
+        Calibrated estimator key.
+
+    Returns
+    -------
+    str
+        The uncalibrated variable name.
+    """
+    for suffix in ("_runcal", "_cal"):
+        if estimator.endswith(suffix):
+            return estimator[: -len(suffix)]
+    return estimator
 
 
 @lru_cache(maxsize=None)
@@ -129,7 +168,7 @@ def extract_resolution_at_q_bb(
     if channel not in pars_dict:
         return np.nan, np.nan
 
-    result = pars_dict[channel]["results"][key_result].get("cuspEmax_ctc_cal", {})
+    result = get_energy_key(pars_dict[channel]["results"][key_result])
     eres_linear = result.get("eres_linear") or {}
     Qbb_keys = [k for k in eres_linear if "Qbb_fwhm_in_" in k]
     if not Qbb_keys:
@@ -161,12 +200,15 @@ def evaluate_fep_cal(
     if channel not in pars_dict:
         return np.nan, np.nan
 
-    ecal_results = get_energy_key(pars_dict[channel]["pars"]["operations"])
+    estimator, ecal_results = find_energy_key(pars_dict[channel]["pars"]["operations"])
+    if not ecal_results:
+        return np.nan, np.nan
     expr = ecal_results["expression"]
     params = ecal_results["parameters"]
+    variable = uncalibrated_variable(estimator)
 
-    fep_cal = eval(expr, {}, {**params, "cuspEmax_ctc": fep_peak_pos})
-    fep_cal_err = eval(expr, {}, {**params, "cuspEmax_ctc": fep_peak_pos_err})
+    fep_cal = eval(expr, {}, {**params, variable: fep_peak_pos})
+    fep_cal_err = eval(expr, {}, {**params, variable: fep_peak_pos_err})
 
     return fep_cal, fep_cal_err
 
@@ -180,13 +222,17 @@ def get_run_start_end_times(
     period: str,
     run: str,
     tier: str,
+    pulser_rawid: int | None = None,
 ):
     """
     Determine the start and end timestamps for a given run, including the special case for additional final calibration runs.
 
-    Results are cached per (tiers, period, run, tier) — the underlying LH5
-    timestamp reads are channel-independent and were previously repeated for
-    every channel.
+    The pulser fires steadily for the whole run, so its first and last
+    timestamps bracket the run better than a detector that may have been off;
+    its rawid comes from the channel map (see :func:`utils.aux_channels`).
+
+    Results are cached per (tiers, period, run, tier, channel) — the reads
+    were previously repeated for every channel.
 
     Parameters
     ----------
@@ -200,8 +246,11 @@ def get_run_start_end_times(
         Run to inspect.
     tier : str
         Tier level for the analysis ('hit', 'phy', etc.).
+    pulser_rawid : int, optional
+        Pulser rawid to read the timestamps from; the first channel in the
+        file is used when omitted.
     """
-    cache_key = (tuple(tiers), period, run, tier)
+    cache_key = (tuple(tiers), period, run, tier, pulser_rawid)
     if cache_key in _run_times_cache:
         return _run_times_cache[cache_key]
 
@@ -213,26 +262,31 @@ def get_run_start_end_times(
 
     run_files = sorted(f for f in os.listdir(folder_tier) if pattern.match(f))
 
+    if pulser_rawid is None:
+        channels = [
+            c
+            for c in lh5.ls(os.path.join(folder_tier, run_files[0]))
+            if c.startswith("ch")
+        ]
+        timestamp_key = f"{channels[0]}/dsp/timestamp"
+        utils.logger.debug("...no pulser rawid given, timing off %s", timestamp_key)
+    else:
+        timestamp_key = f"ch{pulser_rawid}/dsp/timestamp"
+
     # for when we have a calib run but zero phy runs for a given period
     if os.path.isdir(dir_path) and run not in os.listdir(dir_path):
         run_end_time = pd.to_datetime(
-            sto.read(
-                "ch1027201/dsp/timestamp", os.path.join(folder_tier, run_files[-1])
-            )[-1],
+            sto.read(timestamp_key, os.path.join(folder_tier, run_files[-1]))[-1],
             unit="s",
         )
         run_start_time = run_end_time
     else:
         run_start_time = pd.to_datetime(
-            sto.read(
-                "ch1027201/dsp/timestamp", os.path.join(folder_tier, run_files[0])
-            )[0],
+            sto.read(timestamp_key, os.path.join(folder_tier, run_files[0]))[0],
             unit="s",
         )
         run_end_time = pd.to_datetime(
-            sto.read(
-                "ch1027201/dsp/timestamp", os.path.join(folder_tier, run_files[-1])
-            )[-1],
+            sto.read(timestamp_key, os.path.join(folder_tier, run_files[-1]))[-1],
             unit="s",
         )
 
@@ -264,6 +318,7 @@ def get_calib_data_dict(
     key_result: str,
     fit: str,
     data_type: str,
+    pulser_rawid: int | None = None,
 ):
     """
     Extract calibration information for a given run and appends it to the provided dictionary.
@@ -340,7 +395,7 @@ def get_calib_data_dict(
 
     # get timestamp for additional-final cal run (only for FEP gain display)
     run_start_time, run_end_time = get_run_start_end_times(
-        sto, tiers, period, run_to_apply, tier
+        sto, tiers, period, run_to_apply, tier, pulser_rawid
     )
 
     calib_data["fep"].append(fep_gain)
@@ -454,6 +509,14 @@ def get_calib_pars(
     tiers, pars = utils.get_tiers_pars_folders(path)
 
     tier, key_result = get_tier_keyresult(tiers)
+    # the pulser brackets the run best; the channel map says which one it is.
+    # Only a hint: without reachable metadata the first channel in the file is
+    # used instead, so a mock or partial tree still works.
+    try:
+        pulser_rawid = utils.aux_channels(os.path.join(path, "inputs")).get("pulser")
+    except (FileNotFoundError, KeyError, ValueError) as exc:
+        utils.logger.debug("...no channel map for the run timing (%s)", exc)
+        pulser_rawid = None
 
     for run in run_list:
         calib_data = get_calib_data_dict(
@@ -467,6 +530,7 @@ def get_calib_pars(
             key_result,
             fit,
             data_type,
+            pulser_rawid,
         )
 
     for key, item in calib_data.items():

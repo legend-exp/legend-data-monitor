@@ -17,11 +17,8 @@ from . import errors, save_data, subsystem, utils
 
 # Parameters whose whole point is the QC columns -- the only entries that need
 # every ``is_*`` / ``*_classifier`` column the subsystem happens to carry.
-QC_PARAMETERS = {
-    "quality_cuts",
-    "geds/quality/is_not_bb_like/is_delayed_discharge",
-    "geds/quality/is_bb_like",
-}
+# Defined in settings/experiment.yaml; re-exported here for the local uses.
+QC_PARAMETERS = utils.QC_PARAMETERS
 
 
 class AnalysisData:

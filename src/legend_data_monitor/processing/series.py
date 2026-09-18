@@ -98,9 +98,9 @@ def get_dfs(phy_mtg_data: str, period: str, run_list: list, parameter: str):
         Parameter name used to construct the HDF key for loading specific datasets (e.g., 'TrapemaxCtcCal' looks for 'IsPulser_TrapemaxCtcCal').
     """
     # lists to accumulate dataframes, concatenated at the endo only
-    geds_df_cuspEmax_abs = []
-    geds_df_cuspEmax_abs_corr = []
-    puls_df_cuspEmax_abs = []
+    geds_df_abs = []
+    geds_df_abs_corr = []
+    puls_df_abs = []
 
     base_dir = os.path.join(phy_mtg_data, period)
     runs = os.listdir(base_dir)
@@ -116,13 +116,13 @@ def get_dfs(phy_mtg_data: str, period: str, run_list: list, parameter: str):
         if hdf_geds:
             geds_abs = read_if_key_exists(hdf_geds, f"IsPulser_{parameter}")
             if geds_abs is not None:
-                geds_df_cuspEmax_abs.append(geds_abs)
+                geds_df_abs.append(geds_abs)
 
             geds_puls_abs = read_if_key_exists(
                 hdf_geds, f"IsPulser_{parameter}_pulser01anaDiff"
             )
             if geds_puls_abs is not None:
-                geds_df_cuspEmax_abs_corr.append(geds_puls_abs)
+                geds_df_abs_corr.append(geds_puls_abs)
         else:
             utils.logger.debug("...hdf_geds missing in %s", r)
 
@@ -133,104 +133,59 @@ def get_dfs(phy_mtg_data: str, period: str, run_list: list, parameter: str):
         if hdf_puls:
             puls_abs = read_if_key_exists(hdf_puls, f"IsPulser_{parameter}")
             if puls_abs is not None:
-                puls_df_cuspEmax_abs.append(puls_abs)
+                puls_df_abs.append(puls_abs)
         else:
             utils.logger.debug("...hdf_puls missing in %s", r)
 
-    if (
-        not geds_df_cuspEmax_abs
-        and not geds_df_cuspEmax_abs_corr
-        and not puls_df_cuspEmax_abs
-    ):
+    if not geds_df_abs and not geds_df_abs_corr and not puls_df_abs:
         return None, None, None
     else:
         return (
             (
-                pd.concat(geds_df_cuspEmax_abs, ignore_index=False, axis=0)
-                if geds_df_cuspEmax_abs
+                pd.concat(geds_df_abs, ignore_index=False, axis=0)
+                if geds_df_abs
                 else pd.DataFrame()
             ),
             (
-                pd.concat(geds_df_cuspEmax_abs_corr, ignore_index=False, axis=0)
-                if geds_df_cuspEmax_abs_corr
+                pd.concat(geds_df_abs_corr, ignore_index=False, axis=0)
+                if geds_df_abs_corr
                 else pd.DataFrame()
             ),
             (
-                pd.concat(puls_df_cuspEmax_abs, ignore_index=False, axis=0)
-                if puls_df_cuspEmax_abs
+                pd.concat(puls_df_abs, ignore_index=False, axis=0)
+                if puls_df_abs
                 else pd.DataFrame()
             ),
         )
 
 
-def get_traptmax_tp0est(phy_mtg_data: str, period: str, run_list: list):
+def get_spike_veto_series(phy_mtg_data: str, period: str, run_list: list):
     """
-    Load and concatenate trapTmax and tp0est data from HDF files for a given period and list of runs.
+    Load the PULS01ANA series the pulser spike veto is applied on.
+
+    The veto parameter and its acceptance window live in
+    ``settings/experiment.yaml``; the series is the pulser file's
+    ``IsPulser_<parameter>`` pivot, i.e. exactly what :func:`get_dfs` returns
+    for that parameter.
 
     Parameters
     ----------
     phy_mtg_data : str
-        Path to the base directory containing monitoring HDF5 files (typically ending in `/mtg/phy`).
+        Path to the base directory containing monitoring HDF5 files.
     period : str
         Period to inspect.
     run_list : list
         List of available runs.
+
+    Returns
+    -------
+    pandas.DataFrame
+        The pulser pivot, empty when the parameter was never written.
     """
-    geds_df_trapTmax, geds_df_tp0est = [], []
-    puls_df_trapTmax, puls_df_tp0est = [], []
-
-    base_dir = os.path.join(phy_mtg_data, period)
-    for r in os.listdir(base_dir):
-        if r not in run_list:
-            continue
-        run_dir = os.path.join(base_dir, r)
-
-        # geds
-        hdf_geds = find_hdf_file(run_dir, include=["geds"], exclude=["res", "min"])
-        if hdf_geds:
-            trapTmax = read_if_key_exists(hdf_geds, "IsPulser_TrapTmax")
-            if trapTmax is not None:
-                geds_df_trapTmax.append(trapTmax)
-
-            tp0est = read_if_key_exists(hdf_geds, "IsPulser_Tp0Est")
-            if tp0est is not None:
-                geds_df_tp0est.append(tp0est)
-
-        # pulser
-        hdf_puls = find_hdf_file(
-            run_dir, include=["pulser01ana"], exclude=["res", "min"]
-        )
-        if hdf_puls:
-            trapTmax = read_if_key_exists(hdf_puls, "IsPulser_TrapTmax")
-            if trapTmax is not None:
-                puls_df_trapTmax.append(trapTmax)
-
-            tp0est = read_if_key_exists(hdf_puls, "IsPulser_Tp0Est")
-            if tp0est is not None:
-                puls_df_tp0est.append(tp0est)
-
-    return (
-        (
-            pd.concat(geds_df_trapTmax, ignore_index=False)
-            if geds_df_trapTmax
-            else pd.DataFrame()
-        ),
-        (
-            pd.concat(geds_df_tp0est, ignore_index=False)
-            if geds_df_tp0est
-            else pd.DataFrame()
-        ),
-        (
-            pd.concat(puls_df_trapTmax, ignore_index=False)
-            if puls_df_trapTmax
-            else pd.DataFrame()
-        ),
-        (
-            pd.concat(puls_df_tp0est, ignore_index=False)
-            if puls_df_tp0est
-            else pd.DataFrame()
-        ),
-    )
+    parameter = utils.EXPERIMENT["pulser_spike_veto"]["parameter"]
+    key = utils.convert_to_camel_case(parameter, "_")
+    _, _, puls_df = get_dfs(phy_mtg_data, period, run_list, key)
+    return puls_df if puls_df is not None else pd.DataFrame()
 
 
 def filter_series_by_ignore_keys(
@@ -350,149 +305,145 @@ def resample_series(series: pd.Series, resampling_time: str, mask: pd.Series):
 def get_pulser_data(
     resampling_time: str,
     period: str | list,
-    dfs: list,
+    geds_abs: pd.DataFrame,
     channel: str,
     escale: float,
+    puls_abs: pd.DataFrame | None = None,
+    spike_veto: pd.DataFrame | None = None,
     variations=False,
 ) -> dict:
     """
-    Return a dictionary of geds and pulser filtered dataframes for which a time resampling is performed.
+    Return resampled geds and pulser series, and the pulser-corrected geds one.
 
     Parameters
     ----------
     resampling_time : str
-        Resampling time, eg '1HH' or '10T'.
+        Resampling time, eg '1h' or '10min'.
     period : str | list
         Period or list of periods to inspect.
-    dfs : list
-        List of dataframes for geds and pulser events.
+    geds_abs : pandas.DataFrame
+        Absolute values of the inspected parameter, geds x time.
     channel : str
         Channel to inspect.
     escale : float
         Scaling factor used to compute relative differences in gain and calibration constant.
+    puls_abs : pandas.DataFrame, optional
+        The same parameter for PULS01ANA (single column); without it no
+        pulser-corrected series is produced.
+    spike_veto : pandas.DataFrame, optional
+        PULS01ANA series the spike veto is applied on (see
+        :func:`get_spike_veto_series`); without it no spike veto is applied.
     variations : bool
         True if you want to retrieve % variations (default: False).
+
+    Returns
+    -------
+    dict
+        ``ged`` / ``pul`` / ``diff``, each with ``raw``, ``rawdiff``,
+        ``kevdiff``, ``kevdiff_av`` and ``kevdiff_std``.
     """
     # geds
-    ser_ged_cusp = dfs[0][channel].sort_index()
-    ser_ged_cusp = filter_by_period(ser_ged_cusp, period)
-    ser_ged_cusp = ser_ged_cusp[
-        ~ser_ged_cusp.index.duplicated(keep="first")
-    ]  # remove duplicates
-    ser_pul_tp0est_new = pd.DataFrame()
+    ser_ged = geds_abs[channel].sort_index()
+    ser_ged = filter_by_period(ser_ged, period)
+    ser_ged = ser_ged[~ser_ged.index.duplicated(keep="first")]  # remove duplicates
+    ser_veto_kept = pd.DataFrame()
 
-    if ser_ged_cusp.empty:
+    if ser_ged.empty:
         utils.logger.debug("...geds series is empty after filtering")
         return None
 
-    # check if these dfs are empty or not - if not, then remove spikes
-    if isinstance(dfs[6], pd.DataFrame) and not dfs[6].empty:
-        ser_pul_tp0est = dfs[6][1027203].sort_index()
-        ser_pul_tp0est = filter_by_period(ser_pul_tp0est, period)
-        ser_pul_tp0est = ser_pul_tp0est[
-            ~ser_pul_tp0est.index.duplicated(keep="first")
-        ]  # remove duplicates
+    # drop pulser spikes, if the veto series was loaded
+    if isinstance(spike_veto, pd.DataFrame) and not spike_veto.empty:
+        ser_veto = spike_veto.iloc[:, 0].sort_index()  # PULS01ANA: one column
+        ser_veto = filter_by_period(ser_veto, period)
+        ser_veto = ser_veto[~ser_veto.index.duplicated(keep="first")]
 
-        low_lim = 4.8e4
-        upp_lim = 5.0e4
-        mask = (ser_pul_tp0est > low_lim) & (ser_pul_tp0est < upp_lim)
-        ser_pul_tp0est_new = ser_pul_tp0est[mask]
+        low_lim, upp_lim = utils.EXPERIMENT["pulser_spike_veto"]["window"]
+        ser_veto_kept = ser_veto[(ser_veto > low_lim) & (ser_veto < upp_lim)]
 
-        if not ser_pul_tp0est_new.empty:
-            valid_idx = ser_ged_cusp.index.intersection(ser_pul_tp0est_new.index)
-            ser_ged_cusp = ser_ged_cusp.reindex(valid_idx)
+        if not ser_veto_kept.empty:
+            valid_idx = ser_ged.index.intersection(ser_veto_kept.index)
+            ser_ged = ser_ged.reindex(valid_idx)
 
-    # if before, potential mismatches with ser_pul_tp0est
-    ser_ged_cusp = ser_ged_cusp.dropna()
+    # if before, potential mismatches with the veto series
+    ser_ged = ser_ged.dropna()
     # compute average over the first 10% of elements
-    n_elements = max(int(len(ser_ged_cusp) * 0.10), 1)
-    ged_cusp_av = np.nanmean(ser_ged_cusp.iloc[:n_elements])
-    if np.isnan(ged_cusp_av):
+    n_elements = max(int(len(ser_ged) * 0.10), 1)
+    ged_av = np.nanmean(ser_ged.iloc[:n_elements])
+    if np.isnan(ged_av):
         utils.logger.debug("...the geds average is NaN")
         return None
 
-    ser_ged_cuspdiff, ser_ged_cuspdiff_kev = compute_diff_and_rescaling(
-        ser_ged_cusp, ged_cusp_av, escale, variations
+    ser_ged_diff, ser_ged_diff_kev = compute_diff_and_rescaling(
+        ser_ged, ged_av, escale, variations
     )
 
     # hour counts masking
-    mask = ser_ged_cusp.resample(resampling_time).count() > 0
+    mask = ser_ged.resample(resampling_time).count() > 0
 
     # resample geds series
-    ged_cusp_hr_av, ged_cusp_hr_std = resample_series(
-        ser_ged_cuspdiff_kev, resampling_time, mask
-    )
-    ged_index = ged_cusp_hr_av.index
+    ged_hr_av, ged_hr_std = resample_series(ser_ged_diff_kev, resampling_time, mask)
+    ged_index = ged_hr_av.index
 
     # pulser series
-    ser_pul_cusp = ser_pul_cuspdiff = ser_pul_cuspdiff_kev = pul_cusp_hr_av = (
-        pul_cusp_hr_std
-    ) = None
-    ged_cusp_corr = ged_cusp_corr_kev = ged_cusp_cor_hr_av = ged_cusp_cor_hr_std = None
+    ser_pul = ser_pul_diff = ser_pul_diff_kev = pul_hr_av = pul_hr_std = None
+    ged_corr = ged_corr_kev = ged_cor_hr_av = ged_cor_hr_std = None
     # ...if pulser is available:
-    if not dfs[2].empty:
-        ser_pul_cusp = dfs[2][1027203].sort_index()
-        ser_pul_cusp = ser_pul_cusp[
-            ~ser_pul_cusp.index.duplicated(keep="first")
-        ]  # remove duplicates
-        ser_pul_cusp = filter_by_period(ser_pul_cusp, period)
+    if isinstance(puls_abs, pd.DataFrame) and not puls_abs.empty:
+        ser_pul = puls_abs.iloc[:, 0].sort_index()  # PULS01ANA: one column
+        ser_pul = ser_pul[~ser_pul.index.duplicated(keep="first")]  # remove duplicates
+        ser_pul = filter_by_period(ser_pul, period)
 
         # pulser average and diffs
-        if not ser_pul_cusp.empty:
-            # check if these dfs are empty or not - if not, then remove spikes
-            if isinstance(dfs[6], pd.DataFrame) and not dfs[6].empty:
-                if not ser_pul_tp0est_new.empty:
-                    valid_idx = ser_pul_cusp.index.intersection(
-                        ser_pul_tp0est_new.index
-                    )
-                    ser_pul_cusp = ser_pul_cusp.reindex(valid_idx)
+        if not ser_pul.empty:
+            if not ser_veto_kept.empty:
+                valid_idx = ser_pul.index.intersection(ser_veto_kept.index)
+                ser_pul = ser_pul.reindex(valid_idx)
 
-            # if before, potential mismatches with ser_pul_tp0est
-            ser_pul_cusp = ser_pul_cusp.dropna()
-            n_elements_pul = max(int(len(ser_pul_cusp) * 0.10), 1)
-            pul_cusp_av = np.nanmean(ser_pul_cusp.iloc[:n_elements_pul])
-            ser_pul_cuspdiff, ser_pul_cuspdiff_kev = compute_diff_and_rescaling(
-                ser_pul_cusp, pul_cusp_av, escale, variations
+            # if before, potential mismatches with the veto series
+            ser_pul = ser_pul.dropna()
+            n_elements_pul = max(int(len(ser_pul) * 0.10), 1)
+            pul_av = np.nanmean(ser_pul.iloc[:n_elements_pul])
+            ser_pul_diff, ser_pul_diff_kev = compute_diff_and_rescaling(
+                ser_pul, pul_av, escale, variations
             )
 
-            pul_cusp_hr_av, pul_cusp_hr_std = resample_series(
-                ser_pul_cuspdiff_kev, resampling_time, mask
+            pul_hr_av, pul_hr_std = resample_series(
+                ser_pul_diff_kev, resampling_time, mask
             )
-            pul_cusp_hr_av = pul_cusp_hr_av.reindex(ged_index)
-            pul_cusp_hr_std = pul_cusp_hr_std.reindex(ged_index)
+            pul_hr_av = pul_hr_av.reindex(ged_index)
+            pul_hr_std = pul_hr_std.reindex(ged_index)
 
             # corrected GED
-            common_index = ser_ged_cuspdiff.index.intersection(ser_pul_cuspdiff.index)
-            ged_cusp_corr = (
-                ser_ged_cuspdiff[common_index] - ser_pul_cuspdiff[common_index]
+            common_index = ser_ged_diff.index.intersection(ser_pul_diff.index)
+            ged_corr = ser_ged_diff[common_index] - ser_pul_diff[common_index]
+            ged_corr_kev = ged_corr * escale
+            ged_cor_hr_av, ged_cor_hr_std = resample_series(
+                ged_corr_kev, resampling_time, mask
             )
-            ged_cusp_corr_kev = ged_cusp_corr * escale
-            ged_cusp_cor_hr_av, ged_cusp_cor_hr_std = resample_series(
-                ged_cusp_corr_kev, resampling_time, mask
-            )
-            ged_cusp_cor_hr_av = ged_cusp_cor_hr_av.reindex(ged_index)
-            ged_cusp_cor_hr_std = ged_cusp_cor_hr_std.reindex(ged_index)
+            ged_cor_hr_av = ged_cor_hr_av.reindex(ged_index)
+            ged_cor_hr_std = ged_cor_hr_std.reindex(ged_index)
 
     return {
         "ged": {
-            "cusp": ser_ged_cusp,
-            "cuspdiff": ser_ged_cuspdiff,
-            "cuspdiff_kev": ser_ged_cuspdiff_kev,
-            "kevdiff_av": ged_cusp_hr_av,
-            "kevdiff_std": ged_cusp_hr_std,
+            "raw": ser_ged,
+            "rawdiff": ser_ged_diff,
+            "kevdiff": ser_ged_diff_kev,
+            "kevdiff_av": ged_hr_av,
+            "kevdiff_std": ged_hr_std,
         },
-        "pul_cusp": {
-            "raw": ser_pul_cusp,
-            "rawdiff": ser_pul_cuspdiff,
-            "kevdiff": ser_pul_cuspdiff_kev,
-            "kevdiff_av": pul_cusp_hr_av,
-            "kevdiff_std": pul_cusp_hr_std,
+        "pul": {
+            "raw": ser_pul,
+            "rawdiff": ser_pul_diff,
+            "kevdiff": ser_pul_diff_kev,
+            "kevdiff_av": pul_hr_av,
+            "kevdiff_std": pul_hr_std,
         },
         "diff": {
             "raw": None,
-            "rawdiff": ged_cusp_corr,
-            "kevdiff": ged_cusp_corr_kev,
-            "kevdiff_av": ged_cusp_cor_hr_av,
-            "kevdiff_std": ged_cusp_cor_hr_std,
+            "rawdiff": ged_corr,
+            "kevdiff": ged_corr_kev,
+            "kevdiff_av": ged_cor_hr_av,
+            "kevdiff_std": ged_cor_hr_std,
         },
     }

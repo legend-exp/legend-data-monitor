@@ -414,6 +414,52 @@ r012, so array records attach no plots elsewhere.
   consumers were blind to the SPE keys *and* to the phase-S2 LAr `_dist` keys.
   `contract.build.refresh_manifest()` re-inventories from the files, and both
   post-build writers call it. All 14 p22 manifests rebuilt: 69 spms keys each.
+## De-hardcoding pass (2026-09-18)
+
+Review of the split PRs found the same shape of problem in several places:
+L200 constants and one estimator's name inlined across modules. Two rules now:
+**derive from the production metadata where it already says it**, and keep the
+rest in one packaged file, `settings/experiment.yaml`.
+
+- **Aux channels are derived, never configured.** `utils.aux_channels` reads
+  the channel map: `puls` with/without the `ANA` suffix gives pulser and
+  pulser01ana, the non-dummy `auxs` entry the muon, the `bsln` entry FCbsln.
+  `subsystem.py` selects the same way, so the four rawids (1027200-1027203)
+  are gone from the source. Verified identical on p22.
+- **Energy estimator and peaks in settings.** `find_energy_key` returns which
+  estimator matched and `uncalibrated_variable` derives the expression
+  variable from it, so `cuspEmax_ctc` is no longer written down either. Peak
+  energies, their pk_fits search windows, the FEP hit-tier window and the
+  escale band widths come from the same file.
+- **Bug found and fixed**: `extract_resolution_at_q_bb` asked for
+  `cuspEmax_ctc_cal` by name, so a par file carrying only the *run*
+  calibration returned NaN resolutions silently. It now goes through the
+  estimator lookup like everything else.
+- **Dead code found and removed**: `get_traptmax_tp0est` loaded four frames
+  per run of which callers read exactly one, and its trapTmax key was
+  misspelled (`IsPulser_TrapTmax` against the `IsPulser_Traptmax` the
+  camel-caser writes), so that half never loaded anything. Its own test passed
+  only because it wrote the same misspelling it read. Replaced by
+  `get_spike_veto_series`, which reads the one series the spike veto needs;
+  the veto parameter and window are settings.
+- `processing/series.py` no longer names itself after one estimator
+  (`get_pulser_data` takes explicit frames instead of a 7-element positional
+  list, and its `ged`/`pul`/`diff` sub-dicts all use raw/rawdiff/kevdiff).
+  The published `pul_cusp/...` period keys are unchanged.
+- QC pseudo-parameters, headline PNG keys and the production slow-control
+  list were each copy-pasted or inlined; all three now live in settings.
+
+**YAML/JSON**: the run info file is named `.yaml` and was written with
+`json.dump` — now written as YAML. The issues JSONL stays JSON (frozen
+auto-giorgio contract, and line-appendable records are the point), as do the
+JSON strings inside HDF5 attrs.
+
+*Proposal, not yet done*: the run manifest could move to YAML too. Every JSON
+document is valid YAML, so the safe order is (1) switch all readers -- lmon
+and the dashboard's `contract_reader` -- to `yaml.safe_load`, which reads both
+formats, (2) release the dashboard, (3) flip the writer and the
+`-manifest.json` name. Needs coordination with legend-monitor-dashboard, so it
+is deliberately left out of this pass.
 
 ## Muon veto (pmts) contract flavour (2026-08-31)
 
