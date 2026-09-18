@@ -12,7 +12,7 @@ def test_get_dfs_with_valid_files(tmp_path):
     # create directory structure
     phy_mtg_data = tmp_path
     period = "p01"
-    run = "run001"
+    run = "r001"
     run_dir = phy_mtg_data / period / run
     run_dir.mkdir(parents=True)
 
@@ -38,7 +38,7 @@ def test_get_dfs_with_valid_files(tmp_path):
 def test_get_dfs_missing_geds_file(tmp_path):
     phy_mtg_data = tmp_path
     period = "p01"
-    run = "run001"
+    run = "r001"
     run_dir = phy_mtg_data / period / run
     run_dir.mkdir(parents=True)
 
@@ -50,7 +50,7 @@ def test_get_dfs_missing_geds_file(tmp_path):
 def test_get_dfs_runs_not_avail(tmp_path):
     phy_mtg_data = tmp_path
     period = "p01"
-    run = "run001"
+    run = "r001"
     run_dir = phy_mtg_data / period / run
     run_dir.mkdir(parents=True)
 
@@ -73,7 +73,7 @@ def test_get_dfs_skip_non_listed_runs(tmp_path):
 def test_geds_pulser_correction_and_empty_pulser(tmp_path):
     phy_mtg_data = tmp_path
     period = "p01"
-    run = "run001"
+    run = "r001"
     run_dir = phy_mtg_data / period / run
     run_dir.mkdir(parents=True)
 

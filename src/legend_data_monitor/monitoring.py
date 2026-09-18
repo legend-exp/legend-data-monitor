@@ -331,6 +331,10 @@ def qc_and_evt_summary_plots(
             glob.glob(f"{auto_dir_path}/generated/tier/pet/phy/{period}/{run}/*.lh5")
         )
 
+    if not evt_files_phy:
+        utils.logger.info("...no evt/pet data available, skip!")
+        return
+
     ged_pul = read_as(
         "evt/coincident", evt_files_phy, "ak", field_mask=["geds", "puls"]
     )
