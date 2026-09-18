@@ -3,6 +3,7 @@ from unittest.mock import patch
 import pytest
 from freezegun import freeze_time
 
+from legend_data_monitor import errors
 from legend_data_monitor.utils import get_query_timerange
 
 
@@ -49,7 +50,7 @@ def test_get_query_timerange_invalid_date_format(caplog):
 
 
 def test_get_query_timerange_invalid_run_type(caplog):
-    with pytest.raises(SystemExit):
+    with pytest.raises(errors.ConfigError):
         get_query_timerange(runs=["not_an_int"])
 
 

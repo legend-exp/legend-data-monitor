@@ -1,3 +1,8 @@
+# Subsystem plot configuration used by auto_run (production parameter set).
+# Recovered verbatim 2026-08-14 from the live LNGS production deployment
+# (/data1/users/calgaro/legend-data-monitor, commit g5e91c04e5); QC runs via the
+# special 'quality_cuts' parameter with qc_flags/qc_classifiers switches, and the
+# classifier list self-derives from the production hit tier config at load time.
 geds:
   "Baselines (dsp/baseline) in pulser events":
     parameters: baseline
@@ -109,4 +114,3 @@ geds:
     event_type: FCbsln
     qc_flags: false
     qc_classifiers: true
-

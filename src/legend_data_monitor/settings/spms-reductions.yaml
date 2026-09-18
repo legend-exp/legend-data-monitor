@@ -1,0 +1,17 @@
+# Per-event scalars derived at load time from the ragged SiPM fields
+# (VectorOfVectors over pulses in the event window), so that everything
+# downstream keeps seeing one float per event.
+#   fields : ragged lh5 fields read for the reduction (first = values, second = mask)
+#   op     : count_true | sum_masked | max_masked | min_masked
+n_pulses:
+  fields: [is_valid_hit]
+  op: count_true
+pe_sum:
+  fields: [energy_in_pe, is_valid_hit]
+  op: sum_masked
+pe_max:
+  fields: [energy_in_pe, is_valid_hit]
+  op: max_masked
+first_trigger_ns:
+  fields: [trigger_pos, is_valid_hit]
+  op: min_masked

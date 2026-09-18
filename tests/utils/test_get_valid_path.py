@@ -1,33 +1,27 @@
+"""get_valid_path falls back across the processed tiers.
+
+Uses real directories rather than patching the filesystem API, so the test
+pins the behaviour instead of the implementation.
+"""
+
 import pytest
 
-from legend_data_monitor import utils
+from legend_data_monitor import errors, utils
 
 
-def test_base_path_exists(monkeypatch):
-    monkeypatch.setattr("os.path.exists", lambda path: path == "/valid/path/dsp")
-
-    result = utils.get_valid_path("/valid/path/dsp")
-    assert result == "/valid/path/dsp"
-
-
-def test_fallback_path_exists(monkeypatch):
-    def fake_exists(path):
-        if path == "/valid/path/dsp":
-            return False
-        elif path == "/valid/path/psp":
-            return True
-        return False
-
-    monkeypatch.setattr("os.path.exists", fake_exists)
-
-    result = utils.get_valid_path("/valid/path/dsp")
-    assert result == "/valid/path/psp"
+def test_base_path_exists(tmp_path):
+    dsp = tmp_path / "generated/tier/dsp"
+    dsp.mkdir(parents=True)
+    assert utils.get_valid_path(str(dsp)) == str(dsp)
 
 
-def test_no_valid_path(monkeypatch, caplog):
-    monkeypatch.setattr("os.path.exists", lambda path: False)
+def test_fallback_path_exists(tmp_path):
+    (tmp_path / "generated/tier/psp").mkdir(parents=True)
+    dsp = str(tmp_path / "generated/tier/dsp")
+    assert utils.get_valid_path(dsp) == str(tmp_path / "generated/tier/psp")
 
-    with pytest.raises(SystemExit):
-        utils.get_valid_path("/invalid/path/dsp")
 
+def test_no_valid_path(tmp_path, caplog):
+    with pytest.raises(errors.ConfigError):
+        utils.get_valid_path(str(tmp_path / "generated/tier/dsp"))
     assert "The path of dsp/hit/evt/psp/pht/pet/skm files is not valid" in caplog.text

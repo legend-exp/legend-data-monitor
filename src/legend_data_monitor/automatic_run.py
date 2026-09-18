@@ -1,14 +1,20 @@
 import glob
 import importlib.resources
-import os
 import re
 from pathlib import Path
 
 import matplotlib.pyplot as plt
 import yaml
 
-from . import calibration, core, monitoring, utils
-from .excel.core import generate_dashboard
+from . import calibration, core, errors, logs, monitoring, repack, tasks, utils
+from .contract import build as contract_build
+from .contract import reader as contract_reader
+from .contract import schema as contract_schema
+from .plots import calib as calib_plots
+from .plots import qc as qc_plots_mod
+from .plots import stability as stability_plots
+from .plots import summary as summary_plots_mod
+from .plots import timeseries as contract_plots
 
 
 def auto_run(
@@ -26,14 +32,28 @@ def auto_run(
     save_pdf,
     escale_val,
     data_type,
+    prod_root=None,
+    render_plots=True,
 ):
-    """Inspect LEGEND HDF5 (LH5) processed data (and Slow Control data from lngs-login cluster) for a specific period and run (if specified; otherwise the latest being processed are used); plots and summary files are saved; automatic alert emails are sent."""
-    auto_dir = (
-        "/global/cfs/cdirs/m2676/data/lngs/l200/public/prodenv/prod-blind/"
-        if cluster == "nersc"
-        else "/data2/public/prodenv/prod-blind/"
-    )
-    auto_dir_path = os.path.join(auto_dir, ref_version)
+    """Inspect LEGEND HDF5 (LH5) processed data (and Slow Control data from lngs-login cluster) for a specific period and run (if specified; otherwise the latest being processed are used) and save plots and summary files.
+
+    The stages run as isolated tasks with per-task log files under
+    ``<output>/<ref_version>/generated/tmp/log/<timestamp>/`` (see ``logs``);
+    a failing task does not stop the remaining ones. Returns the exit code
+    for the CLI (0 ok, 1 at least one task failed).
+
+    ``prod_root`` overrides the cluster-mapped production root (useful for
+    local/mock trees); by default the root is derived from ``cluster``.
+    """
+    if prod_root is not None:
+        auto_dir = prod_root
+    else:
+        auto_dir = (
+            "/global/cfs/cdirs/m2676/data/lngs/l200/public/prodenv/prod-blind/"
+            if cluster == "nersc"
+            else "/data2/public/prodenv/prod-blind/"
+        )
+    auto_dir_path = str(Path(auto_dir) / ref_version)
     found = False
     for tier in [
         "hit",
@@ -48,20 +68,23 @@ def auto_run(
         "bkg",
         "tst",
     ]:
-        search_directory = os.path.join(
-            auto_dir_path, "generated/tier", tier, data_type
+        search_directory = str(
+            Path(auto_dir_path) / "generated/tier" / tier / data_type
         )
-        if os.path.isdir(search_directory):
+        if Path(search_directory).is_dir():
             found = True
             utils.logger.debug(f"Valid folder: {search_directory}")
             break
     if found is False:
-        utils.logger.debug(f"No valid folder {search_directory} found. Exiting.")
-        exit()
+        raise errors.ConfigError(
+            f"no valid tier folder found under {auto_dir_path} for '{data_type}'"
+        )
 
     def search_latest_folder(my_dir):
         directories = [
-            d for d in os.listdir(my_dir) if os.path.isdir(os.path.join(my_dir, d))
+            d
+            for d in [p.name for p in Path(my_dir).iterdir()]
+            if Path(str(Path(my_dir) / d)).is_dir()
         ]
         directories.sort(key=lambda x: Path(my_dir, x).stat().st_ctime)
         return directories[-1]
@@ -70,21 +93,19 @@ def auto_run(
     period = (
         search_latest_folder(search_directory) if input_period is None else input_period
     )
-    search_directory = os.path.join(search_directory, period)
-    if not os.path.isdir(search_directory):
-        utils.logger.error(f"Period directory does not exist: {search_directory}")
-        return
+    search_directory = str(Path(search_directory) / period)
+    if not Path(search_directory).is_dir():
+        raise errors.ConfigError(f"period directory does not exist: {search_directory}")
 
     # Run to monitor
     run = search_latest_folder(search_directory) if input_run is None else input_run
-    source_dir = os.path.join(search_directory, run)
-    if not os.path.isdir(source_dir):
-        utils.logger.error(f"Run directory does not exist: {source_dir}")
-        return
+    source_dir = str(Path(search_directory) / run)
+    if not Path(source_dir).is_dir():
+        raise errors.ConfigError(f"run directory does not exist: {source_dir}")
     utils.logger.info(f"You are inspecting {period}-{run}")
 
     # ===========================================================================================
-    # START OF THE ANALYSIS
+    # Configuration for the individual tasks
     # ===========================================================================================
 
     # define slow control dict
@@ -100,22 +121,16 @@ def auto_run(
         },
         "saving": "overwrite",
         "slow_control": {
-            "parameters": [
-                "DaqLeft-Temp1",
-                "DaqLeft-Temp2",
-                "DaqRight-Temp1",
-                "DaqRight-Temp2",
-                "RREiT",
-                "RRNTe",
-                "RRSTe",
-                "ZUL_T_RR",
-            ]
+            "parameters": list(utils.EXPERIMENT["slow_control_parameters"])
         },
     }
 
     pkg = importlib.resources.files("legend_data_monitor")
-    with open(pkg / "settings" / "geds-dict.yaml") as f:
-        geds_dict = yaml.load(f, Loader=yaml.CLoader)
+    # one plot dictionary per subsystem; each produces its own v1 + contract file
+    subsystems_dict = {}
+    for name in ("geds-dict.yaml", "spms-dict.yaml", "pmts-dict.yaml"):
+        with open(pkg / "settings" / name) as f:
+            subsystems_dict |= yaml.load(f, Loader=yaml.CLoader)
 
     # define geds dict
     my_config = {
@@ -129,243 +144,554 @@ def auto_run(
             "runs": int(run.split("r")[-1]),
         },
         "saving": "append",
-        "subsystems": geds_dict,
+        "subsystems": subsystems_dict,
     }
 
+    phy_folder = str(
+        Path(output_folder) / ref_version / "generated/plt/hit" / data_type
+    )
+    qcp_path = str(
+        Path(phy_folder) / period / run / f"l200-{period}-{run}-qcp_summary.yaml"
+    )
+    Path(str(Path(phy_folder) / period / run / "mtg/pdf")).mkdir(
+        parents=True, exist_ok=True
+    )
+
     # ===========================================================================================
-    # Check calibration stability and create summary files
+    # Detect not-yet-analyzed files (rsync bookkeeping)
     # ===========================================================================================
 
-    phy_folder = os.path.join(
-        output_folder, ref_version, "generated/plt/hit", data_type
+    rsync_path = str(
+        Path(output_folder) / ref_version / "generated" / "tmp" / "mtg" / period / run
     )
-    qcp_path = os.path.join(
-        phy_folder, period, run, f"l200-{period}-{run}-qcp_summary.yaml"
-    )
-    os.makedirs(os.path.join(phy_folder, period, run, "mtg/pdf"), exist_ok=True)
-    if _qcp_file_is_populated(qcp_path, "cal"):
-        pass
-    else:
+    Path(rsync_path).mkdir(parents=True, exist_ok=True)
+    timestamp_file = str(Path(rsync_path) / "last_checked_timestamp.txt")
+
+    last_checked = None
+    if Path(timestamp_file).exists():
+        with open(timestamp_file) as file:
+            last_checked = file.read().strip()
+
+    current_files = [p.name for p in Path(source_dir).iterdir()]
+    new_files = []
+    for file in current_files:
+        file_path = str(Path(source_dir) / file)
+        current_timestamp = Path(file_path).stat().st_mtime
+        if last_checked is None or current_timestamp > float(last_checked):
+            new_files.append(file)
+
+    if new_files:
+        # keep only files with correct ending (discard ones still under processing)
+        new_files = sorted(f for f in new_files if len(re.findall(r"\d+", f)) == 6)
+
+    last_cycle = sorted(current_files)[-1].split("-")[-2] if current_files else None
+
+    # no phy entries yet means the monitoring plots never ran for this run, so
+    # redo them even when no new files arrived
+    remonitor = not _qcp_file_is_populated(qcp_path, "phy")
+
+    # ===========================================================================================
+    # Task definitions
+    # ===========================================================================================
+
+    def task_check_calibration(logger=None):
+        if _qcp_file_is_populated(qcp_path, "cal"):
+            utils.logger.info("...qcp summary already populated, skipping")
+            return
         utils.logger.info("...inspecting calibration data!")
         check_calib(
             auto_dir_path=auto_dir_path,
             output_folder=phy_folder,
             period=period,
             current_run=run,
-            pswd_email=pswd_email,
             data_type=data_type,
             partition=partition,
             save_pdf=save_pdf,
+            render=render_plots,
         )
+        utils.logger.info("...done!")
 
-    # check for rerunning monitpring plots; data loading will be skipped if no new data were found
-    remonitor = not _qcp_file_is_populated(qcp_path, "phy")
-
-    # ===========================================================================================
-    # Get not-analyzed files
-    # ===========================================================================================
-
-    # File to store the timestamp of the last check
-    rsync_path = os.path.join(
-        output_folder, ref_version, "generated", "tmp", "mtg", period, run
-    )
-    os.makedirs(rsync_path, exist_ok=True)
-    timestamp_file = os.path.join(rsync_path, "last_checked_timestamp.txt")
-
-    # Read the last checked timestamp
-    last_checked = None
-    if os.path.exists(timestamp_file):
-        with open(timestamp_file) as file:
-            last_checked = file.read().strip()
-
-    # Get the current timestamp
-    if not os.path.isdir(source_dir):
-        utils.logger.debug(f"Error: folder '{source_dir}' does not exist.")
-        exit()
-    else:
-        utils.logger.debug(f"Found folder {source_dir}")
-    current_files = os.listdir(source_dir)
-    new_files = []
-
-    # Compare the timestamps of files and find new files
-    last_cycle = sorted(current_files)[-1].split("-")[-2]
-    for file in current_files:
-        file_path = os.path.join(source_dir, file)
-        current_timestamp = os.path.getmtime(file_path)
-        if last_checked is None or current_timestamp > float(last_checked):
-            new_files.append(file)
-
-    # If new files are found, check if they are ok or not
-    if new_files:
-        pattern = r"\d+"
-        correct_files = []
-
-        for new_file in new_files:
-            matches = re.findall(pattern, new_file)
-            # get only files with correct ending (and discard the ones that are still under processing)
-            if len(matches) == 6:
-                correct_files.append(new_file)
-
-        new_files = correct_files
-    new_files = sorted(new_files)
-
-    if new_files:
+    def task_subsystem_plots(logger=None):
         utils.logger.info(f"New files found: {' '.join(new_files)}")
-
-        # create the file containing the keys with correct format to be later used by legend-data-monitor (it must be created every time with the new keys; NOT APPEND)
-        utils.logger.debug("Creating the file containing the keys to inspect...")
-        with open(os.path.join(rsync_path, "new_keys.filekeylist"), "w") as f:
+        # create the file containing the keys with correct format to be later
+        # used by legend-data-monitor (recreated every time; NOT append)
+        keys_file = str(Path(rsync_path) / "new_keys.filekeylist")
+        with open(keys_file, "w") as f:
             for new_file in new_files:
-                new_file = new_file.split("-tier")[0]
-                f.write(new_file + "\n")
-        utils.logger.debug("...done!")
+                f.write(new_file.split("-tier")[0] + "\n")
 
-        # run the plot production
-        utils.logger.debug("Running the generation of plots...")
-        keys_file = os.path.join(rsync_path, "new_keys.filekeylist")
-
-        # read all lines from the original file
         with open(keys_file) as f:
-            lines = f.readlines()
-        num_lines = len(lines)
+            key_lines = f.readlines()
+        num_lines = len(key_lines)
 
         if num_lines > chunk_size:
             # split lines into chunks and write to multiple files
             for idx, i in enumerate(range(0, num_lines, chunk_size), start=1):
-                chunk = lines[i : i + chunk_size]
-                output_file = os.path.join(
-                    rsync_path, f"new_keys_part_{i // chunk_size + 1}.filekeylist"
+                chunk = key_lines[i : i + chunk_size]
+                output_file = str(
+                    Path(rsync_path)
+                    / f"new_keys_part_{i // chunk_size + 1}.filekeylist"
                 )
-
                 with open(output_file, "w") as out_f:
                     out_f.writelines(chunk)
-
                 total_parts = (num_lines + chunk_size - 1) // chunk_size
                 utils.logger.debug(
                     f"[{idx}/{total_parts}] Created file: {output_file} with {len(chunk)} lines."
                 )
-                utils.logger.debug(
-                    "...running command for generating hdf monitoring files"
+                core.auto_control_plots(
+                    my_config, output_file, "", {}, render=render_plots
                 )
-                core.auto_control_plots(my_config, output_file, "", {})
-                plt.close("all")  # close all figures
+                plt.close("all")
         else:
             utils.logger.debug(f"... file has {num_lines} lines. No need to split.")
-            utils.logger.debug("...running command for generating hdf monitoring files")
-            core.auto_control_plots(my_config, keys_file, "", {})
+            core.auto_control_plots(my_config, keys_file, "", {}, render=render_plots)
 
-        utils.logger.debug("...done!")
-
-        # compute resampling + info yaml
-        utils.logger.debug("Resampling outputs...")
-        files_folder = os.path.join(output_folder, ref_version)
+    def task_build_monitoring_hdf(logger=None):
+        files_folder = str(Path(output_folder) / ref_version)
         monitoring.build_new_files(files_folder, period, run, data_type=data_type)
-        utils.logger.debug("...done!")
-
-        # ===========================================================================================
-        # Analyze Slow Control data
-        # ===========================================================================================
-        if cluster == "lngs" and get_sc is True:
-            try:
-                utils.logger.debug("Retrieving Slow Control data...")
-                core.retrieve_scdb(scdb, port, pswd)
-                utils.logger.debug("...SC done!")
-            except Exception as e:
-                utils.logger.error(f"Failed to retrieve Slow Control data: {e}")
-
-    if new_files or remonitor:
-        # ===========================================================================================
-        # Generate Monitoring Summary Plots
-        # ===========================================================================================
-        mtg_folder = os.path.join(
-            output_folder, ref_version, "generated/plt/hit", data_type
+        contract_build.build_all_contract_files(
+            files_folder,
+            period,
+            run,
+            metadata_path=str(Path(auto_dir_path) / "inputs"),
+            data_type=data_type,
         )
-        os.makedirs(mtg_folder, exist_ok=True)
-        utils.logger.info(f"Folder {mtg_folder} ensured")
+        monitoring.write_spms_production_keys(
+            phy_folder,
+            period,
+            run,
+            auto_dir_path,
+            start_key=utils.get_start_key(auto_dir_path, data_type, period, run),
+            data_type=data_type,
+        )
 
-        # define dataset depending on the (latest) monitored period/run
-        avail_runs = sorted(os.listdir(os.path.join(mtg_folder, period)))
+    def task_lar_summary(logger=None):
+        """Summarise the LAr veto performance of the run from the evt tier (~20 s)."""
+        evt_dir = str(
+            Path(auto_dir_path) / "generated/tier/evt" / data_type / period / run
+        )
+        files = sorted(glob.glob(str(Path(evt_dir) / "*.lh5")))
+        if not files:
+            utils.logger.info("...no evt files for %s/%s; no LAr summary", period, run)
+            return
+        names = {
+            info["daq_rawid"]: name
+            for name, info in utils.build_spms_info(
+                str(Path(auto_dir_path) / "inputs")
+            ).items()
+        }
+        written = monitoring.write_lar_summary(
+            phy_folder, period, run, files, rawid_to_name=names, data_type=data_type
+        )
+        utils.logger.info("...LAr summary keys written: %s", written)
+
+        # per-SiPM SPE spectra: validates the PE calibration in force (~5 min)
+        hit_dir = str(
+            Path(auto_dir_path) / "generated/tier/hit" / data_type / period / run
+        )
+        hit_files = sorted(glob.glob(str(Path(hit_dir) / "*.lh5")))
+        written = monitoring.write_spe_spectrum(
+            phy_folder,
+            period,
+            run,
+            hit_files,
+            files,
+            rawid_to_name=names,
+            data_type=data_type,
+        )
+        utils.logger.info("...SPE spectrum keys written: %s", written)
+
+    def task_muon_summary(logger=None):
+        """Summarise the muon veto from the pmts dsp stream (~1 min).
+
+        This production has no evt_muon group and the muon DAQ triggers
+        independently of the geds stream, so the per-trigger multiplicity and
+        summed light come from the per-PMT dsp rows and the ge-coincidence
+        fractions from evt/coincident.
+        """
+        dsp_dir = str(
+            Path(auto_dir_path) / "generated/tier/dsp" / data_type / period / run
+        )
+        dsp_files = sorted(glob.glob(str(Path(dsp_dir) / "*.lh5")))
+        if not dsp_files:
+            utils.logger.info("...no dsp files for %s/%s; no muon summary", period, run)
+            return
+        names = {
+            info["daq_rawid"]: name
+            for name, info in utils.build_pmts_info(
+                str(Path(auto_dir_path) / "inputs")
+            ).items()
+        }
+        if not names:
+            utils.logger.info("...no pmts in the channel map; no muon summary")
+            return
+        evt_dir = str(
+            Path(auto_dir_path) / "generated/tier/evt" / data_type / period / run
+        )
+        evt_files = sorted(glob.glob(str(Path(evt_dir) / "*.lh5")))
+        written = monitoring.write_muon_summary(
+            phy_folder,
+            period,
+            run,
+            dsp_files,
+            evt_files,
+            rawid_to_name=names,
+            data_type=data_type,
+        )
+        utils.logger.info("...muon summary keys written: %s", written)
+
+    def task_strip_transport(logger=None):
+        """Drop the v1 classifier pivots of the period's finished runs.
+
+        They were only the transport to the contract build and the res files
+        (qc_plots reads them too, so this runs last). The current run is left
+        alone: it is still appending, and stripping mid-run would make the
+        contract rebuild bin only post-strip chunks. Earlier runs are closed
+        once this run exists, so they are safe -- and each strip re-verifies
+        the contract holds every key before removing anything.
+        """
+        files_folder = str(Path(output_folder) / ref_version)
+        period_dir = str(Path(phy_folder) / period)
+        for done_run in sorted([p.name for p in Path(period_dir).iterdir()]):
+            if done_run >= run or not re.fullmatch(r"r\d+", done_run):
+                continue
+            for subsystem in contract_schema.SUBSYSTEMS:
+                repack.strip_transport_pivots(
+                    files_folder, period, done_run, data_type, subsystem=subsystem
+                )
+
+    def task_render_plots(logger=None):
+        """Draw the run's figures from the contract file.
+
+        Separate from the data tasks on purpose: it reads only the contract,
+        so it is cheap, it can be skipped (--plots off) and re-run later with
+        `legend-data-monitor plot_run` without touching the production tree.
+        """
+        saved = render_run_plots(
+            str(Path(output_folder) / ref_version),
+            period,
+            run,
+            data_type,
+            logger,
+        )
+        utils.logger.info("...rendered %d figure(s)", len(saved))
+
+    def task_slow_control(logger=None):
+        core.retrieve_scdb(scdb, port, pswd)
+
+    mtg_folder = str(
+        Path(output_folder) / ref_version / "generated/plt/hit" / data_type
+    )
+
+    def task_phy_summary_plots(logger=None):
+        Path(mtg_folder).mkdir(parents=True, exist_ok=True)
+        avail_runs = sorted(
+            [p.name for p in Path(str(Path(mtg_folder) / period)).iterdir()]
+        )
         avail_runs = [ar for ar in avail_runs if re.fullmatch(r"r\d{3}", ar)]
-        dataset = {period: avail_runs}
-        if dataset[period] != []:
-            # per-period & per-run monitoring plots
-            utils.logger.debug("...generating monitoring plots")
-            start_key = (
-                sorted(os.listdir(os.path.join(search_directory, avail_runs[0])))[0]
-            ).split("-")[4]
+        if not avail_runs:
+            utils.logger.debug("...no available runs to summarize")
+            return
+        start_key = (
+            sorted(
+                [
+                    p.name
+                    for p in Path(str(Path(search_directory) / avail_runs[0])).iterdir()
+                ]
+            )[0]
+        ).split("-")[4]
+        summary_plots(
+            auto_dir_path=auto_dir_path,
+            phy_mtg_data=mtg_folder,
+            output_folder=mtg_folder,
+            start_key=start_key,
+            period=period,
+            current_run=run,
+            runs=avail_runs,
+            last_checked=last_checked,
+            last_cycle=last_cycle,
+            data_type=data_type,
+            partition=partition,
+            escale_val=escale_val,
+            save_pdf=save_pdf,
+            render=render_plots,
+        )
 
-            summary_plots(
-                auto_dir_path=auto_dir_path,
-                phy_mtg_data=mtg_folder,
-                output_folder=mtg_folder,
-                start_key=start_key,
-                period=period,
-                current_run=run,
-                runs=avail_runs,
-                pswd_email=pswd_email,
-                last_checked=last_checked,
-                last_cycle=last_cycle,
-                data_type=data_type,
-                partition=partition,
-                escale_val=escale_val,
-                save_pdf=save_pdf,
-            )
-            utils.logger.info("...done!")
+    def task_qc_plots(logger=None):
+        avail_runs = sorted(
+            [p.name for p in Path(str(Path(mtg_folder) / period)).iterdir()]
+        )
+        avail_runs = [ar for ar in avail_runs if re.fullmatch(r"r\d{3}", ar)]
+        if not avail_runs:
+            return
+        start_key = (
+            sorted(
+                [
+                    p.name
+                    for p in Path(str(Path(search_directory) / avail_runs[0])).iterdir()
+                ]
+            )[0]
+        ).split("-")[4]
+        qc_avg_series(
+            auto_dir_path=auto_dir_path,
+            output_folder=mtg_folder,
+            start_key=start_key,
+            period=period,
+            current_run=run,
+            save_pdf=save_pdf,
+            render=render_plots,
+        )
 
-            # QC - average + time series
-            utils.logger.info("...inspecting quality cuts")
-            qc_avg_series(
-                auto_dir_path=auto_dir_path,
-                output_folder=mtg_folder,
-                start_key=start_key,
-                period=period,
-                current_run=run,
-                last_cycle=last_cycle,
-                save_pdf=save_pdf,
-            )
-            utils.logger.info("...done!")
+    def task_phy_issues(logger=None):
+        """Turn the run's phy verdicts into issue records.
 
+        Last of the phy tasks on purpose: qc_plots writes the discharge /
+        saturated / dead-time verdicts after phy_summary_plots, and the
+        magnitudes every producer stashed for its verdict live in-process until
+        this single emission picks them up.
+        """
+        avail_runs = sorted(
+            [p.name for p in Path(str(Path(mtg_folder) / period)).iterdir()]
+        )
+        avail_runs = [ar for ar in avail_runs if re.fullmatch(r"r\d{3}", ar)]
+        if not avail_runs:
+            return
+        start_key = (
+            sorted(
+                [
+                    p.name
+                    for p in Path(str(Path(search_directory) / avail_runs[0])).iterdir()
+                ]
+            )[0]
+        ).split("-")[4]
+        det_info = utils.build_detector_info(
+            str(Path(auto_dir_path) / "inputs"), start_key=start_key
+        )
+        monitoring.check_spms_thresholds(mtg_folder, period, run, data_type=data_type)
+        spms_info = utils.build_spms_info(
+            str(Path(auto_dir_path) / "inputs"), start_key=start_key
+        )
+        utils.check_cal_phy_thresholds(
+            mtg_folder,
+            period,
+            run,
+            data_type,
+            det_info["detectors"],
+            detector_info=det_info["detectors"] | spms_info,
+            data_type=data_type,
+        )
+
+    task_list = [tasks.Task("check_calibration", task_check_calibration, period, run)]
+    if new_files:
+        task_list.append(
+            tasks.Task("build_subsystem_data", task_subsystem_plots, period, run)
+        )
+        task_list.append(
+            tasks.Task("build_monitoring_hdf", task_build_monitoring_hdf, period, run)
+        )
+        if render_plots:
+            task_list.append(tasks.Task("render_plots", task_render_plots, period, run))
+        if cluster == "lngs" and get_sc is True:
+            task_list.append(tasks.Task("slow_control", task_slow_control, period, run))
+
+    # the summary plots also redo a run whose monitoring never produced phy
+    # entries, so they are not gated on new data alone
+    if new_files or remonitor:
+        task_list.append(
+            tasks.Task("phy_summary_plots", task_phy_summary_plots, period, run)
+        )
+        task_list.append(tasks.Task("qc_plots", task_qc_plots, period, run))
+        task_list.append(tasks.Task("lar_summary", task_lar_summary, period, run))
+        task_list.append(tasks.Task("muon_summary", task_muon_summary, period, run))
+        task_list.append(tasks.Task("phy_issues", task_phy_issues, period, run))
+        task_list.append(
+            tasks.Task("strip_transport", task_strip_transport, period, run)
+        )
     else:
         utils.logger.debug("No new files were detected.")
 
-    # create dashboard file
-    output = os.path.join(
-        output_folder,
-        ref_version,
-        "generated/plt/hit",
-        data_type,
-        period,
-    )
-    generate_dashboard(auto_dir_path, period, output, cluster)
-    utils.logger.debug(f"Generated summary excel workbook at {output}")
+    log_root = logs.log_tree_root(str(Path(output_folder) / ref_version))
+    results, exit_code = tasks.run_tasks(task_list, log_root)
 
-    # Update the last checked timestamp
-    with open(timestamp_file, "w") as file:
-        file.write(
-            str(
-                os.path.getmtime(
-                    max(
-                        [os.path.join(source_dir, file) for file in current_files],
-                        key=os.path.getmtime,
-                    )
-                )
+    # update the last checked timestamp only when everything succeeded, so a
+    # failed invocation is retried on the next cron cycle
+    if exit_code == tasks.EXIT_OK and current_files:
+        with open(timestamp_file, "w") as file:
+            newest = max(
+                (Path(source_dir) / f for f in current_files),
+                key=lambda p: p.stat().st_mtime,
             )
+            file.write(str(newest.stat().st_mtime))
+
+    return exit_code
+
+
+# headline (flag, param, unit) triples rendered as per-string PNGs after each
+# contract build; missing keys are skipped so datatype/config changes stay safe.
+# Defined per subsystem in settings/experiment.yaml.
+HEADLINE_PNG_KEYS = [
+    tuple(entry) for entry in utils.EXPERIMENT["headline_plots"]["geds"]
+]
+
+# same for the spms contract, grouped by barrel and position instead of string
+SPMS_HEADLINE_PNG_KEYS = [
+    ("IsBsln", "WfMode_var", "%"),
+    ("IsBsln", "CurrFwhm", "ADC"),
+    ("IsBsln", "NPulses", "per window"),
+    ("All", "HasAnyNoise", "fraction"),
+]
+
+
+def render_run_plots(
+    files_folder: str,
+    period: str,
+    run: str,
+    data_type: str = "phy",
+    logger=None,
+) -> list:
+    """Render a run's per-string PNGs from its contract-v2 file.
+
+    Reads only the contract file, so it needs no access to the production
+    tree: figures for a run processed with ``--plots off`` can be regenerated
+    afterwards in seconds (``legend-data-monitor plot_run``).
+
+    The SAVED_PLOT log lines these emit are the attachment source for
+    unattended agents (see docs/auto-giorgio-integration.md).
+
+    Returns
+    -------
+    list
+        Absolute paths of the figures written.
+    """
+    # SAVED_PLOT lines are a consumer contract, so always announce on some
+    # logger; the per-task one when running in the pipeline, else the package's
+    logger = logger if logger is not None else utils.logger
+    run_dir = str(Path(files_folder) / "generated/plt/hit" / data_type / period / run)
+    v2_file = str(Path(run_dir) / f"l200-{period}-{run}-{data_type}-geds-schema2.hdf")
+    spms_file = v2_file.replace("-geds-schema2.hdf", "-spms-schema2.hdf")
+    if not Path(v2_file).is_file() and not Path(spms_file).is_file():
+        logger.warning("no contract-v2 file to render PNGs from: %s", v2_file)
+        return []
+    saved = []
+    detector_map = None
+    if Path(v2_file).is_file():
+        detector_map = contract_reader.read_frame(v2_file, "detector_map")
+        for flag, param, unit in HEADLINE_PNG_KEYS:
+            try:
+                binned = contract_reader.read_binned_series(
+                    v2_file, flag, param, "10min"
+                )
+            except KeyError:
+                logger.debug("...no %s_%s in %s, skip PNG", flag, param, v2_file)
+                continue
+            for string, group in detector_map.groupby("string"):
+                saved += contract_plots.plot_binned_series(
+                    binned,
+                    run_dir,
+                    f"{flag}_{param}_st{int(string):02d}",
+                    title=f"{flag} {param} — string {string} ({period} {run}, 10min bins)",
+                    unit=unit,
+                    detectors=list(group["name"]),
+                    logger=logger,
+                )
+
+    if Path(spms_file).is_file():
+        spms_map = contract_reader.read_frame(spms_file, "detector_map")
+        for flag, param, unit in SPMS_HEADLINE_PNG_KEYS:
+            try:
+                binned = contract_reader.read_binned_series(
+                    spms_file, flag, param, "10min"
+                )
+            except KeyError:
+                continue
+            for (barrel, position), group in spms_map.groupby(["barrel", "position"]):
+                saved += contract_plots.plot_binned_series(
+                    binned,
+                    run_dir,
+                    f"{flag}_{param}_{barrel}_{position}",
+                    title=f"{flag} {param} — {barrel} {position} ({period} {run}, 10min bins)",
+                    unit=unit,
+                    detectors=list(group["name"]),
+                    logger=logger,
+                    envelope=param != "HasAnyNoise",
+                )
+
+    # the full monitoring figure set, from the period contract file(s)
+    output_folder = str(Path(files_folder) / "generated/plt/hit" / data_type)
+    common = dict(
+        detector_map=detector_map,
+        data_type=data_type,
+        save_pdf=True,
+        logger=logger,
+    )
+    saved += qc_plots_mod.plot_qc_rate_series(output_folder, period, run, **common)
+    saved += qc_plots_mod.plot_qc_average(output_folder, period, run, **common)
+    saved += qc_plots_mod.plot_classifier_distributions(
+        output_folder, period, run, **common
+    )
+    saved += summary_plots_mod.plot_ft_summary(output_folder, period, run, **common)
+    saved += summary_plots_mod.plot_event_rate_qc(output_folder, period, run, **common)
+    for metric in ["TrapemaxCtcCal", "BlStd", "Baseline", "Trapemax"]:
+        saved += summary_plots_mod.plot_detector_summary(
+            output_folder, period, run, metric=metric, **common
         )
+    saved += stability_plots.plot_stability_series(output_folder, period, run, **common)
+    cal_common = dict(detector_map=detector_map, save_pdf=True, logger=logger)
+    saved += stability_plots.plot_fep_gain(output_folder, period, run, **cal_common)
+    saved += calib_plots.plot_psd_stability(output_folder, period, run, **cal_common)
+    saved += calib_plots.plot_escale_panels(output_folder, period, run, **cal_common)
+    return saved
+
+
+# kept as the in-pipeline name; plot_run calls render_run_plots directly
+_render_headline_pngs = render_run_plots
 
 
 def _qcp_file_is_populated(filepath: str, data_type: str) -> bool:
-    """Return True if the qcp summary file exists and has at least one non-null data (cal, phy)entry."""
-    if not os.path.isfile(filepath):
+    """
+    Return True if the qcp summary has at least one non-null entry of this type.
+
+    Parameters
+    ----------
+    filepath : str
+        Path to the qcp summary file.
+    data_type : str
+        Run type to inspect, ``cal`` or ``phy``.
+
+    Returns
+    -------
+    bool
+        True if the file exists and holds a non-null entry for `data_type`.
+    """
+    if not Path(filepath).is_file():
         return False
     with open(filepath) as f:
         data = yaml.safe_load(f)
     if not data:
         return False
     for det_data in data.values():
-        en = det_data.get(data_type, {})
-        if any(v is not None for v in en.values()):
+        entries = det_data.get(data_type, {})
+        if any(v is not None for v in entries.values()):
             return True
     return False
+
+
+def _detector_map_frame(det_info: dict):
+    """name/rawid/string/position frame for the plots/ renderers."""
+    import pandas as pd
+
+    return pd.DataFrame(
+        [
+            {
+                "name": name,
+                "rawid": info.get("daq_rawid"),
+                "string": info.get("string"),
+                "position": info.get("position"),
+                "processable": info.get("processable"),
+            }
+            for name, info in det_info["detectors"].items()
+        ]
+    )
 
 
 def summary_plots(
@@ -376,15 +702,14 @@ def summary_plots(
     period: str,
     current_run: str,
     runs: list,
-    pswd_email: str,
     last_checked: str,
     last_cycle: str,
     data_type: str = "phy",
     partition: bool = False,
     escale_val: float = 2039.0,
     save_pdf: bool = False,
-    zoom: bool = False,
     quadratic: bool = False,
+    render: bool = True,
 ):
     """
     Run function for creating summary plots.
@@ -405,8 +730,6 @@ def summary_plots(
         Run under inspection.
     runs : list
         Available runs to inspect for a given period.
-    pswd_email : str
-        Password to access the legend.data.monitoring@gmail.com account for sending alert messages.
     last_checked : str
         Timestamp of the last check.
     last_cycle : str
@@ -419,17 +742,17 @@ def summary_plots(
         Energy scale at which evaluating the gain differences; default: 2039 keV (76Ge Qbb).
     save_pdf : bool
         True if you want to save pdf files too; default: False.
-    zoom : bool
-        True to zoom over y axis; default: False.
     quadratic : bool
         True if you want to plot the quadratic resolution too; default: False.
+    render : bool
+        Draw the figures from the contract after the data pass; default: True.
     """
     det_info = utils.build_detector_info(
-        os.path.join(auto_dir_path, "inputs"), start_key=start_key
+        str(Path(auto_dir_path) / "inputs"), start_key=start_key
     )
 
-    # stability plots
-    results = monitoring.plot_time_series(
+    # stability series (data pass; figures come from the contract below)
+    results = monitoring.collect_stability_series(
         auto_dir_path,
         phy_mtg_data,
         output_folder,
@@ -438,18 +761,15 @@ def summary_plots(
         runs,
         current_run,
         det_info,
-        save_pdf,
         escale_val,
         last_checked,
-        last_cycle,
         partition,
         quadratic,
-        zoom,
     )
 
     # load proper calibration (eg for lac/ssc/rdc data or back-dated calibs)
     tier = "pht" if partition is True else "hit"
-    validity_file = os.path.join(auto_dir_path, "generated/par", tier, "validity.yaml")
+    validity_file = str(Path(auto_dir_path) / "generated/par" / tier / "validity.yaml")
     with open(validity_file) as f:
         validity_dict = yaml.load(f, Loader=yaml.CLoader)
 
@@ -468,18 +788,18 @@ def summary_plots(
         return
 
     # don't run any check if there are no runs
-    cal_path = os.path.join(auto_dir_path, "generated/par", tier, "cal", period)
-    cal_runs = os.listdir(cal_path)
+    cal_path = str(Path(auto_dir_path) / "generated/par" / tier / "cal" / period)
+    cal_runs = [p.name for p in Path(cal_path).iterdir()]
     if len(cal_runs) == 0:
         utils.logger.debug("No available calibration runs to inspect. Returning.")
         return
 
-    cal_path = os.path.join(auto_dir_path, "generated/par", tier, "cal", period)
+    cal_path = str(Path(auto_dir_path) / "generated/par" / tier / "cal" / period)
     pars_files_list = sorted(glob.glob(f"{cal_path}/*/*.yaml"))
     if not pars_files_list:
         pars_files_list = sorted(glob.glob(f"{cal_path}/*/*.json"))
     det_info = utils.build_detector_info(
-        os.path.join(auto_dir_path, "inputs"), start_key=start_key
+        str(Path(auto_dir_path) / "inputs"), start_key=start_key
     )
 
     pars_path = [p for p in pars_files_list if run_to_apply in p][0]
@@ -493,27 +813,16 @@ def summary_plots(
             pars_dict,
             det_info,
             results[k],
-            last_cycle,
             utils.MTG_PLOT_INFO[k],
             output_folder,
             data_type,
-            save_pdf,
             run_to_apply=run_to_apply,
         )
-
-    utils.check_cal_phy_thresholds(
-        output_folder,
-        period,
-        current_run,
-        data_type,
-        det_info["detectors"],
-        pswd_email,
-    )
 
     # FT failure rate plots
     if data_type not in ["ssc", "lac", "rdc"]:
 
-        # qc classifier plots
+        # qc classifier fractions + FT/event-rate/dead-time data
         monitoring.qc_distributions(
             auto_dir_path,
             phy_mtg_data,
@@ -521,9 +830,7 @@ def summary_plots(
             start_key,
             period,
             current_run,
-            last_cycle,
             det_info,
-            save_pdf,
         )
 
         monitoring.qc_and_evt_summary_plots(
@@ -533,10 +840,29 @@ def summary_plots(
             start_key,
             period,
             current_run,
-            last_cycle,
             det_info,
-            save_pdf,
         )
+
+    if render:
+        detector_map = _detector_map_frame(det_info)
+        common = dict(detector_map=detector_map, data_type=data_type, save_pdf=save_pdf)
+        stability_plots.plot_stability_series(
+            output_folder, period, current_run, quadratic=quadratic, **common
+        )
+        for k in results.keys():
+            summary_plots_mod.plot_detector_summary(
+                output_folder, period, current_run, metric=k, **common
+            )
+        if data_type not in ["ssc", "lac", "rdc"]:
+            qc_plots_mod.plot_classifier_distributions(
+                output_folder, period, current_run, **common
+            )
+            summary_plots_mod.plot_ft_summary(
+                output_folder, period, current_run, **common
+            )
+            summary_plots_mod.plot_event_rate_qc(
+                output_folder, period, current_run, last_cycle=last_cycle, **common
+            )
 
 
 def check_calib(
@@ -544,10 +870,10 @@ def check_calib(
     output_folder: str,
     period: str,
     current_run: str,
-    pswd_email: str,
     data_type: str = "phy",
     partition: bool = False,
     save_pdf: bool = False,
+    render: bool = True,
 ):
     """
     Check calibration stability in calibration runs and create monitoring summary file.
@@ -562,8 +888,6 @@ def check_calib(
         Period to inspect.
     current_run : str
         Run under inspection.
-    pswd_email : str
-        Password to access the legend.data.monitoring@gmail.com account for sending alert messages.
     data_type : str
         Data type to load; default: 'phy'.
     partition : bool
@@ -572,7 +896,7 @@ def check_calib(
         True if you want to save pdf files too; default: False.
     """
     tier = "pht" if partition is True else "hit"
-    validity_file = os.path.join(auto_dir_path, "generated/par", tier, "validity.yaml")
+    validity_file = str(Path(auto_dir_path) / "generated/par" / tier / "validity.yaml")
     with open(validity_file) as f:
         validity_dict = yaml.load(f, Loader=yaml.CLoader)
 
@@ -591,19 +915,19 @@ def check_calib(
         return
 
     # don't run any check if there are no runs
-    cal_path = os.path.join(auto_dir_path, "generated/par", tier, "cal", period)
-    cal_runs = os.listdir(cal_path)
+    cal_path = str(Path(auto_dir_path) / "generated/par" / tier / "cal" / period)
+    cal_runs = [p.name for p in Path(cal_path).iterdir()]
     if len(cal_runs) == 0:
         utils.logger.debug("No available calibration runs to inspect. Returning.")
         return
     first_run = len(cal_runs) == 1
 
-    cal_path = os.path.join(auto_dir_path, "generated/par", tier, "cal", period)
+    cal_path = str(Path(auto_dir_path) / "generated/par" / tier / "cal" / period)
     pars_files_list = sorted(glob.glob(f"{cal_path}/*/*.yaml"))
     if not pars_files_list:
         pars_files_list = sorted(glob.glob(f"{cal_path}/*/*.json"))
     det_info = utils.build_detector_info(
-        os.path.join(auto_dir_path, "inputs"), start_key=start_key
+        str(Path(auto_dir_path) / "inputs"), start_key=start_key
     )
 
     if data_type not in ["lac", "ssc", "rdc"]:
@@ -617,7 +941,6 @@ def check_calib(
             current_run,
             first_run,
             det_info,
-            save_pdf,
         )
         calibration.check_psd(
             auto_dir_path,
@@ -627,18 +950,30 @@ def check_calib(
             period,
             current_run,
             det_info,
-            save_pdf,
         )
 
-        calibration.check_escale(
+        detector_status = calibration.check_escale(
             auto_dir_path,
             cal_path,
             output_folder,
             period,
             current_run,
             det_info,
-            save_pdf,
         )
+
+        if render:
+            detector_map = _detector_map_frame(det_info)
+            common = dict(detector_map=detector_map, save_pdf=save_pdf)
+            stability_plots.plot_fep_gain(output_folder, period, current_run, **common)
+            calib_plots.plot_psd_stability(output_folder, period, current_run, **common)
+            calib_plots.plot_escale_panels(
+                output_folder,
+                period,
+                current_run,
+                detector_status=detector_status,
+                exclude_period=["p05", "p10", "p11", "p13", "p15", "p17"],
+                **common,
+            )
     else:
         calibration.check_calibration_lac_ssc(
             auto_dir_path,
@@ -648,9 +983,17 @@ def check_calib(
             run_to_apply,
             first_run,
             det_info,
-            save_pdf=save_pdf,
             data_type=data_type,
         )
+        if render:
+            stability_plots.plot_fep_gain(
+                output_folder,
+                period,
+                current_run,
+                detector_map=_detector_map_frame(det_info),
+                data_type=data_type,
+                save_pdf=save_pdf,
+            )
 
         utils.logger.debug(
             f"...we do not inspect PSD time stability in {data_type} data"
@@ -660,9 +1003,10 @@ def check_calib(
         output_folder,
         period,
         current_run,
-        "cal",
+        data_type if data_type in ["lac", "ssc", "rdc"] else "cal",
         det_info["detectors"],
-        pswd_email,
+        detector_info=det_info["detectors"],
+        data_type=data_type,
     )
 
 
@@ -672,8 +1016,8 @@ def qc_avg_series(
     start_key: str,
     period: str,
     current_run: str,
-    last_cycle: str,
     save_pdf: bool = False,
+    render: bool = True,
 ):
     """
     Plot quality cuts average values across the array and trends in time.
@@ -690,30 +1034,33 @@ def qc_avg_series(
         Period to inspect.
     current_run : str
         Run under inspection.
-    last_cycle : str
-        Last cycle of the inspect list; format: YYYYMMDDThhmmssZ.
     save_pdf : bool
         True if you want to save pdf files too; default: False.
+    render : bool
+        Draw the figures from the contract after the data pass; default: True.
     """
     det_info = utils.build_detector_info(
-        os.path.join(auto_dir_path, "inputs/"), start_key=start_key
+        str(Path(auto_dir_path) / "inputs/"), start_key=start_key
     )
 
-    monitoring.qc_average(
-        auto_dir_path,
-        output_folder,
-        det_info,
-        period,
-        current_run,
-        last_cycle,
-        save_pdf,
-    )
+    monitoring.qc_average(auto_dir_path, output_folder, det_info, period, current_run)
     monitoring.qc_time_series(
-        auto_dir_path,
-        output_folder,
-        det_info,
-        period,
-        current_run,
-        last_cycle,
-        save_pdf,
+        auto_dir_path, output_folder, det_info, period, current_run
     )
+
+    if render:
+        detector_map = _detector_map_frame(det_info)
+        qc_plots_mod.plot_qc_average(
+            output_folder,
+            period,
+            current_run,
+            detector_map=detector_map,
+            save_pdf=save_pdf,
+        )
+        qc_plots_mod.plot_qc_rate_series(
+            output_folder,
+            period,
+            current_run,
+            detector_map=detector_map,
+            save_pdf=save_pdf,
+        )

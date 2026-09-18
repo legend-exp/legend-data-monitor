@@ -109,7 +109,18 @@ In particular, ``dataset`` settings are:
 
 A ``saving`` option is available to either ``"overwrite"`` any already present output file (or create a new one if not present) or ``"append"`` new data to the previously obtained output files.
 
-Then, ``subsystems`` can either be ``pulser``, ``geds`` or ``spms`` (note: SiPMs plots are not implemented yet, but DataLoader can load the respective data if needed).
+Then, ``subsystems`` can be ``pulser``, ``geds``, ``spms`` or ``pmts``
+(muon-veto PMTs: a sparse stream with one row per muon-DAQ trigger, so only
+``event_type: all`` is meaningful and plots group by location
+pillbox/floor/wall). For SiPMs the
+ragged per-pulse hit fields are reduced to one value per event at load time
+(``settings/spms-reductions.yaml``): ``n_pulses`` (valid pulses in the event
+window), ``pe_sum`` and ``pe_max`` (p.e. over valid pulses), ``first_trigger_ns``;
+scalar dsp fields (``wf_mode``, ``curr_fwhm``, ``wf_lower_hwhm``, ``wf_min_small``)
+and the boolean ``has_any_noise`` load as they are. The production set lives in
+``settings/spms-dict.yaml`` and yields ``l200-<p>-<r>-phy-spms.hdf`` plus the
+``-spms-schema2.hdf`` contract file (its ``/detector_map`` carries
+``barrel``, ``fiber`` and ``position``), both listed in the run manifest.
 
 For each subsystem to be plotted, specify
 
@@ -125,8 +136,8 @@ For each subsystem to be plotted, specify
     - ``per cc4`` (geds): group plots by CC4, i.e. all channels belonging to the same CC4 are in the same canvas
     - ``per string`` (geds): group plots by string, i.e. all channels belonging to the same string are in the same canvas
     - ``array`` (geds): group all channels in the same canvas
-    - ``per fiber`` (spms): group channels separating them into the inner barrel (IB) and outer barrel (OB), and put top/bottom channels of a given fiber together to look for correlations within the fiber and among neighbouring fibers
-    - ``per barrel`` (spms): group channels separating them into top/bottom IB/OB
+    - ``per barrel`` (spms): one figure per barrel (IB/OB) and position (top/bottom), one panel per fiber
+    - ``per fiber`` (spms): reserved, not implemented
 - ``"plot_style"``: plot style. Choose among
     - ``vs time``: plot parameter VS time (all timestamps), as well as resampled values in a time window specified in plot settings (see ``time_window``)
     - ``vs ch``: plot parameter VS channel ID

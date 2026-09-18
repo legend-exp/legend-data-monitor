@@ -50,6 +50,13 @@ bl_mean:
   - 0.87
   - 1.0
   limits:
+    pmts:
+      variation:
+      - null
+      - null
+      absolute:
+      - null
+      - null
     spms:
       variation:
       - null
@@ -761,6 +768,13 @@ event_rate:
   - 0.94
   - 0.75
   limits:
+    pmts:
+      variation:
+      - null
+      - null
+      absolute:
+      - null
+      - null
     spms:
       variation:
       - null
@@ -1033,7 +1047,7 @@ energy_in_pe:
       - null
 trigger_pos:
   label: Trigger Position
-  unit: '?'
+  unit: ns
   facecol:
   - 0.74
   - 0.77
@@ -1069,6 +1083,186 @@ AoE_Custom:
       - null
       - null
     geds:
+      variation:
+      - null
+      - null
+      absolute:
+      - null
+      - null
+wf_mode:
+  label: Baseline (mode)
+  unit: ADC
+  facecol: lightblue
+  limits:
+    spms:
+      variation:
+      - null
+      - null
+      absolute:
+      - null
+      - null
+curr_fwhm:
+  label: Current noise FWHM
+  unit: ADC
+  facecol: lightblue
+  limits:
+    spms:
+      variation:
+      - null
+      - null
+      absolute:
+      - null
+      - null
+wf_lower_hwhm:
+  label: Waveform lower HWHM
+  unit: ADC
+  facecol: lightblue
+  limits:
+    spms:
+      variation:
+      - null
+      - null
+      absolute:
+      - null
+      - null
+wf_min_small:
+  label: Waveform minimum (small window)
+  unit: ADC
+  facecol: lightblue
+  limits:
+    spms:
+      variation:
+      - null
+      - null
+      absolute:
+      - null
+      - null
+has_any_noise:
+  label: Noisy waveform fraction
+  unit: a.u.
+  facecol: lightblue
+  limits:
+    spms:
+      variation:
+      - null
+      - null
+      absolute:
+      - null
+      - null
+n_pulses:
+  label: Pulses per event window
+  unit: a.u.
+  facecol: lightblue
+  limits:
+    spms:
+      variation:
+      - null
+      - null
+      absolute:
+      - null
+      - null
+pe_sum:
+  label: Light per event
+  unit: p.e.
+  facecol: lightblue
+  limits:
+    spms:
+      variation:
+      - null
+      - null
+      absolute:
+      - null
+      - null
+pe_max:
+  label: Largest pulse per event
+  unit: p.e.
+  facecol: lightblue
+  limits:
+    spms:
+      variation:
+      - null
+      - null
+      absolute:
+      - null
+      - null
+first_trigger_ns:
+  label: First pulse time
+  unit: ns
+  facecol: lightblue
+  limits:
+    spms:
+      variation:
+      - null
+      - null
+      absolute:
+      - null
+      - null
+bl_sig:
+  label: Baseline sigma
+  unit: ADC
+  facecol: lightsteelblue
+  limits:
+    pmts:
+      variation:
+      - null
+      - null
+      absolute:
+      - null
+      - null
+pulseHeight:
+  label: Pulse height
+  unit: LSB
+  facecol: lightsteelblue
+  limits:
+    pmts:
+      variation:
+      - null
+      - null
+      absolute:
+      - null
+      - null
+rawPulseHeight:
+  label: Raw pulse height
+  unit: LSB
+  facecol: lightsteelblue
+  limits:
+    pmts:
+      variation:
+      - null
+      - null
+      absolute:
+      - null
+      - null
+max_peak_height:
+  label: Max peak height
+  unit: LSB
+  facecol: lightsteelblue
+  limits:
+    pmts:
+      variation:
+      - null
+      - null
+      absolute:
+      - null
+      - null
+mean_peak_height:
+  label: Mean peak height
+  unit: LSB
+  facecol: lightsteelblue
+  limits:
+    pmts:
+      variation:
+      - null
+      - null
+      absolute:
+      - null
+      - null
+containsPulse:
+  label: Contains-pulse fraction
+  unit: a.u.
+  facecol: lightsteelblue
+  limits:
+    pmts:
       variation:
       - null
       - null

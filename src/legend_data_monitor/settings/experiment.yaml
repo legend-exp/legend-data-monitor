@@ -1,0 +1,74 @@
+# Experiment constants that the code used to inline.
+#
+# Anything derivable from the production metadata is NOT here: the pulser,
+# pulser01ana, muon and FC-baseline channels come from the channel map
+# (see utils.aux_channels), never from a configured rawid.
+
+energy:
+  # calibrated-energy estimator, in order of preference: the first key present
+  # in a par file wins. The uncalibrated variable a calibration expression is
+  # written in is derived from it by stripping the _runcal/_cal suffix.
+  estimators:
+    - cuspEmax_ctc_runcal
+    - cuspEmax_ctc_cal
+
+  # calibration peaks. search_kev brackets the peak in the par file's pk_fits
+  # keys, whose digits have changed over time, so a window is used rather than
+  # an exact match.
+  peaks:
+    fep:
+      energy_kev: 2614.511
+      search_kev: [2613, 2616]
+    low:
+      energy_kev: 583.191
+      search_kev: [580, 586]
+    sep:
+      energy_kev: 2103.511
+
+  # hit-tier selection around the FEP for the gain-variation fit
+  fep_window_kev: [2600, 2630]
+
+  # energy-scale consistency bands: fixed half-width, or this multiple of the
+  # mean fit error where no fixed width applies
+  escale_fixed_threshold_kev: 0.65375
+  escale_error_multiplier: 3
+
+# parameters whose whole point is the QC columns: the only entries that need
+# every is_* / *_classifier column the subsystem carries
+qc_parameters:
+  - quality_cuts
+  - geds/quality/is_not_bb_like/is_delayed_discharge
+  - geds/quality/is_bb_like
+
+# the subset of the above that lives in the evt tier (flags only, no
+# classifiers): both the columns to load and the parameters that request them
+qc_parameters_evt:
+  - geds/quality/is_not_bb_like/is_delayed_discharge
+  - geds/quality/is_bb_like
+
+# pulser spike veto: events whose PULS01ANA rise time falls outside the window
+# are dropped before the gain series is built
+pulser_spike_veto:
+  parameter: tp_0_est
+  window: [48000.0, 50000.0]
+
+# headline PNGs rendered per subsystem after each contract build:
+# (event-type flag, parameter, unit)
+headline_plots:
+  geds:
+    - [IsPulser, TrapemaxCtcCal, keV]
+    - [IsPhysics, TrapemaxCtcCal, keV]
+    - [IsPulser, Baseline, ADC]
+    - [IsPulser, BlStd, ADC]
+
+# slow-control parameters retrieved by the production run (SC-params.yaml
+# defines what each one is; this is the subset auto_run asks for)
+slow_control_parameters:
+  - DaqLeft-Temp1
+  - DaqLeft-Temp2
+  - DaqRight-Temp1
+  - DaqRight-Temp2
+  - RREiT
+  - RRNTe
+  - RRSTe
+  - ZUL_T_RR

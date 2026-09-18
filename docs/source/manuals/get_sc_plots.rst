@@ -74,24 +74,25 @@ The meaning of each entry is explained below:
   In principle, for plotting the SC data you would need just the start and the end of a time interval of interest. This means that SC data does not depend on any dataset info (i.e. on entries ``experiment``, ``period``, ``version``, ``type``). However, these entries are important to retrieve any channel map of interest for the given time range of interest.
 
 
-We store SC data in the following way:
+SC data are published to the period contract file, next to every other
+monitoring quantity, under one key per parameter and run:
 
 .. code-block::
 
-    <output_path>/
-        └── <version>/
-            └── generated/
-                ├── plt/
-                │    └── hit/
-                │        └── <type>/
-                │            └── <period>/
-                │                └── <time_selection>/
-                │                    └── <experiment>-<period>-<time_selection>-<type>-slow_control.hdf
-                └── tmp/
-                    └── mtg/
-                        └── <period>/
-                            └── <time_selection>/
-                                └── <experiment>-<period>-<time_selection>-<type>.log
+    <output_path>/<version>/generated/plt/hit/<type>/<period>/
+        └── <experiment>-<period>-<type>-monitoring.hdf
+                └── slow_control/<parameter>/<run>      (pandas frame)
+
+Each frame has a UTC ``DatetimeIndex`` named ``datetime`` and the columns
+``value``, ``unit``, ``lower_lim``, ``upper_lim``; parameter names use
+underscores (``DaqLeft_Temp1``). Rewriting a (parameter, run) replaces it.
+The dashboard overlays these series on the physics views.
+
+.. note::
+
+  The SC database is reached through the ``ugnet-proxy`` SSH tunnel, which
+  forwards a local port (5678 in the reference ``~/.ssh/config``) to the
+  database host; pass that port as ``--port``.
 
 
 .. note::

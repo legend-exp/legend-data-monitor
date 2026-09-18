@@ -1,14 +1,14 @@
 import pytest
 
-import legend_data_monitor.monitoring as monitoring
-from legend_data_monitor.monitoring import add_calibration_runs
+import legend_data_monitor.loading.calib_files as calib_files
+from legend_data_monitor.loading.calib_files import add_calibration_runs
 
 CALIB_RUNS = {"p1": [101, 102], "p2": [201], "p3": [301, 302, 303]}
 
 
 @pytest.fixture(autouse=True)
 def patch_calib_runs(monkeypatch):
-    monkeypatch.setattr(monitoring, "CALIB_RUNS", CALIB_RUNS)
+    monkeypatch.setattr(calib_files, "CALIB_RUNS", CALIB_RUNS)
 
 
 def test_single_period_list_input():

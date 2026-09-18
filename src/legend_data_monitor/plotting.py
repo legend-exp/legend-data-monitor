@@ -1,19 +1,13 @@
-import io
-import os
-import pickle
-import shelve
-from typing import Union
-
 import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
 import numpy as np
-from matplotlib.axes import Axes
 from matplotlib.backends.backend_pdf import PdfPages
 from pandas import DataFrame
 from seaborn import color_palette
 
 from . import (
     analysis_data,
+    errors,
     plot_styles,
     save_data,
     string_visualization,
@@ -42,11 +36,20 @@ def make_subsystem_plots(
     dataset_info: dict,
     plt_path: str,
     saving=None,
+    render: bool = True,
 ):
+    """Build the monitoring data for each configured plot and (optionally) draw it.
 
-    plt_file = utils.get_output_plot_path(plt_path, "pdf")
-    pdf = PdfPages(plt_file)
+    With ``render=False`` the analysis and the HDF output are produced exactly
+    as usual but nothing is drawn: rendering is roughly 40 % of this stage on a
+    full run and the figures can be regenerated later from the contract file,
+    so unattended runs need not pay for them.
+    """
+    pdf = None
     is_pdf_saved = False
+    if render:
+        plt_file = utils.get_output_plot_path(plt_path, "pdf")
+        pdf = PdfPages(plt_file)
 
     for plot_title in plots:
         if "plot_structure" not in plots[plot_title].keys():
@@ -192,12 +195,16 @@ def make_subsystem_plots(
                         "\033[91mPlotting per CC4 is not available for %s. Try again!\033[0m",
                         subsystem.type,
                     )
-                    exit()
+                    raise errors.MonitoringError(
+                        "make_subsystem_plots failed (see log for details)"
+                    )
                 else:
                     utils.logger.error(
                         "\033[91mPlotting per CC4 is not available because CC4 ID or/and CC4 channel are 'None'.\nTry again!\033[0m"
                     )
-                    exit()
+                    raise errors.MonitoringError(
+                        "make_subsystem_plots failed (see log for details)"
+                    )
             # ...if cc4 are present, group by them
             max_ch_per_string = (
                 data_to_plot.data.groupby("cc4_id")["cc4_channel"].nunique().max()
@@ -217,6 +224,7 @@ def make_subsystem_plots(
             "locname": {
                 "geds": "string",
                 "spms": "fiber",
+                "pmts": "location",
                 "pulser": "puls",
                 "pulser01ana": "pulser01ana",
                 "FCbsln": "FC bsln",
@@ -253,7 +261,7 @@ def make_subsystem_plots(
             # plot info should contain final parameter to plot i.e. _var if var is asked
             # unit, label and limits are connected to original parameter name
             # this is messy AF need to rethink
-            param_orig = param.rstrip("_var")
+            param_orig = param.removesuffix("_var")
             plot_info["unit"][param] = utils.PLOT_INFO[param_orig]["unit"]
             plot_info["label"][param] = utils.PLOT_INFO[param_orig]["label"]
 
@@ -313,23 +321,27 @@ def make_subsystem_plots(
         # call chosen plot structure + plotting
         # -------------------------------------------------------------------------
 
-        if "exposure" in plot_info["parameters"]:
-            string_visualization.exposure_plot(
-                subsystem, data_to_plot.data, plot_info, pdf
-            )
-        else:
-            utils.logger.debug("Plot structure: %s", plot_settings["plot_structure"])
-            plot_structure(data_to_plot.data, plot_info, pdf)
+        if render:
+            if "exposure" in plot_info["parameters"]:
+                string_visualization.exposure_plot(
+                    subsystem, data_to_plot.data, plot_info, pdf
+                )
+            else:
+                utils.logger.debug(
+                    "Plot structure: %s", plot_settings["plot_structure"]
+                )
+                plot_structure(data_to_plot.data, plot_info, pdf)
 
-        # For some reason, after some plotting functions the index is set to "channel".
-        # We need to set it back otherwise string_visualization.py gets crazy.
-        data_to_plot.data = data_to_plot.data.reset_index()
+            # For some reason, after some plotting functions the index is set to
+            # "channel". We need to set it back otherwise string_visualization.py
+            # gets crazy.
+            data_to_plot.data = data_to_plot.data.reset_index()
 
         # -------------------------------------------------------------------------
         # call status plot
         # -------------------------------------------------------------------------
 
-        if "status" in plot_settings and plot_settings["status"]:
+        if render and "status" in plot_settings and plot_settings["status"]:
             if subsystem.type in ["pulser", "pulser01ana", "FCbsln", "muon"]:
                 utils.logger.debug(
                     f"Thresholds are not enabled for {subsystem.type}! Use you own eyes to do checks there"
@@ -363,9 +375,16 @@ def make_subsystem_plots(
             plot_info,
         )
 
-        is_pdf_saved = True
+        is_pdf_saved = render
 
-    pdf.close()
+        # Drop this entry's frames before building the next one. Rebinding
+        # alone is too late: the next AnalysisData is fully constructed while
+        # these names still point at the previous ones, so the two largest
+        # objects in the run (~1 GB each for the QC entries) coexist.
+        del data_analysis, aux_analysis, aux_ratio_analysis, aux_diff_analysis
+
+    if pdf is not None:
+        pdf.close()
     if is_pdf_saved:
         utils.logger.info(
             f"All plots saved in: \33[4m{plt_path}-{subsystem.type}.pdf\33[0m"
@@ -489,7 +508,7 @@ def plot_per_cc4(data_analysis: DataFrame, plot_info: dict, pdf: PdfPages):
             "\033[91mPlotting per CC4 is not available for %s channel.\nTry again with a different plot structure!\033[0m",
             plot_info["subsystem"],
         )
-        exit()
+        raise errors.MonitoringError("plot_per_cc4 failed (see log for details)")
     # --- choose plot function based on user requested style e.g. vs time or histogram
     plot_style = plot_styles.PLOT_STYLE[plot_info["plot_style"]]
     utils.logger.debug("Plot style: " + plot_info["plot_style"])
@@ -514,7 +533,8 @@ def plot_per_cc4(data_analysis: DataFrame, plot_info: dict, pdf: PdfPages):
     ]
     labels["channel"] = labels.index
     labels["label"] = labels[["location", "position", "name", "cc4_channel"]].apply(
-        lambda x: f"s{x.iloc[0]}-p{x.iloc[1]}-{x.iloc[2]}-cc4 ch.{x.iloc[3]}", axis=1
+        lambda x: f"s{x['location']}-p{x['position']}-{x['name']}-cc4 ch.{x['cc4_channel']}",
+        axis=1,
     )
     # put it in the table
     data_analysis = data_analysis.set_index("channel")
@@ -605,7 +625,8 @@ def plot_per_string(data_analysis: DataFrame, plot_info: dict, pdf: PdfPages):
     labels = data_analysis.groupby("channel").first()[["name", "position"]]
     labels["channel"] = labels.index
     labels["label"] = labels[["position", "channel", "name"]].apply(
-        lambda x: f"p{x.iloc[0]}-ch{str(x.iloc[1]).zfill(3)}-{x.iloc[2]}", axis=1
+        lambda x: f"p{x['position']}-ch{str(x['channel']).zfill(3)}-{x['name']}",
+        axis=1,
     )
     # put it in the table
     data_analysis = data_analysis.set_index("channel")
@@ -689,7 +710,7 @@ def plot_array(data_analysis: DataFrame, plot_info: dict, pdf: PdfPages):
         utils.logger.error(
             "\033[91mPlotting per array is not available for the spms.\nTry again!\033[0m"
         )
-        exit()
+        raise errors.MonitoringError("plot_array failed (see log for details)")
 
     # --- choose plot function based on user requested style
     plot_style = plot_styles.PLOT_STYLE[plot_info["plot_style"]]
@@ -710,7 +731,8 @@ def plot_array(data_analysis: DataFrame, plot_info: dict, pdf: PdfPages):
     labels = data_analysis.groupby("channel").first()[["name", "location", "position"]]
     labels["channel"] = labels.index
     labels["label"] = labels[["location", "position", "channel", "name"]].apply(
-        lambda x: f"p{x.iloc[1]}-ch{str(x.iloc[2])}-{x.iloc[3]}", axis=1
+        lambda x: f"p{x['position']}-ch{x['channel']!s}-{x['name']}",
+        axis=1,
     )
     # put it in the table
     data_analysis = data_analysis.set_index("channel")
@@ -822,7 +844,9 @@ def plot_per_fiber_and_barrel(data_analysis: DataFrame, plot_info: dict, pdf: Pd
         utils.logger.error(
             "\033[91mPlotting per fiber-barrel is available ONLY for spms.\nTry again!\033[0m"
         )
-        exit()
+        raise errors.MonitoringError(
+            "plot_per_fiber_and_barrel failed (see log for details)"
+        )
     # here will be a function plotting SiPMs with:
     # - one figure for top and one for bottom SiPMs
     # - each figure has subplots with N columns and M rows where N is the number of fibers, and M is the number of positions (top/bottom -> 2)
@@ -835,135 +859,56 @@ def plot_per_fiber_and_barrel(data_analysis: DataFrame, plot_info: dict, pdf: Pd
 def plot_per_barrel_and_position(
     data_analysis: DataFrame, plot_info: dict, pdf: PdfPages
 ):
+    """One figure per barrel x position (IB/OB x top/bottom), one panel per fiber."""
     if plot_info["subsystem"] != "spms":
         utils.logger.error(
             "\033[91mPlotting per barrel-position is available ONLY for spms.\nTry again!\033[0m"
         )
-        exit()
-    # here will be a function plotting SiPMs with:
-    # - one figure for each barrel-position combination (IB-top, IB-bottom, OB-top, OB-bottom) = 4 figures in total
-
+        raise errors.MonitoringError(
+            "plot_per_barrel_and_position failed (see log for details)"
+        )
     plot_style = plot_styles.PLOT_STYLE[plot_info["plot_style"]]
     utils.logger.debug("Plot style: " + plot_info["plot_style"])
 
-    par_dict = {}
-
-    # re-arrange dataframe to separate location: from location=[IB-015-016] to location=[IB] & fiber=[015-016]
-    data_analysis["fiber"] = (
-        data_analysis["location"].str.split("-").str[1].str.join("")
-        + "-"
-        + data_analysis["location"].str.split("-").str[2].str.join("")
-    )
-    data_analysis["location"] = (
-        data_analysis["location"].str.split("-").str[0].str.join("")
-    )
-
-    # -------------------------------------------------------------------------------
-    # create label of format hardcoded for geds pX-chXXX-name
-    # -------------------------------------------------------------------------------
-
-    labels = data_analysis.groupby("channel").first()[
-        ["name", "position", "location", "fiber"]
-    ]
-    labels["channel"] = labels.index
-    labels["label"] = labels[
-        ["position", "location", "fiber", "channel", "name"]
-    ].apply(lambda x: f"{x.iloc[0]}-{x.iloc[1]}-{x.iloc[2]}-ch{str(x.iloc[3]).zfill(3)}-{x.iloc[4]}", axis=1)
-    # put it in the table
+    labels = data_analysis.groupby("channel").first()[["name", "location"]]
     data_analysis = data_analysis.set_index("channel")
-    data_analysis["label"] = labels["label"]
-    data_analysis = data_analysis.sort_values("label")
+    data_analysis["label"] = (
+        labels["name"].astype(str) + "-ch" + labels.index.astype(str)
+    )
+    data_analysis = data_analysis.reset_index()
+    colors = COLORS or color_palette("hls", 2).as_hex()
 
-    data_analysis = data_analysis.sort_values(["location", "label"])
-
-    # separate figure for each barrel ("location"= IB, OB)...
-    for location, data_location in data_analysis.groupby("location"):
-        # ...and position ("position"= bottom, top)
-        for position, data_position in data_location.groupby("position"):
-
-            # -------------------------------------------------------------------------------
-            # create plot structure: M columns, N rows with subplots for each channel
-            # -------------------------------------------------------------------------------
-
-            # number of channels in this barrel
-            if location == "IB":
-                num_rows = 3
-                num_cols = 3
-            if location == "OB":
-                num_rows = 4
-                num_cols = 5
-            # create corresponding number of subplots for each channel, set constrained layout to accommodate figure suptitle
-            fig, axes = plt.subplots(
-                nrows=num_rows,
-                ncols=num_cols,
-                figsize=(10, num_rows * 3),
-                sharex=True,
-                constrained_layout=True,
-            )  # , sharey=True)
-
-            # -------------------------------------------------------------------------------
-            # plot
-            # -------------------------------------------------------------------------------
-
-            data_position = data_position.reset_index()
-            channel = data_position["channel"].unique()
-            det_idx = 0
-            col_idx = 0
-            labels = []
-            for ax_row in axes:
-                for (
-                    axes
-                ) in ax_row:  # this is already the Axes object (no need to add ax_idx)
-                    # plot one channel on each axis, ordered by position
-                    data_position = data_position[
-                        data_position["channel"] == channel[col_idx]
-                    ]  # get only rows for a given channel
-
-                    # plotting...
-                    if data_position.empty:
-                        det_idx += 1
-                        continue
-
-                    plot_style(
-                        data_position, fig, axes, plot_info, color=COLORS[det_idx]
-                    )
-                    labels.append(data_position["label"])
-
-                    if channel[det_idx] not in par_dict.keys():
-                        par_dict[channel[det_idx]] = {}
-
-                    # set label as title for each axes
-                    text = (
-                        data_position["label"].iloc[0][4:]
-                        if position == "top"
-                        else data_position["label"].iloc[0][7:]
-                    )
-                    axes.set_title(label=text, loc="center")
-
-                    # add grid
-                    axes.grid("major", linestyle="--")
-                    axes.set_axisbelow(True)
-                    # remove automatic y label since there will be a shared one
-                    axes.set_ylabel("")
-
-                    det_idx += 1
-                    col_idx += 1
-
-            fig.suptitle(
-                f"{plot_info['subsystem']} - {plot_info['title']}\n{position} {location}",
-                y=1.15,
-            )
-            # fig.supylabel(f'{plotdata.param.label} [{plotdata.param.unit_label}]') # --> plot style
-            plt.savefig(pdf, format="pdf", bbox_inches="tight")
-            # figures are retained until explicitly closed; close to not consume too much memory
-            plt.close()
-
-            with io.BytesIO() as buf:
-                fig.savefig(buf, bbox_inches="tight")
-                buf.seek(0)
-                par_dict[f"figure_plot_{location}_{position}"] = buf.getvalue()
-
-    return par_dict
+    for (barrel, position), data_bp in data_analysis.groupby(
+        ["barrel", "position"], observed=True
+    ):
+        fibers = sorted(data_bp["location"].astype(str).unique())
+        fig, axes = plt.subplots(
+            len(fibers),
+            figsize=(10, len(fibers) * 3),
+            sharex=True,
+            sharey=True,
+            constrained_layout=True,
+            squeeze=False,
+        )
+        for ax, fiber in zip(axes[:, 0], fibers):
+            data_fiber = data_bp[data_bp["location"].astype(str) == fiber]
+            legend = []
+            for idx, (label, data_channel) in enumerate(data_fiber.groupby("label")):
+                plot_style(data_channel, fig, ax, plot_info, colors[idx % len(colors)])
+                legend.append(label)
+            ax.grid("major", linestyle="--")
+            ax.set_axisbelow(True)
+            ax.set_title(f"fiber {fiber}")
+            ax.set_ylabel("")
+            ax.legend(labels=legend, loc="center left", bbox_to_anchor=(1, 0.5))
+            if "limits" in plot_info:
+                plot_limits(ax, plot_info["parameters"], plot_info["limits"])
+        fig.suptitle(
+            f"{plot_info['subsystem']} - {plot_info['title']}\n{barrel} {position}",
+            y=1.05,
+        )
+        plt.savefig(pdf, format="pdf", bbox_inches="tight")
+        plt.close()
 
 
 # -------------------------------------------------------------------------------
@@ -990,7 +935,7 @@ def get_fwhm_for_fixed_ch(data_channel: DataFrame, parameter: str) -> float:
         return 0
 
 
-def plot_limits(ax: plt.Axes, params: list, limits: Union[list, dict]):
+def plot_limits(ax: plt.Axes, params: list, limits: list | dict):
     """Plot limits (if present) on the plot. The multi-params case is carefully handled."""
     # one parameter case
     if (isinstance(params, list) and len(params) == 1) or isinstance(params, str):
@@ -1026,694 +971,6 @@ def save_pdf(plt, pdf: PdfPages):
 # -------------------------------------------------------------------------------
 # energy-scale plotting functions
 # -------------------------------------------------------------------------------
-
-
-def apply_cal_to_following_run(mu_vals: np.ndarray, cal_vals: np.ndarray):
-    """
-    Apply calibration parameters from each run to the following run's ADC values.
-
-    Returns a list of calibrated peak positions in keV for each following run.
-
-    Assumes `mu_vals` and `cal_vals` have the same length.
-    If `mu_vals` and `cal_vals` do not have the same length an error is raised.
-    The function shifts the arrays so that each calibration is applied to the subsequent run:
-    - drops the first element of `mu_vals`
-    - drops the last element of `cal_vals`
-
-    Each ADC value is converted to keV using a polynomial calibration.
-
-    Parameters
-    ----------
-    mu_vals : np.ndarray
-        Sequence of ADC peak positions (one per run).
-    cal_vals : np.ndarray
-        Sequence of calibration polynomial coefficients (one per run).
-    """
-    if len(mu_vals) == len(cal_vals):
-        mu_vals = mu_vals[1:]
-        cal_vals = cal_vals[:-1]
-        mu_keV = []
-        for mu, cal_v in zip(mu_vals, cal_vals):
-            mu_keV.append(np.polynomial.polynomial.polyval(mu, cal_v))
-        return mu_keV
-    else:
-        raise ValueError
-
-
-def filter_period(keys: list, vals: list, *periods):
-    """
-    Filter key-value pairs by matching key prefixes (e.g. 'p18'); only entries where the key starts with any of the provided period prefixes (e.g. 'p18', 'p19') are retained.
-
-    Returns filtered (keys, values), otherwise empty lists if no matches are found.
-
-    Parameters
-    ----------
-    keys : list
-        List of keys
-    vals : list
-        Values corresponding to `keys`.
-    *periods : ntuple of str
-        Variable number of prefix strings to filter by.
-    """
-    items = [
-        (k, v) for k, v in zip(keys, vals) if any(k.startswith(p) for p in periods)
-    ]
-    if not items:
-        return [], []
-    ks, vs = zip(*items)
-
-    return list(ks), list(vs)
-
-
-def plot_det_status(det_name: str, ax: Axes, detector_status: dict, keys: list):
-    """
-    Overlay detector usability status as shaded regions on a plot: 'ac' ('off') grey (red) shaded region.
-
-    Parameters
-    ----------
-    det_name : str
-        Detector identifier.
-    ax :  Axes
-        Axis object to draw on.
-    detector_status : dict
-        Nested dictionary containing detector status information, with 'processable' and 'usability' keys, per detector.
-    keys : list
-        Ordered run keys corresponding to x-axis positions.
-    """
-    usab_vals = detector_status[det_name]["usability"]
-
-    for j, k in enumerate(keys):
-        usab_v = usab_vals[k]
-
-        if usab_v == "ac":
-            ax.axvspan(j - 0.5, j + 0.5, alpha=0.15, color="grey")
-        elif usab_v == "off":
-            ax.axvspan(j - 0.5, j + 0.5, alpha=0.15, color="r")
-
-
-def align_to_keys(all_keys: list, keys: list, values: list, categorical=False):
-    """
-    Align values to a reference list of keys.
-
-    Creates an array matching `all_keys` and fills in values where keys match.
-    Missing entries are filled with NaN (numeric) or None (categorical).
-    Returns array of values aligned to `all_keys`.
-
-    Parameters
-    ----------
-    all_keys : list
-        Reference list of keys defining the output order.
-    keys : list
-        Keys corresponding to provided values.
-    values : list
-        Values to align.
-    categorical : bool, optional
-        If True, output array is object dtype with None for missing values.
-        Otherwise (default), uses float dtype with NaN for missing values.
-    """
-    key_to_idx = {k: i for i, k in enumerate(all_keys)}
-
-    if categorical:
-        aligned = np.full(len(all_keys), None, dtype=object)
-    else:
-        aligned = np.full(len(all_keys), np.nan, dtype=float)
-
-    for k, v in zip(keys, values):
-        if k in key_to_idx:
-            aligned[key_to_idx[k]] = v
-
-    return aligned
-
-
-def plot_variable(
-    det_name: str,
-    ax: Axes,
-    all_keys: np.ndarray,
-    keys: list,
-    vals: list,
-    det_status: dict,
-    periods: list | str,
-    current_run: str,
-    errs=None,
-    title="",
-    units="keV",
-    alpha=1,
-    fixed_thr=None,
-    err_thr=None,
-    plot_det_stat=False,
-    plot_mean=True,
-    exclude_period=None,
-    ylabel=None,
-):
-    """
-    Plot a detector variable over runs, grouped by data-taking periods.
-
-    Data are aligned to `all_keys`, split by period prefixes (e.g., 'p16'),
-    and plotted with optional error bands and threshold lines. Mean values
-    are computed per period using only runs where the detector usability is 'on'.
-
-    Parameters
-    ----------
-    det_name : str
-        Detector identifier.
-    ax :  Axes
-        Axis to plot on.
-    all_keys : np.ndarray
-        Master list of run keys defining x-axis.
-    keys : list
-        Keys corresponding to `vals`.
-    vals : list
-        Values to plot.
-    det_status : dict
-        Detector status dictionary containing usability information.
-    periods : list | str
-        Period to inspect.
-    current_run : str
-        Run to inspect.
-    errs : sequence, optional
-        Uncertainties corresponding to `vals`.
-    title : str, optional
-        Plot title.
-    units : str, optional
-        Units for y-axis label.
-    alpha : float, optional
-        Transparency for plotted data.
-    fixed_thr : float, optional
-        Fixed threshold to draw around the mean.
-    err_thr : float, optional
-        Multiplier for mean error-based thresholds.
-    plot_det_stat : bool, optional
-        If True, overlays detector status shading.
-    plot_mean : bool, optional
-        If True, plots mean lines per period.
-    exclude_period : list of str, optional
-        Period prefixes to exclude.
-    ylabel : str, optional
-        Custom y-axis label (overrides default).
-    """
-    vals_aligned = (
-        align_to_keys(all_keys, keys, vals)
-        if title != "Usability"
-        else align_to_keys(all_keys, keys, vals, categorical=True)
-    )
-    errs_aligned = align_to_keys(all_keys, keys, errs) if errs is not None else None
-
-    target = f"{periods}-{current_run}"
-    not_out_of_bounds = None
-
-    x = np.arange(len(all_keys))
-
-    colors = plt.cm.tab10.colors
-
-    if plot_det_stat:
-        plot_det_status(det_name, ax, det_status, all_keys)
-
-    for i, period in enumerate(periods):
-        color_p = colors[i % len(colors)]
-
-        if exclude_period and period in exclude_period:
-            continue
-
-        mask = np.array([k.startswith(period) for k in all_keys])
-
-        if title == "Usability":
-            x0 = x[mask]
-            vals0 = vals_aligned[mask]
-
-            # map categories → numbers
-            mapping = {"off": 0, "ac": 1, "on": 2}
-            vals0 = np.array([mapping.get(v, np.nan) for v in vals0])
-
-            valid = ~np.isnan(vals0)
-            x0 = x0[valid]
-            vals0 = vals0[valid]
-
-            ax.plot(x0, vals0, ls="-", marker="o", color=color_p, alpha=alpha)
-
-            continue
-
-        x0 = x[mask]
-        vals0 = vals_aligned[mask]
-        valid = ~np.isnan(vals0)
-        x0 = x0[valid]
-        vals0 = vals0[valid]
-
-        if len(x0) == 0:
-            continue
-
-        ax.plot(x0, vals0, ls="--", lw=1, marker="*", color=color_p, alpha=alpha)
-
-        if errs_aligned is not None:
-            errs0 = errs_aligned[mask][valid]
-            ax.fill_between(x0, vals0 - errs0, vals0 + errs0, alpha=0.3, color=color_p)
-
-        lim_line0 = x0[0] - 0.5
-        lim_line1 = x0[-1] + 0.5
-
-        # Compute mean but include only values where detector is ON
-        usab_vals = det_status[det_name]["usability"]
-        usab_aligned = align_to_keys(
-            all_keys, list(usab_vals.keys()), list(usab_vals.values()), categorical=True
-        )
-
-        usab0 = usab_aligned[mask][valid]
-        good = usab0 == "on"
-        vals_good = vals0[good]
-
-        if len(vals_good) > 0:
-            mean_arr_p = np.nanmean(vals_good)
-
-            if plot_mean:
-                ax.hlines(mean_arr_p, lim_line0, lim_line1, color="k", ls=":", lw=1.2)
-
-            if fixed_thr is not None:
-                ax.hlines(
-                    mean_arr_p + fixed_thr,
-                    lim_line0,
-                    lim_line1,
-                    color="r",
-                    ls="--",
-                    lw=1.2,
-                )
-                ax.hlines(
-                    mean_arr_p - fixed_thr,
-                    lim_line0,
-                    lim_line1,
-                    color="r",
-                    ls="--",
-                    lw=1.2,
-                )
-
-                if target in all_keys:
-                    idx = np.where(all_keys == target)[0][0]
-                    val = vals_aligned[idx]
-                    upper = mean_arr_p + fixed_thr
-                    lower = mean_arr_p - fixed_thr
-                    not_out_of_bounds = bool(lower <= val <= upper)
-
-            if err_thr is not None and errs_aligned is not None:
-                errs0 = errs_aligned[mask][valid]
-                errs_good = errs0[good]
-                means_err = np.nanmean(errs_good)
-
-                ax.hlines(
-                    mean_arr_p - err_thr * means_err,
-                    lim_line0,
-                    lim_line1,
-                    color="r",
-                    ls="--",
-                    lw=1.2,
-                )
-                ax.hlines(
-                    mean_arr_p + err_thr * means_err,
-                    lim_line0,
-                    lim_line1,
-                    color="r",
-                    ls="--",
-                    lw=1.2,
-                )
-
-                if target in all_keys:
-                    idx = np.where(all_keys == target)[0][0]
-                    val = vals_aligned[idx]
-                    upper = mean_arr_p + err_thr * means_err
-                    lower = mean_arr_p - err_thr * means_err
-                    not_out_of_bounds = bool(lower <= val <= upper)
-
-    ax.set_title(title, fontsize=14)
-    if ylabel is None:
-        ax.set_ylabel(f"{title} ({units})")
-    else:
-        ax.set_ylabel(ylabel)
-    ax.set_xticks(x)
-    ax.set_xticklabels(all_keys, rotation=90, fontsize=11)
-    ax.grid(False)
-
-    if title == "Usability":
-        ax.plot([], [], color="r", ls="--", label="Thresholds")
-        ax.plot([], [], color="k", ls=":", label="Mean")
-        ax.set_yticks([0, 1, 2])
-        ax.set_yticklabels(["OFF", "AC", "ON"])
-        ax.set_ylabel("Status")
-        ax.legend(fontsize=11)
-
-    return not_out_of_bounds
-
-
-def plot_all_detector_info(
-    det_name: str,
-    det_info: dict,
-    partitions_params: dict,
-    detector_status: dict,
-    period: str,
-    current_run: str,
-    output_folder: str,
-    save_pdf=False,
-    exclude_period=None,
-):
-    """
-    Generate a comprehensive multi-panel summary plot of detector performance.
-
-    Produces a grid of subplots showing key quantities such as:
-    - Slow control voltage
-    - Energy resolution (FWHM)
-    - Peak positions and residuals
-    - Baseline properties
-    - Pulse shape parameters
-    - Calibration stability metrics
-
-    Internally extracts, aligns, and plots multiple variables using `plot_variable`.
-
-    Parameters
-    ----------
-    det_name : str
-        Detector identifier.
-    partitions_params : dict
-        Dictionary containing per-detector analysis results and calibration data.
-    detector_status : dict
-        Dictionary with detector usability and slow control information.
-    period : str
-        Period to inspect.
-    current_run : str
-        Run to inspect.
-    output_folder : str
-        Output folder where to save plots.
-    save_pdf : bool, optional
-        True if you want to save pdf files too; default: False.
-    exclude_period : list of str, optional
-        Period prefixes to exclude from plotting.
-    """
-    string = det_info["detectors"][det_name]["string"]
-    position = det_info["detectors"][det_name]["position"]
-    det_results = partitions_params[det_name]
-    usab_values = detector_status[det_name]["usability"]
-
-    all_keys = np.array(sorted(usab_values.keys()))
-
-    e_583 = 583.191
-    e_sep = 2103.511
-    e_fep = 2614.511
-
-    fig, axs = plt.subplots(nrows=4, ncols=3, figsize=(14, 14), facecolor="white")
-
-    def safe_peak(det_results, field, energy):
-        return det_results.get(field, {}).get(energy, {})
-
-    def to_arrays(d):
-        if not d:
-            return np.array([]), np.array([])
-        items = sorted(d.items())  # ensures consistent order
-        keys = np.array([k for k, _ in items])
-        vals = np.array([v for _, v in items])
-        return keys, vals
-
-    def to_arrays_err(d):
-        if not d:
-            return np.array([])
-        items = sorted(d.items())
-        return np.array([v for _, v in items])
-
-    # --- FEP ---
-    mu_fep_keV_first_cal_dict = safe_peak(det_results, "mus_keV_first_cal_peaks", e_fep)
-    mu_fep_keV_first_cal_keys, mu_fep_keV_first_cal = to_arrays(
-        mu_fep_keV_first_cal_dict
-    )
-    mu_fep_keV_first_cal_err = to_arrays_err(
-        safe_peak(det_results, "mus_keV_first_cal_err_peaks", e_fep)
-    )
-
-    mu_fep_keV_keys, mu_fep_keV = to_arrays(
-        safe_peak(det_results, "mus_keV_peaks", e_fep)
-    )
-
-    fwhm_fep_keys, fwhm_fep = to_arrays(safe_peak(det_results, "fwhms_peaks", e_fep))
-    fwhm_fep_err = to_arrays_err(safe_peak(det_results, "fwhms_err_peaks", e_fep))
-
-    mu_fep_ADC_keys, mu_fep_ADC = to_arrays(safe_peak(det_results, "mus_peaks", e_fep))
-
-    # --- 583 keV ---
-    fwhm_583_keys, fwhm_583 = to_arrays(safe_peak(det_results, "fwhms_peaks", e_583))
-    fwhm_583_err = to_arrays_err(safe_peak(det_results, "fwhms_err_peaks", e_583))
-
-    # --- residuals ---
-    fep_residuals_keys, fep_residuals = to_arrays(
-        safe_peak(det_results, "residuals", e_fep)
-    )
-    sep_residuals_keys, sep_residuals = to_arrays(
-        safe_peak(det_results, "residuals", e_sep)
-    )
-
-    # --- derived ---
-    gain_keys, gain = to_arrays(det_results.get("gains", {}))
-
-    # --- other params ---
-    cusp_sigma_keys, cusp_sigma = to_arrays(det_results.get("cusp_sigma", {}))
-    etrap_rise = np.array(list(det_results.get("etrap_rise", {}).values()))
-
-    bl_std_keys, bl_std = to_arrays(det_results.get("bl_std", {}))
-
-    bl_max_keys, bl_max = to_arrays(det_results.get("bl_max", {}))
-
-    pzc_keys, pzc = to_arrays(det_results.get("pz_tau", {}))
-
-    alpha_ctc_keys, alpha_ctc = to_arrays(det_results.get("ctc_alpha_par", {}))
-
-    aoe_mu_keys, aoe_mu = to_arrays(det_results.get("aoe_mu", {}))
-    aoe_mu_err = to_arrays_err(det_results.get("aoe_mu_err", {}))
-
-    aoe_sigma_keys, aoe_sigma = to_arrays(det_results.get("aoe_sigma", {}))
-    aoe_sigma_err = to_arrays_err(det_results.get("aoe_sigma_err", {}))
-
-    _ = plot_variable(
-        det_name,
-        axs[0][0],
-        all_keys,
-        list(usab_values.keys()),
-        list(usab_values.values()),
-        detector_status,
-        period,
-        current_run,
-        plot_det_stat=False,
-        plot_mean=False,
-        title="Usability",
-    )
-    escale_fwhm_FEP = plot_variable(
-        det_name,
-        axs[0][1],
-        all_keys,
-        fwhm_fep_keys,
-        fwhm_fep,
-        detector_status,
-        period,
-        current_run,
-        fwhm_fep_err,
-        plot_det_stat=True,
-        title="FWHM at FEP",
-        units="keV",
-        err_thr=3,
-        exclude_period=exclude_period,
-    )
-    escale_fwhm_583 = plot_variable(
-        det_name,
-        axs[0][2],
-        all_keys,
-        fwhm_583_keys,
-        fwhm_583,
-        detector_status,
-        period,
-        current_run,
-        fwhm_583_err,
-        plot_det_stat=True,
-        title="FWHM at 583 keV",
-        units="keV",
-        err_thr=3,
-        exclude_period=exclude_period,
-    )
-    escale_FEP_pos = plot_variable(
-        det_name,
-        axs[1][0],
-        all_keys,
-        mu_fep_keV_first_cal_keys,
-        mu_fep_keV_first_cal,
-        detector_status,
-        period,
-        current_run,
-        mu_fep_keV_first_cal_err,
-        plot_det_stat=True,
-        title="FEP position in keV using first cal",
-        units="keV",
-        fixed_thr=0.65375,
-        exclude_period=exclude_period,
-    )
-    escale_SEP_residual = plot_variable(
-        det_name,
-        axs[1][1],
-        all_keys,
-        sep_residuals_keys,
-        sep_residuals,
-        detector_status,
-        period,
-        current_run,
-        plot_det_stat=True,
-        title="SEP residuals",
-        units="keV",
-        fixed_thr=0.65375,
-        exclude_period=exclude_period,
-    )
-    _ = plot_variable(
-        det_name,
-        axs[1][2],
-        all_keys,
-        cusp_sigma_keys,
-        cusp_sigma,
-        detector_status,
-        period,
-        current_run,
-        plot_det_stat=False,
-        title="",
-        exclude_period=exclude_period,
-    )
-    _ = plot_variable(
-        det_name,
-        axs[1][2],
-        all_keys,
-        cusp_sigma_keys,
-        etrap_rise,
-        detector_status,
-        period,
-        current_run,
-        plot_det_stat=True,
-        title="cusp sigma / etrap rise",
-        units=r"$\mu$s",
-        alpha=0.3,
-        exclude_period=exclude_period,
-    )
-    _ = plot_variable(
-        det_name,
-        axs[2][0],
-        all_keys,
-        bl_std_keys,
-        bl_std,
-        detector_status,
-        period,
-        current_run,
-        plot_det_stat=True,
-        title="bl std",
-        units="ADC",
-        exclude_period=exclude_period,
-    )
-    _ = plot_variable(
-        det_name,
-        axs[2][1],
-        all_keys,
-        bl_max_keys,
-        bl_max,
-        detector_status,
-        period,
-        current_run,
-        plot_det_stat=True,
-        title="bl max",
-        units="ADC",
-        exclude_period=exclude_period,
-    )
-    _ = plot_variable(
-        det_name,
-        axs[2][2],
-        all_keys,
-        pzc_keys,
-        pzc,
-        detector_status,
-        period,
-        current_run,
-        plot_det_stat=True,
-        title="PZ const",
-        units=r"$\mu$s",
-        exclude_period=exclude_period,
-    )
-    _ = plot_variable(
-        det_name,
-        axs[3][0],
-        all_keys,
-        alpha_ctc_keys,
-        alpha_ctc,
-        detector_status,
-        period,
-        current_run,
-        plot_det_stat=True,
-        title="alpha ctc",
-        units="ns^-1",
-        exclude_period=exclude_period,
-    )
-    _ = plot_variable(
-        det_name,
-        axs[3][1],
-        all_keys,
-        aoe_mu_keys,
-        aoe_mu,
-        detector_status,
-        period,
-        current_run,
-        aoe_mu_err,
-        plot_det_stat=True,
-        title="AoE mu",
-        units="a. u.",
-        exclude_period=exclude_period,
-    )
-    _ = plot_variable(
-        det_name,
-        axs[3][2],
-        all_keys,
-        aoe_sigma_keys,
-        aoe_sigma,
-        detector_status,
-        period,
-        current_run,
-        aoe_sigma_err,
-        plot_det_stat=True,
-        title="AoE sigma",
-        units="a. u.",
-        exclude_period=exclude_period,
-    )
-
-    plt.suptitle(f"{det_name}, String {string}", fontsize=16)
-    plt.tight_layout()
-
-    if save_pdf:
-        final_path = os.path.join(
-            output_folder,
-            period,
-            "mtg/pdf",
-            f"st{string}",
-            f"{period}_string{string}_pos{position}_{det_name}_ESCALEusability.pdf",
-        )
-        os.makedirs(os.path.dirname(final_path), exist_ok=True)
-        fig.savefig(final_path)
-
-    # store the serialized plot in a shelve object under key
-    serialized_plot = pickle.dumps(plt.gcf())
-    with shelve.open(
-        os.path.join(
-            output_folder,
-            period,
-            "mtg",
-            f"l200-{period}-cal-monitoring",
-        ),
-        "c",
-        protocol=pickle.HIGHEST_PROTOCOL,
-    ) as shelf:
-        shelf[f"{period}_string{string}_pos{position}_{det_name}_ESCALEusability"] = (
-            serialized_plot
-        )
-    plt.close()
-
-    eval_result = {
-        "escale_fwhm_FEP": escale_fwhm_FEP,
-        "escale_fwhm_583": escale_fwhm_583,
-        "escale_FEP_pos": escale_FEP_pos,
-        "escale_SEP_residual": escale_SEP_residual,
-    }
-
-    return eval_result
 
 
 # mapping user keywords to plot style functions
