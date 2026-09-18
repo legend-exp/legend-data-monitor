@@ -1,7 +1,7 @@
 """Plot-free helpers for loading and manipulating monitoring time series."""
 
-import os
 import re
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -34,7 +34,7 @@ def compute_diff(
 
 
 def find_hdf_file(
-    directory: str, include: list[str], exclude: list[str] = None
+    directory: str, include: list[str], exclude: list[str] | None = None
 ) -> str | None:
     """
     Find the original HDF monitoring file in a given directory, matching inclusion/exclusion filters.
@@ -49,16 +49,15 @@ def find_hdf_file(
         List of words that the HDF monitoring file to retrieve must NOT contain.
     """
     exclude = exclude or []
-    files = os.listdir(directory)
     candidates = [
         f
-        for f in files
+        for f in sorted(p.name for p in Path(directory).iterdir())
         if f.endswith(".hdf")
         and all(tag in f for tag in include)
         and not any(tag in f for tag in exclude)
     ]
 
-    return os.path.join(directory, candidates[0]) if candidates else None
+    return str(Path(directory) / candidates[0]) if candidates else None
 
 
 def read_if_key_exists(hdf_path: str, key: str) -> pd.DataFrame | None:
@@ -102,14 +101,14 @@ def get_dfs(phy_mtg_data: str, period: str, run_list: list, parameter: str):
     geds_df_abs_corr = []
     puls_df_abs = []
 
-    base_dir = os.path.join(phy_mtg_data, period)
-    runs = os.listdir(base_dir)
+    base_dir = Path(phy_mtg_data) / period
+    runs = [p.name for p in base_dir.iterdir()]
     runs = [r for r in runs if re.fullmatch(r"r\d{3}", r)]
 
     for r in runs:
         if r not in run_list:
             continue
-        run_dir = os.path.join(base_dir, r)
+        run_dir = base_dir / r
 
         # geds file
         hdf_geds = find_hdf_file(run_dir, include=["geds"], exclude=["res", "min"])

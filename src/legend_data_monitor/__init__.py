@@ -40,10 +40,10 @@ _LAZY_ATTRS = {
 }
 
 __all__ = [
-    "__version__",
     "AnalysisData",
     "SlowControl",
     "Subsystem",
+    "__version__",
     "automatic_run",
     "calibration",
     "control_plots",

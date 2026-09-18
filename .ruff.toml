@@ -1,0 +1,41 @@
+# Replaces flake8 (+ isort, pyupgrade), matching the other LEGEND repos.
+# The selected families are the flake8 plugins this repo used to run:
+# bugbear, print, docstrings (numpy convention) and pep8-naming.
+lint.select = [
+  "E", "F", "W", # pycodestyle + pyflakes (flake8 core)
+  "B",           # flake8-bugbear
+  "D",           # flake8-docstrings
+  "I",           # isort
+  "N",           # pep8-naming
+  "T20",         # flake8-print: the logger, never print(), in src/
+  "UP",          # pyupgrade
+  "RUF",         # ruff-specific
+]
+lint.extend-ignore = [
+  "E203",   # whitespace before ':' -- black formats this way
+  "E501",   # line too long -- black owns line length
+  "D1",     # missing docstrings (was flake8's D10)
+  "N806",   # non-lowercase local variable (physics names: Qbb_fwhm, ...)
+  "RUF005", # list concatenation; iterable unpacking is not always clearer
+  "RUF001", # ambiguous unicode in code: plot labels carry real sigmas
+  "RUF002", # ambiguous unicode in docstrings: the x of "time x detector"
+  # Below: rules that flake8 never applied here, so the migration does not
+  # change what CI enforces. flake8-bugbear's B9xx are opt-in and were not
+  # enabled, and these RUF rules have no flake8 equivalent. Worth enabling
+  # one at a time in their own PRs -- B904 (raise ... from) and B905
+  # (zip strict=) in particular are real.
+  "B9",
+  "RUF015", # prefer next(...) over a single-element slice
+  "RUF046", # unnecessary int() on an already-integral value
+  "RUF059", # unused unpacked variable
+]
+lint.pydocstyle.convention = "numpy"
+# flake8 only ever linted .py files, so the example notebooks keep that scope
+extend-exclude = ["notebook"]
+target-version = "py311"
+src = ["src"]
+
+[lint.per-file-ignores]
+# tests may print and need no docstrings; the baseline snapshot is a script
+"tests/**" = ["T20", "D"]
+"docs/**" = ["D"]

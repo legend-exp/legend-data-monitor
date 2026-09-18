@@ -92,8 +92,5 @@ testpaths = ["tests"]
 profile = "black"
 multi_line_output = 3
 
-[tool.flake8]
-extend-ignore = "E203, E501, D10, N806"
-
 [tool.codespell]
 ignore-words-list = "crate, nd, unparseable, compiletime, puls, ser, livetime, whis, acs, anc, anp, ant, aph, ath, bkg, cal, cos, fft, hvs, lac, old_tst, phy, pul, pzc, rdc, ssc, tst, xtc"

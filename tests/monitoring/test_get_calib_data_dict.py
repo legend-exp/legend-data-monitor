@@ -1,3 +1,4 @@
+from pathlib import Path
 from unittest.mock import MagicMock, mock_open, patch
 
 import numpy as np
@@ -42,8 +43,8 @@ def patch_common_io():
             return_value=FAKE_VALIDITY,
         ),
         patch(
-            "legend_data_monitor.monitoring.os.listdir",
-            return_value=["a-b-c-d-0001-extra.lh5"],
+            "legend_data_monitor.loading.calib_files.Path.iterdir",
+            return_value=[Path("a-b-c-d-0001-extra.lh5")],
         ),
     ):
         yield

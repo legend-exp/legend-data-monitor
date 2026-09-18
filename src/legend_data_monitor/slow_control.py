@@ -1,5 +1,4 @@
-from datetime import datetime, timezone
-from typing import Tuple
+from datetime import UTC, datetime
 
 import pandas as pd
 from legendmeta import LegendSlowControlDB
@@ -187,7 +186,7 @@ def get_plotting_info(
     first_tstmp: str,
     last_tstmp: str,
     scdb: LegendSlowControlDB,
-) -> Tuple[str, float, float]:
+) -> tuple[str, float, float]:
     """Return units and low/high limits of a given parameter."""
     table_param = sc_parameters["SC_DB_params"][parameter]["table"]
     flags_param = sc_parameters["SC_DB_params"][parameter]["flags"]
@@ -203,12 +202,8 @@ def get_plotting_info(
     )
 
     # Convert first_tstmp and last_tstmp to datetime objects in the UTC timezone
-    first_tstmp = datetime.strptime(first_tstmp, "%Y%m%dT%H%M%SZ").replace(
-        tzinfo=timezone.utc
-    )
-    last_tstmp = datetime.strptime(last_tstmp, "%Y%m%dT%H%M%SZ").replace(
-        tzinfo=timezone.utc
-    )
+    first_tstmp = datetime.strptime(first_tstmp, "%Y%m%dT%H%M%SZ").replace(tzinfo=UTC)
+    last_tstmp = datetime.strptime(last_tstmp, "%Y%m%dT%H%M%SZ").replace(tzinfo=UTC)
 
     # Filter the DataFrame based on the time interval, starting to look from the latest entry ('reversed(...)')
     times = list(get_table_info["tstamp"].unique())

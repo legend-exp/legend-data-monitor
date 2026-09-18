@@ -1,5 +1,7 @@
 """Auxiliary channels come from the channel map, not from hardcoded rawids."""
 
+from typing import ClassVar
+
 import pytest
 
 from legend_data_monitor import utils
@@ -8,7 +10,7 @@ from legend_data_monitor import utils
 class _FakeMeta:
     """LegendMetadata stand-in returning a channel map like production's."""
 
-    MAP = {
+    MAP: ClassVar[dict] = {
         "PULS01": {"system": "puls", "name": "PULS01", "daq": {"rawid": 1027201}},
         "PULS01ANA": {"system": "puls", "name": "PULS01ANA", "daq": {"rawid": 1027203}},
         "MUON01": {"system": "auxs", "name": "MUON01", "daq": {"rawid": 1027202}},
@@ -47,7 +49,7 @@ def test_rawids_are_not_assumed(monkeypatch):
     """A cycle that renumbers the DAQ must still resolve."""
 
     class _Renumbered(_FakeMeta):
-        MAP = {
+        MAP: ClassVar[dict] = {
             name: {**info, "daq": {"rawid": info["daq"]["rawid"] + 100000}}
             for name, info in _FakeMeta.MAP.items()
         }
@@ -58,7 +60,7 @@ def test_rawids_are_not_assumed(monkeypatch):
 
 def test_missing_systems_are_simply_absent(monkeypatch):
     class _GedsOnly(_FakeMeta):
-        MAP = {"V01234A": _FakeMeta.MAP["V01234A"]}
+        MAP: ClassVar[dict] = {"V01234A": _FakeMeta.MAP["V01234A"]}
 
     monkeypatch.setattr(utils, "LegendMetadata", _GedsOnly)
     assert utils.aux_channels("meta") == {}

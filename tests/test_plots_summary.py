@@ -7,14 +7,14 @@ import matplotlib
 
 matplotlib.use("Agg")
 
-import matplotlib.pyplot as plt  # noqa: E402
-import numpy as np  # noqa: E402
-import pandas as pd  # noqa: E402
-from matplotlib.colors import to_rgba  # noqa: E402
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+from matplotlib.colors import to_rgba
 
-from legend_data_monitor import monitoring, utils  # noqa: E402
-from legend_data_monitor.contract import writer as contract_writer  # noqa: E402
-from legend_data_monitor.plots import summary  # noqa: E402
+from legend_data_monitor import monitoring, utils
+from legend_data_monitor.contract import writer as contract_writer
+from legend_data_monitor.plots import summary
 
 PERIOD, RUN = "p22", "r000"
 

@@ -12,7 +12,7 @@ explicit ``channel`` and ``timestamp`` columns, so callers merge tiers on those
 keys instead of relying on two loaders emitting identically ordered rows.
 """
 
-import os
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -78,7 +78,7 @@ def load_channel_frame(
                     "skipping %s in tier '%s' of %s: %s",
                     channel,
                     tier,
-                    os.path.basename(path),
+                    Path(path).name,
                     exc,
                 )
                 continue
@@ -153,9 +153,8 @@ def resolve_files(
     ``{"<word>": {"start": ..., "end": ...}}``.
     """
     import glob
-    import os
 
-    base = os.path.join(path, version, "generated/tier", tier, datatype, period)
+    base = Path(path) / version / "generated/tier" / tier / datatype / period
     exp = experiment.lower()
 
     if not timerange:

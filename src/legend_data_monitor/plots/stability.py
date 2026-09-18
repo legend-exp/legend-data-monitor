@@ -8,7 +8,7 @@ parameter-stability traces (``gain_shift/...``, ``param_stability/...``,
 calls verbatim -- they are a frozen shifter interface.
 """
 
-import os
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -38,8 +38,11 @@ def _read_frame(path, key, log, warn=True):
 
 def _run_contract_path(output_folder, period, run, data_type):
     """Path of the schema2 run contract file (source of ``detector_map``)."""
-    return os.path.join(
-        output_folder, period, run, f"l200-{period}-{run}-{data_type}-geds-schema2.hdf"
+    return str(
+        Path(output_folder)
+        / period
+        / run
+        / f"l200-{period}-{run}-{data_type}-geds-schema2.hdf"
     )
 
 
@@ -89,14 +92,15 @@ def _save_figure(fig, pdf_dir, pdf_name, save_pdf, png_dir, log, **savefig_kwarg
     """Save the legacy-named PDF (and optional PNG twin); announce both."""
     saved = []
     if save_pdf:
-        os.makedirs(pdf_dir, exist_ok=True)
-        path = os.path.abspath(os.path.join(pdf_dir, pdf_name))
+        Path(pdf_dir).mkdir(parents=True, exist_ok=True)
+        path = str((Path(pdf_dir) / pdf_name).absolute())
         fig.savefig(path, **savefig_kwargs)
         logs.log_saved_plot(log, path)
         saved.append(path)
     if png_dir is not None:
-        os.makedirs(png_dir, exist_ok=True)
-        path = os.path.abspath(os.path.join(png_dir, pdf_name[:-4] + ".png"))
+        Path(png_dir).mkdir(parents=True, exist_ok=True)
+        png_name = pdf_name[:-4] + ".png"
+        path = str((Path(png_dir) / png_name).absolute())
         fig.savefig(path, **savefig_kwargs)
         logs.log_saved_plot(log, path)
         saved.append(path)
@@ -456,7 +460,7 @@ def plot_stability_series(
     apply_monitoring_style()
     log = logger if logger is not None else utils.logger
     path = period_contract_path(output_folder, period, data_type)
-    if not os.path.exists(path):
+    if not Path(path).exists():
         log.warning("no period contract file %s", path)
         return []
     detector_map = _load_detector_map(
@@ -496,7 +500,7 @@ def plot_stability_series(
                 corrected,
                 quadratic,
             )
-            pdf_dir = os.path.join(output_folder, period, "mtg", "pdf", f"st{string}")
+            pdf_dir = str(Path(output_folder) / period / "mtg" / "pdf" / f"st{string}")
             pdf_name = f"{period}_string{string}_pos{position}_{detector}_{plot_type}_gain_shift.pdf"
             saved += _save_figure(fig, pdf_dir, pdf_name, save_pdf, png_dir, log)
             plt.close(fig)
@@ -546,8 +550,8 @@ def plot_stability_series(
                 t0,
                 res0,
             )
-            pdf_dir = os.path.join(
-                output_folder, period, run, "mtg", "pdf", f"st{string}"
+            pdf_dir = str(
+                Path(output_folder) / period / run / "mtg" / "pdf" / f"st{string}"
             )
             pdf_name = (
                 f"{period}_{run}_string{string}_pos{position}_{detector}_{title}.pdf"
@@ -618,7 +622,7 @@ def plot_fep_gain(
         fig = _build_fep_gain_figure(
             period, run, detector, string, position, rows.sort_values("time_s")
         )
-        pdf_dir = os.path.join(output_folder, period, run, "mtg/pdf", f"st{string}")
+        pdf_dir = str(Path(output_folder) / period / run / "mtg/pdf" / f"st{string}")
         pdf_name = (
             f"{period}_{run}_string{string}_pos{position}_{detector}_FEP_gain_stab.pdf"
         )

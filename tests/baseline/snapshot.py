@@ -66,11 +66,11 @@ def main() -> int:
             if rel not in reference:
                 problems.append(f"EXTRA   {rel}")
         report = "\n".join(problems) if problems else "OK: snapshot matches golden"
-        print(report)  # noqa: T201
+        print(report)
         return 1 if problems else 0
     golden.parent.mkdir(parents=True, exist_ok=True)
     golden.write_text(json.dumps(current, indent=1, sort_keys=True))
-    print(f"wrote {golden} ({len(current)} files)")  # noqa: T201
+    print(f"wrote {golden} ({len(current)} files)")
     return 0
 
 

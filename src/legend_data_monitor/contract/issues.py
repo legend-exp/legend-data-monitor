@@ -21,7 +21,7 @@ docs/auto-giorgio-integration.md) — do not change its format.
 
 import dataclasses
 import json
-import os
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -161,7 +161,7 @@ class Issue:
             if field.name == "plots":
                 # consumers (auto-giorgio) attach these files directly:
                 # always publish absolute paths
-                value = [os.path.abspath(p) for p in value]
+                value = [str(Path(p).absolute()) for p in value]
             out[field.name] = value
         return out
 
@@ -227,12 +227,12 @@ def _span_seconds(idx, i0: int, i1: int) -> float:
 
 def issues_file_path(output_folder: str, period: str, run: str, datatype: str) -> str:
     """Path of the issues JSONL for one (period, run, datatype)."""
-    return os.path.join(
-        output_folder,
-        "generated/mon/issues",
-        period,
-        run,
-        f"l200-{period}-{run}-{datatype}-issues.jsonl",
+    return str(
+        Path(output_folder)
+        / "generated/mon/issues"
+        / period
+        / run
+        / f"l200-{period}-{run}-{datatype}-issues.jsonl"
     )
 
 
@@ -341,7 +341,7 @@ def collapse_correlated(
 
 def write_issues(path: str, issues: list) -> str:
     """Write issues as JSONL (one object per line), replacing any previous file."""
-    os.makedirs(os.path.dirname(path), exist_ok=True)
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w") as f:
         for issue in issues:
             f.write(json.dumps(issue.to_dict(), default=str) + "\n")
