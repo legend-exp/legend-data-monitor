@@ -1,0 +1,67 @@
+# Muon-veto PMT plot configuration used by auto_run alongside geds/spms dicts.
+# The pmts dsp stream is sparse (one row per muon-DAQ trigger, ~5/min) and its
+# timestamps match no other subsystem, so flags cannot attach: everything runs
+# on 'all' events. 'per string' groups by location (pillbox/floor/wall).
+pmts:
+  "PMT baselines (dsp/bl_mean) in all events":
+    parameters: bl_mean
+    event_type: all
+    plot_structure: per string
+    resampled: only
+    plot_style: vs time
+    variation: true
+    time_window: 10min
+
+  "PMT baseline sigma (dsp/bl_sig) in all events":
+    parameters: bl_sig
+    event_type: all
+    plot_structure: per string
+    resampled: only
+    plot_style: vs time
+    variation: false
+    time_window: 10min
+
+  "PMT pulse height (dsp/pulseHeight) in all events":
+    parameters: pulseHeight
+    event_type: all
+    plot_structure: per string
+    resampled: only
+    plot_style: vs time
+    variation: false
+    time_window: 10min
+
+  "PMT max peak height (dsp/max_peak_height) in all events":
+    parameters: max_peak_height
+    event_type: all
+    plot_structure: per string
+    resampled: only
+    plot_style: vs time
+    variation: false
+    time_window: 10min
+
+  "PMT mean peak height (dsp/mean_peak_height) in all events":
+    parameters: mean_peak_height
+    event_type: all
+    plot_structure: per string
+    resampled: only
+    plot_style: vs time
+    variation: false
+    time_window: 10min
+
+  "PMT pulse fraction (dsp/containsPulse) in all events":
+    parameters: containsPulse
+    event_type: all
+    plot_structure: per string
+    resampled: only
+    plot_style: vs time
+    variation: false
+    time_window: 10min
+
+  "PMT trigger rate (event_rate) in all events":
+    parameters: event_rate
+    event_type: all
+    plot_structure: per string
+    resampled: only
+    plot_style: vs time
+    variation: false
+    time_window: 10min

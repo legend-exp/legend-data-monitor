@@ -17,6 +17,7 @@ import os
 import numpy as np
 import pandas as pd
 from lgdo import lh5
+from lh5.io.exceptions import LH5DecodeError
 
 from .. import utils
 
@@ -72,7 +73,7 @@ def load_channel_frame(
                 frame = lh5.read_as(
                     f"{channel}/{tier}/", [path], library="pd", field_mask=fields
                 )
-            except (KeyError, ValueError) as exc:
+            except (KeyError, ValueError, LH5DecodeError) as exc:
                 utils.logger.debug(
                     "skipping %s in tier '%s' of %s: %s",
                     channel,

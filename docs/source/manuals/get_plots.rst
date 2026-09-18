@@ -109,7 +109,10 @@ In particular, ``dataset`` settings are:
 
 A ``saving`` option is available to either ``"overwrite"`` any already present output file (or create a new one if not present) or ``"append"`` new data to the previously obtained output files.
 
-Then, ``subsystems`` can either be ``pulser``, ``geds`` or ``spms``. For SiPMs the
+Then, ``subsystems`` can be ``pulser``, ``geds``, ``spms`` or ``pmts``
+(muon-veto PMTs: a sparse stream with one row per muon-DAQ trigger, so only
+``event_type: all`` is meaningful and plots group by location
+pillbox/floor/wall). For SiPMs the
 ragged per-pulse hit fields are reduced to one value per event at load time
 (``settings/spms-reductions.yaml``): ``n_pulses`` (valid pulses in the event
 window), ``pe_sum`` and ``pe_max`` (p.e. over valid pulses), ``first_trigger_ns``;

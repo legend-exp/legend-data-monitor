@@ -2430,6 +2430,53 @@ def _aux_channels_cached(metadata_path, start_key=None):
     return tuple(sorted(found.items()))
 
 
+def build_pmts_info(metadata_path, start_key=None):
+    """
+    Build muon-veto PMT information from LEGEND metadata, keyed by channel name.
+
+    Parameters
+    ----------
+    metadata_path : str
+        LEGEND metadata root (``<prod>/inputs``).
+    start_key : str, optional
+        Timestamp key selecting the channel map; latest when omitted.
+
+    Returns
+    -------
+    dict
+        name -> {daq_rawid, location, processable, usability}; ``location``
+        is ``pillbox``/``floor``/``wall`` (a plain string in the channel map,
+        unlike the geds/spms location dicts).
+    """
+    return copy.deepcopy(_build_pmts_info_cached(metadata_path, start_key))
+
+
+@lru_cache(maxsize=None)
+def _build_pmts_info_cached(metadata_path, start_key=None):
+    lmeta = LegendMetadata(metadata_path)
+    chmap = lmeta.channelmap(start_key) if start_key else lmeta.channelmap()
+    key = start_key or datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+    try:
+        statuses = TextDB(os.path.join(metadata_path, "datasets/statuses")).on(
+            timestamp=key
+        )
+    except Exception:  # noqa: BLE001 - statuses stay None when unavailable
+        statuses = {}
+    detectors = {}
+    for det, info in chmap.items():
+        if info["system"] != "pmts" or info["name"] != det:
+            continue
+        status = statuses.get(det, {}) if hasattr(statuses, "get") else {}
+        detectors[det] = {
+            "name": det,
+            "daq_rawid": info["daq"]["rawid"],
+            "location": info["location"],
+            "processable": status.get("processable", None),
+            "usability": status.get("usability", None),
+        }
+    return detectors
+
+
 def build_detector_info_per_period(auto_dir_path: str, run_dict: dict, period: str):
     metadata_path = os.path.join(auto_dir_path, "inputs")
     lmeta = LegendMetadata(metadata_path)

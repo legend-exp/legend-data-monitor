@@ -2217,3 +2217,260 @@ def write_spe_spectrum(
     if written:
         _refresh_run_manifest(output_folder, period, run, data_type)
     return written
+
+
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# Muon veto (pmts) from the dsp tier: this production has no evt_muon group,
+# and the muon DAQ triggers independently of the geds stream (its timestamps
+# match nothing else), so the per-trigger quantities are derived from the
+# per-PMT dsp rows themselves and the ge-coincidence from evt/coincident.
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+#: per-PMT pulse-height spectrum: fixed range so the flow bins absorb outliers
+PMT_SPEC_BINS = 500
+PMT_SPEC_RANGE = (0.0, 100.0)
+
+
+def read_pmt_events(dsp_files: list, rawid_to_name: dict) -> tuple:
+    """
+    Collect the muon-DAQ triggers and fill the per-PMT pulse-height spectra.
+
+    One dsp row per PMT per muon-DAQ trigger (~5/min): small enough to read
+    whole. The spectrum takes every pulse height unmasked (no ``containsPulse``
+    cut) so the single-photoelectron region is not clipped; the per-trigger
+    ``light_sum`` counts only PMTs that actually saw a pulse.
+
+    Parameters
+    ----------
+    dsp_files : list
+        dsp-tier LH5 files of the run.
+    rawid_to_name : dict
+        PMT rawid -> name, from :func:`utils.build_pmts_info`.
+
+    Returns
+    -------
+    tuple
+        ``(events, spectrum)``: per-trigger frame (datetime index;
+        ``multiplicity`` = PMTs with a pulse, ``light_sum`` = summed pulse
+        height in LSB) and the Regular(pulse height) x StrCategory(PMT)
+        histogram of every pulse height.
+    """
+    from lgdo import lh5
+    from lh5.io.exceptions import LH5DecodeError
+
+    from .processing import binning
+
+    spectrum = binning.empty_distribution_2d(PMT_SPEC_BINS, PMT_SPEC_RANGE)
+    per_channel = []
+    for rawid, name in sorted(rawid_to_name.items()):
+        frames = []
+        for path in dsp_files:
+            try:
+                frames.append(
+                    lh5.read_as(
+                        f"ch{rawid}/dsp/",
+                        [path],
+                        library="pd",
+                        field_mask=["timestamp", "pulseHeight", "containsPulse"],
+                    )
+                )
+            except (KeyError, ValueError, TypeError, LH5DecodeError):
+                # a PMT can be absent from a file (e.g. switched off)
+                continue
+        if not frames:
+            continue
+        frame = pd.concat(frames, ignore_index=True)
+        heights = frame["pulseHeight"].to_numpy()
+        has_pulse = frame["containsPulse"].astype(bool).to_numpy()
+        finite = np.isfinite(heights)
+        if finite.any():
+            spectrum.fill(heights[finite], name)
+        per_channel.append(
+            pd.DataFrame(
+                {
+                    "timestamp": frame["timestamp"],
+                    "has_pulse": has_pulse,
+                    # only PMTs that saw a pulse contribute to the summed light
+                    "height": np.where(finite & has_pulse, heights, 0.0),
+                }
+            )
+        )
+    if not per_channel:
+        return pd.DataFrame(), spectrum
+    stacked = pd.concat(per_channel, ignore_index=True)
+    grouped = stacked.groupby("timestamp")
+    events = pd.DataFrame(
+        {
+            "multiplicity": grouped["has_pulse"].sum(),
+            "light_sum": grouped["height"].sum(),
+        }
+    )
+    events.index = pd.to_datetime(events.index, unit="s", utc=True)
+    events.index.name = "datetime"
+    return events.sort_index(), spectrum
+
+
+def muon_veto_series(
+    events: pd.DataFrame, coincidence: pd.DataFrame, freq: str = "1h"
+) -> pd.DataFrame:
+    """
+    Hourly muon-veto performance.
+
+    Parameters
+    ----------
+    events : pandas.DataFrame
+        Per-trigger frame from :func:`read_pmt_events`.
+    coincidence : pandas.DataFrame
+        Per-geds-event booleans ``muon``/``muon_offline`` (datetime index)
+        from the evt tier's ``coincident`` group.
+    freq : str
+        Resampling cadence.
+
+    Returns
+    -------
+    pandas.DataFrame
+        ``muon_rate_hz`` (muon-DAQ triggers), ``multiplicity_median`` and
+        ``light_sum_median`` per trigger, and the fraction of geds events in
+        coincidence with a muon (``ge_coincidence_frac``, ``_offline``).
+    """
+    if events.empty:
+        return pd.DataFrame()
+    seconds = pd.Timedelta(freq).total_seconds()
+    grouped = events.resample(freq)
+    out = pd.DataFrame(
+        {
+            "muon_rate_hz": grouped.size() / seconds,
+            "multiplicity_median": grouped["multiplicity"].median(),
+            "light_sum_median": grouped["light_sum"].median(),
+        }
+    )
+    if coincidence is not None and not coincidence.empty:
+        resampled = coincidence.resample(freq)
+        out["ge_coincidence_frac"] = resampled["muon"].mean()
+        if "muon_offline" in coincidence.columns:
+            out["ge_coincidence_frac_offline"] = resampled["muon_offline"].mean()
+    out.index.name = "datetime"
+    return out.astype("float32")
+
+
+def write_muon_summary(
+    output_folder: str,
+    period: str,
+    run: str,
+    dsp_files: list,
+    evt_files: list,
+    rawid_to_name: dict,
+    data_type: str = "phy",
+) -> list:
+    """
+    Publish the run's muon-veto performance to the period and pmts contracts.
+
+    Parameters
+    ----------
+    output_folder : str
+        Monitoring output root (the folder containing ``<period>/``).
+    period, run : str
+        Run to summarise.
+    dsp_files, evt_files : list
+        dsp- and evt-tier LH5 files of the run.
+    rawid_to_name : dict
+        PMT rawid -> name, from :func:`utils.build_pmts_info`.
+    data_type : str
+        Data type key of the contract files.
+
+    Returns
+    -------
+    list
+        Keys written: ``muon_veto/<run>`` in the period file and, in the
+        run's pmts contract, ``hist/All_Pulseheight_dist2d`` (the SPP
+        spectrum per PMT) plus ``_dist`` keys for the per-trigger
+        multiplicity and summed light.
+    """
+    from lgdo import lh5
+
+    from .processing import binning
+
+    events, spectrum = read_pmt_events(dsp_files, rawid_to_name)
+    if events.empty:
+        utils.logger.warning(
+            "...no pmts dsp rows for %s/%s; no muon summary", period, run
+        )
+        return []
+
+    coincidence = pd.DataFrame()
+    if evt_files:
+        frames = []
+        for path in evt_files:
+            try:
+                frame = lh5.read_as(
+                    "evt/",
+                    path,
+                    library="pd",
+                    field_mask=[
+                        "trigger/timestamp",
+                        "coincident/muon",
+                        "coincident/muon_offline",
+                    ],
+                )
+            except (KeyError, ValueError, TypeError):
+                continue
+            frames.append(
+                frame.rename(
+                    columns={
+                        "coincident_muon": "muon",
+                        "coincident_muon_offline": "muon_offline",
+                    }
+                )
+            )
+        if frames:
+            coincidence = pd.concat(frames, ignore_index=True)
+            coincidence = coincidence.set_index(
+                pd.to_datetime(coincidence.pop("trigger_timestamp"), unit="s", utc=True)
+            )
+
+    written = []
+    path = period_contract_path(output_folder, period, data_type)
+    written.append(
+        contract_writer.write_frame(
+            path, f"muon_veto/{run}", muon_veto_series(events, coincidence)
+        )
+    )
+
+    contract = os.path.join(
+        output_folder, period, run, f"l200-{period}-{run}-{data_type}-pmts-schema2.hdf"
+    )
+    if os.path.isfile(contract):
+        if spectrum.sum():
+            written.append(
+                contract_writer.write_distribution_2d(
+                    contract,
+                    "All",
+                    "Pulseheight",
+                    spectrum,
+                    {
+                        "unit": "LSB",
+                        "label": "Pulse height",
+                        "event_type": "All",
+                        "selection": "all triggers (containsPulse not applied)",
+                    },
+                )
+            )
+        for name, series in (
+            ("MuonMultiplicity", events["multiplicity"]),
+            ("MuonLightSum", events["light_sum"]),
+        ):
+            values = series.to_numpy(dtype=float)
+            if len(values):
+                written.append(
+                    contract_writer.write_distribution(
+                        contract,
+                        "All",
+                        name,
+                        binning.fill_distribution(values),
+                        {"event_type": "All", "label": name},
+                    )
+                )
+        _refresh_run_manifest(output_folder, period, run, data_type)
+    else:
+        utils.logger.debug("no pmts contract at %s; period key only", contract)
+    return written

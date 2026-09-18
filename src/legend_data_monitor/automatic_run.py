@@ -127,7 +127,7 @@ def auto_run(
     pkg = importlib.resources.files("legend_data_monitor")
     # one plot dictionary per subsystem; each produces its own v1 + contract file
     subsystems_dict = {}
-    for name in ("geds-dict.yaml", "spms-dict.yaml"):
+    for name in ("geds-dict.yaml", "spms-dict.yaml", "pmts-dict.yaml"):
         with open(pkg / "settings" / name) as f:
             subsystems_dict |= yaml.load(f, Loader=yaml.CLoader)
 
@@ -293,6 +293,45 @@ def auto_run(
         )
         utils.logger.info("...SPE spectrum keys written: %s", written)
 
+    def task_muon_summary(logger=None):
+        """Summarise the muon veto from the pmts dsp stream (~1 min).
+
+        This production has no evt_muon group and the muon DAQ triggers
+        independently of the geds stream, so the per-trigger multiplicity and
+        summed light come from the per-PMT dsp rows and the ge-coincidence
+        fractions from evt/coincident.
+        """
+        dsp_dir = os.path.join(
+            auto_dir_path, "generated/tier/dsp", data_type, period, run
+        )
+        dsp_files = sorted(glob.glob(os.path.join(dsp_dir, "*.lh5")))
+        if not dsp_files:
+            utils.logger.info("...no dsp files for %s/%s; no muon summary", period, run)
+            return
+        names = {
+            info["daq_rawid"]: name
+            for name, info in utils.build_pmts_info(
+                os.path.join(auto_dir_path, "inputs")
+            ).items()
+        }
+        if not names:
+            utils.logger.info("...no pmts in the channel map; no muon summary")
+            return
+        evt_dir = os.path.join(
+            auto_dir_path, "generated/tier/evt", data_type, period, run
+        )
+        evt_files = sorted(glob.glob(os.path.join(evt_dir, "*.lh5")))
+        written = monitoring.write_muon_summary(
+            phy_folder,
+            period,
+            run,
+            dsp_files,
+            evt_files,
+            rawid_to_name=names,
+            data_type=data_type,
+        )
+        utils.logger.info("...muon summary keys written: %s", written)
+
     def task_strip_transport(logger=None):
         """Drop the v1 classifier pivots of the period's finished runs.
 
@@ -430,6 +469,7 @@ def auto_run(
         )
         task_list.append(tasks.Task("qc_plots", task_qc_plots, period, run))
         task_list.append(tasks.Task("lar_summary", task_lar_summary, period, run))
+        task_list.append(tasks.Task("muon_summary", task_muon_summary, period, run))
         task_list.append(tasks.Task("phy_issues", task_phy_issues, period, run))
         task_list.append(
             tasks.Task("strip_transport", task_strip_transport, period, run)

@@ -203,6 +203,7 @@ def write_frame(file_path: str, key: str, frame: pd.DataFrame) -> str:
 DETECTOR_MAP_COLUMNS = {
     "geds": ["string", "position", "processable", "usability", "mass_in_kg"],
     "spms": ["barrel", "fiber", "position", "processable", "usability"],
+    "pmts": ["location", "processable", "usability"],
 }
 
 

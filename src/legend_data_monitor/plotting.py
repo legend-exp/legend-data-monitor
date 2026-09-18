@@ -226,6 +226,7 @@ def make_subsystem_plots(
             "locname": {
                 "geds": "string",
                 "spms": "fiber",
+                "pmts": "location",
                 "pulser": "puls",
                 "pulser01ana": "pulser01ana",
                 "FCbsln": "FC bsln",

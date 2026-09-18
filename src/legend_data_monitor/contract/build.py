@@ -92,7 +92,7 @@ def build_contract_files(
         v1 key bodies (e.g. ``IsPulser_BlMean``) to refresh in place; the rest
         of an existing contract file is kept. Default rebuilds everything.
     subsystem : str
-        ``geds`` or ``spms``; selects the v1 input, the ``-<subsystem>-schema2``
+        ``geds``, ``spms`` or ``pmts``; selects the v1 input, the ``-<subsystem>-schema2``
         output and the detector-map flavour. The manifest lists every
         subsystem file built for the run.
 
@@ -112,6 +112,8 @@ def build_contract_files(
     if metadata_path is not None:
         if subsystem == "spms":
             detectors = utils.build_spms_info(metadata_path)
+        elif subsystem == "pmts":
+            detectors = utils.build_pmts_info(metadata_path)
         else:
             detectors = utils.build_detector_info(metadata_path)["detectors"]
         rename = {info["daq_rawid"]: name for name, info in detectors.items()}

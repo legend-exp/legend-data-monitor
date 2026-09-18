@@ -107,3 +107,10 @@ n_pulses: hit
 pe_sum: hit
 pe_max: hit
 first_trigger_ns: hit
+# pmts (muon veto) dsp fields; sparse stream, one row per muon-DAQ trigger
+bl_sig: dsp
+pulseHeight: dsp
+rawPulseHeight: dsp
+max_peak_height: dsp
+mean_peak_height: dsp
+containsPulse: dsp

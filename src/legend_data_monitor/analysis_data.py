@@ -590,9 +590,15 @@ class AnalysisData:
             return False
         return self.data["barrel"].notna().any()
 
+    def is_pmts(self) -> bool:
+        """Return True for muon-veto PMT data (its locations are the tank groups)."""
+        if self.data.empty or self.is_spms():
+            return False
+        return str(self.data.iloc[0]["location"]) in ("pillbox", "floor", "wall")
+
     def is_geds(self) -> bool:
-        """Return True if 'location' (=string) and 'position' are NOT strings."""
-        return not self.is_spms()
+        """Return True if the data is neither SiPM nor PMT flavoured."""
+        return not self.is_spms() and not self.is_pmts()
 
     def is_pulser(self) -> bool:
         """Return True if the system is the pulser channel."""
@@ -647,6 +653,8 @@ class AnalysisData:
             return "muon"
         if self.is_spms():
             return "spms"
+        if self.is_pmts():
+            return "pmts"
         if self.is_geds():
             return "geds"
 
@@ -982,6 +990,7 @@ def load_subsystem_data(
             "locname": {
                 "geds": "string",
                 "spms": "fiber",
+                "pmts": "location",
                 "pulser": "puls",
                 "pulser01ana": "pulser01ana",
                 "FCbsln": "FC bsln",

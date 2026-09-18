@@ -56,7 +56,7 @@ def mean_key(flag: str, param: str) -> str:
 
 
 #: subsystems that get their own v1 file and contract file per run
-SUBSYSTEMS = ("geds", "spms")
+SUBSYSTEMS = ("geds", "spms", "pmts")
 
 
 def run_file_name(

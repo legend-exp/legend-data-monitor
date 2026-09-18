@@ -50,6 +50,13 @@ bl_mean:
   - 0.87
   - 1.0
   limits:
+    pmts:
+      variation:
+      - null
+      - null
+      absolute:
+      - null
+      - null
     spms:
       variation:
       - null
@@ -761,6 +768,13 @@ event_rate:
   - 0.94
   - 0.75
   limits:
+    pmts:
+      variation:
+      - null
+      - null
+      absolute:
+      - null
+      - null
     spms:
       variation:
       - null
@@ -1177,6 +1191,78 @@ first_trigger_ns:
   facecol: lightblue
   limits:
     spms:
+      variation:
+      - null
+      - null
+      absolute:
+      - null
+      - null
+bl_sig:
+  label: Baseline sigma
+  unit: ADC
+  facecol: lightsteelblue
+  limits:
+    pmts:
+      variation:
+      - null
+      - null
+      absolute:
+      - null
+      - null
+pulseHeight:
+  label: Pulse height
+  unit: LSB
+  facecol: lightsteelblue
+  limits:
+    pmts:
+      variation:
+      - null
+      - null
+      absolute:
+      - null
+      - null
+rawPulseHeight:
+  label: Raw pulse height
+  unit: LSB
+  facecol: lightsteelblue
+  limits:
+    pmts:
+      variation:
+      - null
+      - null
+      absolute:
+      - null
+      - null
+max_peak_height:
+  label: Max peak height
+  unit: LSB
+  facecol: lightsteelblue
+  limits:
+    pmts:
+      variation:
+      - null
+      - null
+      absolute:
+      - null
+      - null
+mean_peak_height:
+  label: Mean peak height
+  unit: LSB
+  facecol: lightsteelblue
+  limits:
+    pmts:
+      variation:
+      - null
+      - null
+      absolute:
+      - null
+      - null
+containsPulse:
+  label: Contains-pulse fraction
+  unit: a.u.
+  facecol: lightsteelblue
+  limits:
+    pmts:
       variation:
       - null
       - null

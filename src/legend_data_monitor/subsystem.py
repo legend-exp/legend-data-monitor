@@ -118,7 +118,7 @@ class Subsystem:
     """
     Object containing information for a given subsystem such as channel map, channels status etc.
 
-    sub_type [str]: geds | spms | pulser | pulser01ana | FCbsln | muon
+    sub_type [str]: geds | spms | pmts | pulser | pulser01ana | FCbsln | muon
 
     Options for kwargs
 
@@ -880,17 +880,24 @@ class Subsystem:
             ch = entry_info["daq"][ch_flag]
 
             df_map.at[ch, "name"] = entry_info["name"]
-            # number/name of string/fiber for geds/spms, dummy for pulser/pulser01ana/FCbsln/muon
+            # number/name of string/fiber for geds/spms, dummy for pulser/pulser01ana/FCbsln/muon;
+            # for pmts the channel map's location IS the group (pillbox/floor/wall)
             df_map.at[ch, "location"] = (
                 special_systems[self.type]
                 if self.type in special_systems
-                else entry_info["location"][loc_code[self.type]]
+                else (
+                    entry_info["location"]
+                    if self.type == "pmts"
+                    else entry_info["location"][loc_code[self.type]]
+                )
             )
-            # position in string/fiber for geds/spms, dummy for pulser/pulser01ana/FCbsln/muon
+            # position in string/fiber for geds/spms, dummy elsewhere (pmts have none)
             df_map.at[ch, "position"] = (
                 special_systems[self.type]
                 if self.type in special_systems
-                else entry_info["location"]["position"]
+                else (
+                    None if self.type == "pmts" else entry_info["location"]["position"]
+                )
             )
             # barrel (IB/OB) only exists for spms
             df_map.at[ch, "barrel"] = (
