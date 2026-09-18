@@ -34,6 +34,7 @@ def mock_helpers():
             data_type,
             key_result,
             fit,
+            pulser_rawid=None,
         ):
             calib_data["fep"].append(2614 + run)
             calib_data["fep_err"].append(0.1)

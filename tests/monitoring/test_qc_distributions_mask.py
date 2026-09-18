@@ -140,9 +140,7 @@ def test_load_and_filter_aligns_by_position_when_shapes_match(tmp_path):
     idx = pd.date_range("2026-07-01", periods=6, freq="1min", tz="UTC")
     other = pd.date_range("2027-01-01", periods=6, freq="1min", tz="UTC")
     with _store(tmp_path, {"target": _frame(idx, value=5.0)}) as store:
-        mask = pd.DataFrame(
-            [[True, False]] * 6, index=other, columns=RAWIDS
-        )
+        mask = pd.DataFrame([[True, False]] * 6, index=other, columns=RAWIDS)
         out = utils.load_and_filter(store, "/target", mask=mask)
         assert out[RAWIDS[0]].notna().all() and out[RAWIDS[1]].isna().all()
 

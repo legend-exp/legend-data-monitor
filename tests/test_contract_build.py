@@ -222,6 +222,7 @@ def test_param_attrs_take_subsystem_limits():
     attrs = build._param_attrs("IsBsln_WfMode_var", "spms")
     assert attrs["unit"] == "%" and attrs["limits"] == [None, None]
 
+
 def test_keyed_refresh_restores_a_missing_detector_map(tmp_path, monkeypatch):
     """A keyed refresh must not leave a contract without /detector_map."""
     from legend_data_monitor import utils
