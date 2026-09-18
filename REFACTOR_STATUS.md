@@ -461,6 +461,38 @@ formats, (2) release the dashboard, (3) flip the writer and the
 `-manifest.json` name. Needs coordination with legend-monitor-dashboard, so it
 is deliberately left out of this pass.
 
+## Three bugs from the auto-giorgio backfill (2026-08-23)
+
+Reported by the close-out consumer while backfilling p16/p18/p19/p22, all
+fixed in `5098809`. Two of the reported root causes were wrong, so the fixes
+are not what the report proposed:
+
+1. **`qc_distributions` mask** built on an ignore-key-filtered frame and
+   applied to unfiltered ones. The asymmetry was real (the mask now comes from
+   the unfiltered frame; every flag is filtered right after masking, so the
+   semantics are unchanged), but a differing row count alone does *not* raise
+   on pandas 3: `where()` aligns on the index. `validate_putmask` only fires
+   when the mask carries index labels the target lacks -- a repeated
+   timestamp. Since the exact pathology was not reproducible here,
+   `utils.load_and_filter` is also defensive now: a mask that does not share
+   its target's index is applied by position when the shapes match, otherwise
+   the key is dropped with a warning. One malformed frame can no longer take
+   down `phy_summary_plots`.
+2. **`read_spms_calibration` crash** was *not* an empty YAML or a null key:
+   the hit `validity.yaml` lists entries that escape the database root
+   (`../raw/cal/p15/r002/...`), `TextDB` returns None for them and
+   `Props.add_to` iterates it. The function now merges the `lar/` overrides
+   itself (recursively -- a later file may redefine only part of a channel's
+   pars, as S054 and S087 do on p22) and skips anything that is not a mapping,
+   so the parameter database is not consulted for this at all.
+3. **`check_calib` on cal-only runs**: `build_detector_info_per_period` skips
+   runs whose phy start key does not resolve instead of aborting the period.
+   A run with cal pars but no physics data simply contributes no channel map.
+
+The consumer-facing report that prompted this lived at
+`docs/bugs-found-by-auto-giorgio.md` and was removed once the fixes landed;
+auto-giorgio keeps its own copy.
+
 ## Remaining
 
 1. ~~**Pickled-figure shelve writers**~~ **DONE (2026-08-20)**, see above. Was:
