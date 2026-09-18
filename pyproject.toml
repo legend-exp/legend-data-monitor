@@ -33,14 +33,25 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Physics",
     "Topic :: Software Development"
 ]
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 
 dependencies = [
+    "awkward",
+    "boost-histogram",
+    "dbetto",
+    "h5py",
+    "legend-lh5io",
+    "legend-pydataobj",
+    "matplotlib",
+    "numpy",
+    "pandas",
     "pygama==2.4.1",
     "pylegendmeta >=0.9",
+    "pytz",
+    "PyYAML",
     "seaborn",
-    "openpyxl",
-    "legend-lh5io",
+    "tables >=3.8",
+    "uhi >=1.1",
 ]
 dynamic = ["version"]
 
@@ -59,7 +70,8 @@ zip-safe = false
 legend_data_monitor = [
     "settings/*.json",
     "settings/*.yaml",
-    "settings/*.yml"
+    "settings/*.yml",
+    "examples/*.yaml"
 ]
 
 [project.scripts]

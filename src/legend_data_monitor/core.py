@@ -1,11 +1,18 @@
 import os
 import subprocess
-import sys
 
 import yaml
 from dbetto import TextDB
 
-from . import analysis_data, plotting, slow_control, subsystem, utils
+from . import (
+    analysis_data,
+    errors,
+    monitoring,
+    plotting,
+    slow_control,
+    subsystem,
+    utils,
+)
 
 
 def retrieve_exposure(
@@ -127,7 +134,7 @@ def retrieve_scdb(config: str, port: int, pswd: str):
         utils.logger.error(
             f"\033[91mError running SSH tunnel to Slow Control database command: {e}\033[0m"
         )
-        sys.exit()
+        raise errors.MonitoringError("retrieve_scdb failed (see log for details)")
 
     # -------------------------------------------------------------------------
     # Read user settings
@@ -137,17 +144,16 @@ def retrieve_scdb(config: str, port: int, pswd: str):
     # check validity of scdb settings
     utils.check_scdb_settings(config)
 
-    # -------------------------------------------------------------------------
-    # Define PDF file basename
-    # -------------------------------------------------------------------------
-
-    # Format: l200-{period}-{run}-{data_type}; one pdf/log/shelve file for each subsystem
-    out_path = utils.get_output_path(config) + "-slow_control.hdf"
+    # the period contract file lives beside the run directories
+    run_dir = os.path.dirname(utils.get_output_path(config))
+    output_folder = os.path.dirname(os.path.dirname(run_dir))
+    period = config["dataset"]["period"]
+    run = f"r{int(config['dataset']['runs']):03d}"
 
     # -------------------------------------------------------------------------
     # Load and save data
     # -------------------------------------------------------------------------
-    for idx, param in enumerate(config["slow_control"]["parameters"]):
+    for param in config["slow_control"]["parameters"]:
         utils.logger.info(
             "\33[34m~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\33[0m"
         )
@@ -173,18 +179,9 @@ def retrieve_scdb(config: str, port: int, pswd: str):
             )
             continue
 
-        # remove the slow control hdf file if
-        #   1) it already exists
-        #   2) we specified "overwrite" as saving option
-        #   3) it is the first parameter we want to save (idx==0)
-        if os.path.exists(out_path) and config["saving"] == "overwrite" and idx == 0:
-            os.remove(out_path)
-
-        # save data to hdf file
-        sc_analysis.data.copy().to_hdf(
-            out_path,
-            key=param.replace("-", "_"),
-            mode="a",
+        # one key per (parameter, run): rewriting it replaces the previous pass
+        monitoring.write_slow_control(
+            output_folder, period, run, param, sc_analysis.data
         )
 
 
@@ -213,7 +210,12 @@ def control_plots(user_config_path: str, n_files=None):
 
 
 def auto_control_plots(
-    config: str, file_keys: str, prod_path: str, prod_config: str, n_files=None
+    config: str,
+    file_keys: str,
+    prod_path: str,
+    prod_config: str,
+    n_files=None,
+    render: bool = True,
 ):
     """Set the configuration file and the output paths when a config file is provided during automathic plot production."""
     # -------------------------------------------------------------------------
@@ -237,10 +239,10 @@ def auto_control_plots(
     plt_path = utils.get_output_path(config)
 
     # plot
-    generate_plots(config, plt_path, n_files)
+    generate_plots(config, plt_path, n_files, render=render)
 
 
-def generate_plots(config: dict, plt_path: str, n_files=None):
+def generate_plots(config: dict, plt_path: str, n_files=None, render: bool = True):
     """Generate plots once the config file is set and once we provide the path and name in which store results. n_files specifies if we want to inspect the entire time window (if n_files is not specified), otherwise we subdivide the time window in smaller datasets, each one being composed by n_files files."""
     # no subdivision of data (useful when the inspected time window is short enough)
     if n_files is None:
@@ -261,9 +263,9 @@ def generate_plots(config: dict, plt_path: str, n_files=None):
             utils.logger.error(
                 "\033[91mThe selected saving option in the config file is wrong. Try again with 'overwrite', 'append' or nothing!\033[0m"
             )
-            sys.exit()
+            raise errors.MonitoringError("generate_plots failed (see log for details)")
         # do the plots
-        make_plots(config, plt_path, config["saving"])
+        make_plots(config, plt_path, config["saving"], render=render)
 
     # for subdivision of data, let's loop over lists of timestamps, each one of length n_files
     else:
@@ -292,10 +294,14 @@ def generate_plots(config: dict, plt_path: str, n_files=None):
             # get the dataset
             config["dataset"]["timestamps"] = bunch
             # make the plots / load data for the dataset of interest
-            make_plots(config.copy(), plt_path, config["saving"])
+            make_plots(config.copy(), plt_path, config["saving"], render=render)
 
 
-def make_plots(config: dict, plt_path: str, saving: str):
+def make_plots(config: dict, plt_path: str, saving: str, render: bool = True):
+
+    # each chunk gets its own subsystems; do not carry the previous chunk's
+    # cached aux data (or its memory) into this one
+    subsystem.clear_aux_cache()
 
     # -------------------------------------------------------------------------
     # set up log file for each system
@@ -354,6 +360,19 @@ def make_plots(config: dict, plt_path: str, saving: str):
             subsystems[system].get_data(parameters)
 
         # load also aux channel if necessary (FOR ALL SYSTEMS), and add it to the already existing df
+        # one pass for every parameter the plots will ask of the aux channel:
+        # include_aux is called per plot, each with a different parameter, so
+        # without this each one would re-read the tier
+        aux_params = []
+        for plot in config["subsystems"][system].values():
+            # only plots that merge the aux channel will ever read it
+            if not (plot.get("AUX_ratio") or plot.get("AUX_diff")):
+                continue
+            params = plot["parameters"]
+            aux_params += [params] if isinstance(params, str) else list(params)
+        if aux_params:
+            subsystem.prewarm_aux("pulser01ana", config["dataset"], aux_params)
+
         for plot in config["subsystems"][system].keys():
             # !!! add if for sipms...
             subsystems[system].include_aux(
@@ -385,6 +404,7 @@ def make_plots(config: dict, plt_path: str, saving: str):
             config["dataset"],
             plt_path,
             saving,
+            render=render,
         )
 
         # -------------------------------------------------------------------------

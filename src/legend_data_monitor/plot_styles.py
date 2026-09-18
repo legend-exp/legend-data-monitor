@@ -436,21 +436,16 @@ def plot_heatmap(
         ybin = 100
 
     # to plot spms data, we need a new dataframe with numeric-datetime column and 'unrolled'-list values column
-    # new_df = pd.DataFrame(columns=['datetime', plot_info["parameter"]])
-    new_df = pd.DataFrame()
-    for _, row in data_channel.iterrows():
-        for value in row[plot_info["parameter"]]:
-            # remove nan entries for simplicity (and since we have the possibility here)
-            if value is np.nan:
-                continue
-            new_row = [[row["datetime"], value]]
-            new_row = pd.DataFrame(
-                new_row, columns=["datetime", plot_info["parameter"]]
-            )
-            new_df = pd.concat([new_df, new_row], ignore_index=True, axis=0)
+    # (explode the list column instead of concatenating one row at a time)
+    new_df = (
+        data_channel[["datetime", plot_info["parameter"]]]
+        .explode(plot_info["parameter"])
+        .dropna(subset=[plot_info["parameter"]])
+        .reset_index(drop=True)
+    )
 
-    # make sure the datetime column is in UTC
-    new_df["datetime"] = pd.to_datetime(new_df["datetime"]).dt.tz_localize("UTC")
+    # make sure the datetime column is in UTC (tz-aware input stays aware)
+    new_df["datetime"] = pd.to_datetime(new_df["datetime"], utc=True)
     # convert to numeric values for plotting
     x_values = pd.to_numeric(
         new_df["datetime"].dt.tz_convert("UTC").dt.to_pydatetime()

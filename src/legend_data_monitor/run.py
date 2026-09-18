@@ -39,6 +39,10 @@ def main():
     add_user_rsync_parser(subparsers)
     add_auto_prod_parser(subparsers)
     add_auto_run_parser(subparsers)
+    add_plot_run_parser(subparsers)
+    add_repack_parser(subparsers)
+    add_repair_parser(subparsers)
+    add_refresh_parser(subparsers)
     add_get_exposure(subparsers)
     add_get_runinfo(subparsers)
 
@@ -54,7 +58,17 @@ def main():
         )
         sys.exit()
 
-    args.func(args)
+    # exit-code policy (the CLI is the only place allowed to call sys.exit):
+    #   0 ok / 1 task or pipeline failure / 2 config or environment error
+    try:
+        exit_code = args.func(args)
+    except legend_data_monitor.errors.ConfigError as exc:
+        legend_data_monitor.utils.logger.error("Configuration error: %s", exc)
+        sys.exit(2)
+    except legend_data_monitor.errors.MonitoringError as exc:
+        legend_data_monitor.utils.logger.error("%s: %s", type(exc).__name__, exc)
+        sys.exit(1)
+    sys.exit(exit_code if isinstance(exit_code, int) else 0)
 
 
 def add_user_scdb(subparsers):
@@ -205,6 +219,11 @@ def add_auto_run_parser(subparsers):
         description="""Inspect LEGEND HDF5 (LH5) processed data (and Slow Control data from lngs-login cluster) for a specific period and run (if specified; otherwise the latest being processed are used); plots and summary files are saved; automatic alert emails are sent.""",
     )
     parser_auto_run.add_argument(
+        "--prod_root",
+        default=None,
+        help="Override the cluster-mapped production root with an explicit path (useful for local/mock trees).",
+    )
+    parser_auto_run.add_argument(
         "--cluster",
         default="lngs",
         help="Name of the cluster where you are working; pick among 'lngs' (default) or 'nersc'.",
@@ -238,8 +257,8 @@ def add_auto_run_parser(subparsers):
     )
     parser_auto_run.add_argument(
         "--port",
-        default=8282,
-        help="Port necessary to retrieve the Slow Control database (default: 8282).",
+        default=5678,
+        help="Local port the ugnet-proxy tunnel forwards to the Slow Control database (default: 5678).",
     )
     parser_auto_run.add_argument(
         "--pswd_email",
@@ -273,6 +292,14 @@ def add_auto_run_parser(subparsers):
         default=False,
         help="True if you want to save pdf files too; default: False",
     )
+    parser_auto_run.add_argument(
+        "--plots",
+        default="on",
+        choices=["on", "off"],
+        help="Render subsystem plots ('off' produces the monitoring data only, "
+        "roughly 40%% faster; regenerate figures later from the contract file). "
+        "Default: on.",
+    )
 
     parser_auto_run.set_defaults(func=auto_run_cli)
 
@@ -294,7 +321,7 @@ def auto_run_cli(args):
     escale_val = args.escale
     data_type = args.data_type
 
-    legend_data_monitor.automatic_run.auto_run(
+    return legend_data_monitor.automatic_run.auto_run(
         cluster,
         ref_version,
         output_folder,
@@ -309,7 +336,189 @@ def auto_run_cli(args):
         save_pdf,
         escale_val,
         data_type,
+        prod_root=args.prod_root,
+        render_plots=args.plots == "on",
     )
+
+
+def add_plot_run_parser(subparsers):
+    """Configure the ``plot_run`` command line interface."""
+    parser_plot_run = subparsers.add_parser(
+        "plot_run",
+        description="""Render monitoring figures for one run from an already
+        produced output tree. Reads only the contract-v2 file, so it needs no
+        access to the production data and takes seconds; use it to regenerate
+        figures for a run processed with --plots off.""",
+    )
+    parser_plot_run.add_argument(
+        "--output_folder",
+        required=True,
+        help="Output root of a previous run (the folder containing 'generated').",
+    )
+    parser_plot_run.add_argument("--p", required=True, help="Period to render, eg p22.")
+    parser_plot_run.add_argument("--r", required=True, help="Run to render, eg r012.")
+    parser_plot_run.add_argument(
+        "--data_type",
+        default="phy",
+        help="Data type to render. Default: 'phy'.",
+    )
+    parser_plot_run.set_defaults(func=plot_run_cli)
+
+
+def plot_run_cli(args):
+    """Render a run's figures from its contract file."""
+    from . import automatic_run
+
+    saved = automatic_run.render_run_plots(
+        args.output_folder, args.p, args.r, args.data_type
+    )
+    legend_data_monitor.utils.logger.info(
+        "rendered %d figure(s) for %s-%s", len(saved), args.p, args.r
+    )
+    return 0 if saved else 1
+
+
+def add_repack_parser(subparsers):
+    """Configure :func:`.repack.repack_run` command line interface."""
+    parser_repack = subparsers.add_parser(
+        "repack",
+        description="""Rewrite an already-produced run's HDF outputs in the
+        current on-disk layout: float32 + compression for the v1 pandas
+        files, narrowed histogram storage for the contract (schema2) files.
+        Runs produced before that layout carry roughly 7x the disk they need;
+        repacking takes minutes where regenerating takes hours. The rewrite
+        is atomic per file and never replaces a file it did not manage to
+        shrink.""",
+    )
+    parser_repack.add_argument(
+        "--output_folder",
+        required=True,
+        help="Output root of a previous run (the folder containing 'generated').",
+    )
+    parser_repack.add_argument("--p", required=True, help="Period to repack, eg p22.")
+    parser_repack.add_argument(
+        "--r", required=True, nargs="+", help="Run(s) to repack, eg r012."
+    )
+    parser_repack.add_argument(
+        "--data_type", default="phy", help="Data type to repack. Default: 'phy'."
+    )
+    parser_repack.add_argument(
+        "--strip-classifiers",
+        action="store_true",
+        help="""Also drop the QC classifier pivots from the v1 file (~1.6 GB
+        of a 2.2 GB run). Refuses unless the contract file already carries
+        every binned classifier key being removed.""",
+    )
+    parser_repack.set_defaults(func=repack_cli)
+
+
+def repack_cli(args):
+    """Repack one or more runs' v1 files."""
+    from . import repack
+
+    before = after = 0
+    for run in args.r:
+        for sizes in repack.repack_run(
+            args.output_folder, args.p, run, args.data_type
+        ).values():
+            before += sizes[0]
+            after += sizes[1]
+        if args.strip_classifiers:
+            stripped_before, stripped_after = repack.strip_classifier_pivots(
+                args.output_folder, args.p, run, args.data_type
+            )
+            # repack_run already counted this file at its pre-strip size;
+            # fold in only the further reduction the strip achieved
+            after -= stripped_before - stripped_after
+    if not before:
+        legend_data_monitor.utils.logger.warning("no v1 files found to repack")
+        return 1
+    legend_data_monitor.utils.logger.info(
+        "repacked %.2f GB -> %.2f GB (%.1fx)",
+        before / 2**30,
+        after / 2**30,
+        before / max(after, 1),
+    )
+    return 0
+
+
+def add_repair_parser(subparsers):
+    """Configure :func:`.repair.repair_parameter` command line interface."""
+    parser = subparsers.add_parser(
+        "repair_param",
+        description="""Regenerate one parameter for already-processed runs
+        without re-running the pipeline: replays its plot-config entries over
+        the recorded chunk lists, transplants the keys into the v1 files and
+        refreshes the matching contract keys in place.""",
+    )
+    parser.add_argument("--output_folder", required=True, help="auto_run output root.")
+    parser.add_argument("--ref_version", required=True, help="e.g. auto/v2.0.0.")
+    parser.add_argument("--p", required=True, help="Period, eg p22.")
+    parser.add_argument("--r", required=True, nargs="+", help="Run(s), eg r012.")
+    parser.add_argument("--parameter", required=True, help="e.g. bl_mean.")
+    parser.add_argument("--cluster", default="lngs", choices=["lngs", "nersc"])
+    parser.add_argument("--prod_root", default=None, help="Overrides --cluster.")
+    parser.add_argument("--data_type", default="phy")
+    parser.set_defaults(func=repair_cli)
+
+
+def repair_cli(args):
+    """Repair one parameter over one or more runs."""
+    from . import repair
+
+    prod_root = args.prod_root or repair.PROD_ROOTS[args.cluster]
+    for run in args.r:
+        replaced = repair.repair_parameter(
+            args.output_folder,
+            args.ref_version,
+            args.p,
+            run,
+            args.parameter,
+            prod_root=prod_root,
+            data_type=args.data_type,
+        )
+        legend_data_monitor.utils.logger.info(
+            "%s-%s: %d key(s) repaired", args.p, run, len(replaced)
+        )
+    return 0
+
+
+def add_refresh_parser(subparsers):
+    """Configure :func:`.repair.refresh_contract` command line interface."""
+    parser = subparsers.add_parser(
+        "refresh_contract",
+        description="""Rebuild every contract key that still has a v1 source
+        (keyed refresh: classifier groups without v1 backing are kept), e.g.
+        after a change in how the contract is binned or annotated.""",
+    )
+    parser.add_argument("--output_folder", required=True, help="auto_run output root.")
+    parser.add_argument("--ref_version", required=True, help="e.g. auto/v2.0.0.")
+    parser.add_argument("--p", required=True, help="Period, eg p22.")
+    parser.add_argument("--r", required=True, nargs="+", help="Run(s), eg r012.")
+    parser.add_argument("--cluster", default="lngs", choices=["lngs", "nersc"])
+    parser.add_argument("--prod_root", default=None, help="Overrides --cluster.")
+    parser.add_argument("--data_type", default="phy")
+    parser.set_defaults(func=refresh_cli)
+
+
+def refresh_cli(args):
+    """Refresh the contract of one or more runs."""
+    from . import repair
+
+    prod_root = args.prod_root or repair.PROD_ROOTS[args.cluster]
+    for run in args.r:
+        n = repair.refresh_contract(
+            args.output_folder,
+            args.ref_version,
+            args.p,
+            run,
+            prod_root=prod_root,
+            data_type=args.data_type,
+        )
+        legend_data_monitor.utils.logger.info(
+            "%s-%s: %d key(s) refreshed", args.p, run, n
+        )
+    return 0
 
 
 def add_get_exposure(subparsers):

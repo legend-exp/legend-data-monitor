@@ -163,6 +163,11 @@ monitoring/
 *.ipynb
 *.yaml
 *.json
+# packaged resources must never be swallowed by the blanket *.yaml/*.json
+# rules above (geds-dict.yaml was silently missing from the repo because of it)
+!src/legend_data_monitor/settings/*.yaml
+!src/legend_data_monitor/settings/*.json
+!src/legend_data_monitor/examples/*.yaml
 
 # PyCharm
 #  JetBrains specific template is maintained in a separate JetBrains.gitignore that can

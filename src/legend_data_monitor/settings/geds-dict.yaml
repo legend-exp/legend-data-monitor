@@ -1,0 +1,116 @@
+# Subsystem plot configuration used by auto_run (production parameter set).
+# Recovered verbatim 2026-08-14 from the live LNGS production deployment
+# (/data1/users/calgaro/legend-data-monitor, commit g5e91c04e5); QC runs via the
+# special 'quality_cuts' parameter with qc_flags/qc_classifiers switches, and the
+# classifier list self-derives from the production hit tier config at load time.
+geds:
+  "Baselines (dsp/baseline) in pulser events":
+    parameters: baseline
+    event_type: pulser
+    plot_structure: per string
+    resampled: only
+    plot_style: vs time
+    AUX_ratio: true
+    variation: true
+    time_window: 10min
+
+  "Mean baselines (dsp/bl_mean) in pulser events":
+    parameters: bl_mean
+    event_type: pulser
+    plot_structure: per string
+    resampled: only
+    plot_style: vs time
+    AUX_ratio: true
+    variation: true
+    time_window: 10min
+
+  "trapTmax gain (dsp/trapTmax) in pulser events":
+    parameters: trapTmax
+    event_type: pulser
+    plot_structure: per string
+    resampled: only
+    plot_style: vs time
+    AUX_ratio: true
+    variation: true
+    time_window: 10min
+
+  "tp_0_est gain (dsp/tp_0_est) in pulser events":
+    parameters: tp_0_est
+    event_type: pulser
+    plot_structure: per string
+    resampled: only
+    plot_style: vs time
+    AUX_ratio: true
+    variation: true
+    time_window: 10min
+
+  "Uncalibrated gain (dsp/trapEmax) in pulser events":
+    parameters: trapEmax
+    event_type: pulser
+    plot_structure: per string
+    resampled: only
+    plot_style: vs time
+    AUX_ratio: true
+    variation: true
+    time_window: 10min
+
+  "Calibrated gain (hit/trapEmax_ctc_cal) in physics events":
+    parameters: trapEmax_ctc_cal
+    event_type: phy
+    plot_structure: per string
+    resampled: only
+    plot_style: vs time
+    variation: true
+    time_window: 10min
+
+  "Calibrated gain (hit/trapEmax_ctc_cal) in pulser events":
+    parameters: trapEmax_ctc_cal
+    event_type: pulser
+    plot_structure: per string
+    resampled: only
+    plot_style: vs time
+    variation: true
+    time_window: 10min
+
+  "Noise (dsp/bl_std) in pulser events":
+    parameters: bl_std
+    event_type: pulser
+    plot_structure: per string
+    resampled: only
+    plot_style: vs time
+    AUX_ratio: true
+    variation: true
+    time_window: 10min
+
+  "A/E (from dsp) in pulser events":
+    parameters: AoE_Custom
+    event_type: pulser
+    plot_structure: per string
+    resampled: only
+    plot_style: vs time
+    variation: true
+    time_window: 10min
+
+  "Quality cuts and classifiers in physics events":
+    parameters: quality_cuts
+    event_type: phy
+    qc_flags: true
+    qc_classifiers: true
+
+  "QC classifiers in all events":
+    parameters: quality_cuts
+    event_type: all
+    qc_flags: false
+    qc_classifiers: true
+
+  "QC classifiers in pulser events":
+    parameters: quality_cuts
+    event_type: pulser
+    qc_flags: false
+    qc_classifiers: true
+
+  "QC classifiers in FCbsln events":
+    parameters: quality_cuts
+    event_type: FCbsln
+    qc_flags: false
+    qc_classifiers: true

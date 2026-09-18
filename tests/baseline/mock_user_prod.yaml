@@ -1,0 +1,35 @@
+output: /path/to/baseline_out  # edit: where the run writes
+dataset:
+  experiment: L200
+  period: p19
+  version: ''
+  path: /path/to/mock_prod  # edit: the mock production tree root
+  type: phy
+  runs: 1
+saving: overwrite
+subsystems:
+  geds:
+    Baselines (dsp/baseline) in pulser events:
+      parameters: baseline
+      event_type: pulser
+      plot_structure: per channel
+      resampled: also
+      plot_style: vs time
+      variation: true
+      time_window: 1h
+    Noise (dsp/bl_std) in pulser events:
+      parameters: bl_std
+      event_type: pulser
+      plot_structure: per channel
+      resampled: also
+      plot_style: vs time
+      variation: true
+      time_window: 1h
+    Uncalibrated gain (dsp/trapEmax) in pulser events:
+      parameters: trapEmax
+      event_type: pulser
+      plot_structure: per channel
+      resampled: also
+      plot_style: vs time
+      variation: true
+      time_window: 1h

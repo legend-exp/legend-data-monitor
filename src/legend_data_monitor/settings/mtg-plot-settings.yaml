@@ -5,6 +5,7 @@ TrapemaxCtcCal:
     - b
   percentage: true
   title: "pulser_stab"
+  unit: "keV"
   limits:
     - null
     - null
@@ -16,6 +17,7 @@ Trapemax:
     - b
   percentage: true
   title: "pulser_stab_uncalib"
+  unit: "%"
   limits:
     - null
     - null
@@ -27,6 +29,7 @@ Baseline:
     - firebrick
   percentage: true
   title: "baseln_stab"
+  unit: "%"
   limits:
     - -10
     - 10
@@ -38,6 +41,7 @@ BlStd:
     - saddlebrown
   percentage: false
   title: "baseln_spike"
+  unit: "ADC"
   limits:
     - null
     - 50
@@ -49,24 +53,28 @@ FEP_variation:
     - saddlebrown
   percentage: false
   title: "FEP_gain_stab"
+  unit: "keV"
   limits:
     - null
     - null
 
 tot_discharge_dead_time:
   title: "tot_discharge_dead_time"
+  unit: "%"
   limits:
     - null
     - 0.02
 
 IsDischarge:
   title: "discharge_rate"
+  unit: "mHz"
   limits:
     - null
     - 5
 
 IsSaturated:
   title: "saturated_rate"
+  unit: "mHz"
   limits:
     - null
     - 5

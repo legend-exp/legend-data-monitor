@@ -41,7 +41,10 @@ def test_special_case(monkeypatch, fake_sto, tmp_path):
         period="p01",
         run="r001",
         tier="hit",
+        pulser_rawid=1027201,
     )
+    # the timestamps are read off the channel the caller named
+    assert fake_sto.read.call_args[0][0] == "ch1027201/dsp/timestamp"
 
     # both should equal last timestamp
     expected = pd.to_datetime(3000, unit="s")
@@ -73,10 +76,42 @@ def test_normal_case(monkeypatch, fake_sto, tmp_path):
         period="p01",
         run="r002",
         tier="hit",
+        pulser_rawid=1027201,
     )
+    assert fake_sto.read.call_args[0][0] == "ch1027201/dsp/timestamp"
 
     # start = first timestamp, end = last timestamp
     expected_start = pd.to_datetime(1000, unit="s")
     expected_end = pd.to_datetime(3000, unit="s")
     assert start == expected_start
     assert end == expected_end
+
+
+def test_falls_back_to_the_first_channel_in_the_file(monkeypatch, fake_sto, tmp_path):
+    """Without a pulser rawid the first channel in the file supplies the times."""
+    import numpy as np
+    from lgdo import lh5
+    from lgdo.types import Array, Table
+
+    folder_tier = tmp_path / "tier_hit" / "cal" / "p01" / "r003"
+    folder_tier.mkdir(parents=True)
+    fname = "l200-p01-r003-cal-20240101T120000Z-tier_hit.lh5"
+    lh5.write(
+        Table({"timestamp": Array(np.array([1000.0, 2000.0, 3000.0]))}),
+        "dsp",
+        str(folder_tier / fname),
+        group="ch1084803",
+    )
+    monkeypatch.setattr(
+        os, "listdir", lambda path: ["r003"] if str(path).endswith("p01") else [fname]
+    )
+    monkeypatch.setattr(os.path, "isdir", lambda path: True)
+
+    get_run_start_end_times(
+        sto=fake_sto,
+        tiers=[str(tmp_path / "tier_hit"), str(tmp_path / "tier_phy")],
+        period="p01",
+        run="r003",
+        tier="hit",
+    )
+    assert fake_sto.read.call_args[0][0] == "ch1084803/dsp/timestamp"

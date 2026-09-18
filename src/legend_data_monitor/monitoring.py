@@ -1,51 +1,154 @@
 import glob
-import itertools
-import json
-import math
 import os
-import pickle
-import re
-import shelve
-import sys
-from functools import partial
 
 import awkward as ak
 import h5py
-import lh5
 import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import pytz
 import yaml
 from lgdo.lh5 import read_as
-from matplotlib.patches import Patch
 
-from . import utils
+from . import errors, utils
+from .contract import reader as contract_reader
+from .contract import writer as contract_writer
+
+# --- Phase 4 re-export shims: these functions moved to loading/ and processing/;
+# import them here so existing ``monitoring.X`` references keep working. ---
+from .loading.calib_files import (  # noqa: F401
+    _first_run_key,
+    _load_validity_file,
+    _run_times_cache,
+    add_calibration_runs,
+    evaluate_fep_cal,
+    extract_fep_peak,
+    extract_resolution_at_q_bb,
+    find_energy_key,
+    get_calib_data_dict,
+    get_calib_pars,
+    get_calibration_file,
+    get_energy_key,
+    get_run_start_end_times,
+    get_tier_keyresult,
+    uncalibrated_variable,
+)
+from .processing.series import (  # noqa: F401
+    compute_diff,
+    compute_diff_and_rescaling,
+    filter_by_period,
+    filter_series_by_ignore_keys,
+    find_hdf_file,
+    get_dfs,
+    get_pulser_data,
+    get_spike_veto_series,
+    read_if_key_exists,
+    resample_series,
+)
 
 # -------------------------------------------------------------------------
 
-IPython_default = plt.rcParams.copy()
 SMALL_SIZE = 8
 
-plt.rc("font", size=SMALL_SIZE)
-plt.rc("axes", titlesize=SMALL_SIZE)
-plt.rc("axes", labelsize=SMALL_SIZE)
-plt.rc("xtick", labelsize=SMALL_SIZE)
-plt.rc("ytick", labelsize=SMALL_SIZE)
-plt.rc("legend", fontsize=SMALL_SIZE)
-plt.rc("figure", titlesize=SMALL_SIZE)
-plt.rcParams["font.family"] = "serif"
 
-matplotlib.rcParams["mathtext.fontset"] = "stix"
+def period_contract_path(
+    output_folder: str, period: str, data_type: str = "phy"
+) -> str:
+    """Path of the period-level monitoring contract file.
 
-plt.rc("axes", facecolor="white", edgecolor="black", axisbelow=True, grid=True)
+    One file per (period, datatype) holding the numbers the monitoring figures
+    are drawn from, so consumers no longer have to unpickle a matplotlib
+    figure out of a shelve to reach them.
+    """
+    return os.path.join(
+        output_folder, period, f"l200-{period}-{data_type}-monitoring.hdf"
+    )
+
+
+def write_dead_time(
+    output_folder: str,
+    period: str,
+    run: str,
+    dead_time_s: float,
+    dead_time_pct: float,
+    data_type: str = "phy",
+) -> str:
+    """Record the discharge dead time of a run in the period contract file."""
+    path = period_contract_path(output_folder, period, data_type)
+    contract_writer.write_frame(
+        path,
+        f"dead_time/{run}",
+        pd.DataFrame(
+            [{"run": run, "dead_time_s": dead_time_s, "dead_time_pct": dead_time_pct}]
+        ),
+    )
+    return path
+
+
+def read_dead_time(
+    output_folder: str, period: str, run: str, data_type: str = "phy"
+) -> dict | None:
+    """Dead time of a run, or None when it has not been computed yet.
+
+    Callers must handle None: the value comes from qc_and_evt_summary_plots,
+    which may not have run for this run yet.
+    """
+    path = period_contract_path(output_folder, period, data_type)
+    if not os.path.isfile(path):
+        return None
+    try:
+        frame = contract_reader.read_frame(path, f"dead_time/{run}")
+    except (KeyError, OSError):
+        return None
+    if frame is None or frame.empty:
+        return None
+    row = frame.iloc[0]
+    return {
+        "dead_time_s": float(row["dead_time_s"]),
+        "dead_time_pct": float(row["dead_time_pct"]),
+    }
+
+
+def apply_monitoring_style():
+    """Apply the monitoring plot style to matplotlib's global rcParams.
+
+    Called by the plot-generating functions; importing this module must not
+    restyle the host application's matplotlib.
+    """
+    plt.rc("font", size=SMALL_SIZE)
+    plt.rc("axes", titlesize=SMALL_SIZE)
+    plt.rc("axes", labelsize=SMALL_SIZE)
+    plt.rc("xtick", labelsize=SMALL_SIZE)
+    plt.rc("ytick", labelsize=SMALL_SIZE)
+    plt.rc("legend", fontsize=SMALL_SIZE)
+    plt.rc("figure", titlesize=SMALL_SIZE)
+    plt.rcParams["font.family"] = "serif"
+    matplotlib.rcParams["mathtext.fontset"] = "stix"
+    plt.rc("axes", facecolor="white", edgecolor="black", axisbelow=True, grid=True)
+
 
 IGNORE_KEYS = utils.IGNORE_KEYS
 CALIB_RUNS = utils.CALIB_RUNS
 
 
 # -------------------------------------------------------------------------
+def write_qc_classifier_fractions(
+    output_folder: str, period: str, run: str, rows: list, data_type: str = "phy"
+) -> str | None:
+    """Write the in-range fractions behind the QC classifier distributions.
+
+    The distributions themselves are already published by the main pipeline as
+    contract ``_dist`` histograms; what only existed inside these figures were
+    the per-(classifier, detector, event type) percentages, so those are what
+    this records.
+    """
+    if not rows:
+        return None
+    path = period_contract_path(output_folder, period, data_type)
+    contract_writer.write_frame(path, f"qc_classifier_frac/{run}", pd.DataFrame(rows))
+    return path
+
+
 def qc_distributions(
     auto_dir_path: str,
     phy_mtg_data: str,
@@ -53,17 +156,38 @@ def qc_distributions(
     start_key: str,
     period: str,
     run: str,
-    last_cycle: str,
     det_info: dict,
-    save_pdf: bool,
 ):
+    """
+    Publish the in-range fractions of every QC classifier per event type.
+
+    Data-only: the per-detector histograms are in the run contract as
+    ``_dist2d`` keys and the grids are drawn by
+    ``plots.qc.plot_classifier_distributions``.
+
+    Parameters
+    ----------
+    auto_dir_path : str
+        Path to tmp-auto public data files.
+    phy_mtg_data : str
+        Path to the folder holding the run's v1 monitoring files.
+    output_folder : str
+        Monitoring output root (period contract file location).
+    start_key : str
+        First cycle of the run (detector-info vintage).
+    period : str
+        Period to inspect.
+    run : str
+        Run under inspection.
+    det_info : dict
+        Dictionary with channel names, IDs, and mapping to string and position.
+    """
     pars_to_inspect = [
         "IsValidBlSlopeClassifier",
         "IsValidTailRmsClassifier",
         "IsValidPzSlopeClassifier",
         "IsValidBlSlopeRmsClassifier",
         "IsValidBlPolyRmsClassifier",
-        "IsValidBlSlopeRmsClassifier",
         "IsValidCuspeminClassifier",
         "IsValidCuspemaxClassifier",
     ]
@@ -77,262 +201,61 @@ def qc_distributions(
         utils.logger.warning(f"...file not found: {my_file}. Return!")
         return
 
-    end_folder = os.path.join(
-        output_folder,
-        period,
-        run,
-        "mtg",
-    )
-    os.makedirs(end_folder, exist_ok=True)
-    shelve_path = os.path.join(
-        end_folder,
-        f"l200-{period}-{run}-phy-monitoring",
-    )
+    def safe_perc(vals, lo=-5, hi=5):
+        if len(vals) == 0:
+            return float("nan")
+        return 100 * np.mean((vals >= lo) & (vals <= hi))
 
-    step = 0.4
-    with (
-        shelve.open(shelve_path, "c", protocol=pickle.HIGHEST_PROTOCOL) as shelf,
-        pd.HDFStore(my_file, "r") as store,
-    ):
+    classifier_rows = []
+    with pd.HDFStore(my_file, "r") as store:
         df_energy_IsPhysics = store["/IsPhysics_TrapemaxCtcCal"]
         df_energy_IsPhysics = filter_series_by_ignore_keys(
             df_energy_IsPhysics, utils.IGNORE_KEYS, period
         )
 
         for par in pars_to_inspect:
-
             mask = df_energy_IsPhysics > 25
-            df_All = utils.load_and_filter(store, f"/All_{par}")
-            df_IsPulser = utils.load_and_filter(store, f"/IsPulser_{par}")
-            df_IsBsln = utils.load_and_filter(store, f"/IsBsln_{par}")
-            df_IsPhysics = utils.load_and_filter(store, f"/IsPhysics_{par}", mask=mask)
-
-            if df_All.empty:
+            frames = {
+                "All": utils.load_and_filter(store, f"/All_{par}"),
+                "IsPulser": utils.load_and_filter(store, f"/IsPulser_{par}"),
+                "IsBsln": utils.load_and_filter(store, f"/IsBsln_{par}"),
+                "IsPhysics": utils.load_and_filter(
+                    store, f"/IsPhysics_{par}", mask=mask
+                ),
+            }
+            if frames["All"].empty:
                 continue
-
-            df_All = filter_series_by_ignore_keys(df_All, utils.IGNORE_KEYS, period)
-            if not df_IsPulser.empty:
-                df_IsPulser = filter_series_by_ignore_keys(
-                    df_IsPulser, utils.IGNORE_KEYS, period
-                )
-            if not df_IsBsln.empty:
-                df_IsBsln = filter_series_by_ignore_keys(
-                    df_IsBsln, utils.IGNORE_KEYS, period
-                )
-            if not df_IsPhysics.empty:
-                df_IsPhysics = filter_series_by_ignore_keys(
-                    df_IsPhysics, utils.IGNORE_KEYS, period
-                )
+            for flag, frame in frames.items():
+                if not frame.empty:
+                    frames[flag] = filter_series_by_ignore_keys(
+                        frame, utils.IGNORE_KEYS, period
+                    )
 
             for string, det_list in str_chns.items():
-                # grid size
-                n_dets = len(det_list)
-                ncols = math.ceil(math.sqrt(n_dets))
-                nrows = math.ceil(n_dets / ncols)
-
-                fig, axes = plt.subplots(nrows, ncols, figsize=(6 * ncols, 3.5 * nrows))
-                axes = axes.flatten()
-
-                for i, det in enumerate(det_list):
+                for det in det_list:
                     if det not in det_info["detectors"]:
                         continue
                     if not det_info["detectors"][det]["processable"]:
                         continue
-
-                    ax = axes[i]
                     ch = det_info["detectors"][det]["daq_rawid"]
-                    # not processed detectors
-                    if ch not in df_All.keys():
+                    if ch not in frames["All"].keys():
                         continue
+                    for flag, frame in frames.items():
+                        vals = utils.get_vals(frame, ch)
+                        vals = vals[~np.isnan(vals)]
+                        classifier_rows.append(
+                            {
+                                "run": run,
+                                "classifier": par,
+                                "detector": det,
+                                "string": string,
+                                "event_type": flag,
+                                "percent_in_range": float(safe_perc(vals)),
+                                "n_events": int(len(vals)),
+                            }
+                        )
 
-                    vals_all = utils.get_vals(df_All, ch)
-                    vals_pulser = utils.get_vals(df_IsPulser, ch)
-                    vals_bsln = utils.get_vals(df_IsBsln, ch)
-                    vals_phys = utils.get_vals(df_IsPhysics, ch)
-
-                    vals_all = vals_all[~np.isnan(vals_all)]
-                    vals_pulser = vals_pulser[~np.isnan(vals_pulser)]
-                    vals_bsln = vals_bsln[~np.isnan(vals_bsln)]
-                    vals_phys = vals_phys[~np.isnan(vals_phys)]
-
-                    # global bins
-                    bins = np.arange(-15, 15 + step, step)
-
-                    # percentages
-                    def safe_perc(vals, lo=-5, hi=5):
-                        if len(vals) == 0:
-                            return np.nan
-                        return 100 * np.mean((vals >= lo) & (vals <= hi))
-
-                    perc_all = safe_perc(vals_all)
-                    perc_pulser = safe_perc(vals_pulser)
-                    perc_bsln = safe_perc(vals_bsln)
-                    perc_phys = safe_perc(vals_phys)
-
-                    # plotting
-                    ax.hist(
-                        vals_all,
-                        bins=bins,
-                        label=f"All events - {perc_all:.1f}%",
-                        histtype="step",
-                        facecolor="g",
-                    )
-                    ax.hist(
-                        vals_pulser,
-                        bins=bins,
-                        label=f"TP - {perc_pulser:.1f}%",
-                        histtype="step",
-                        facecolor="g",
-                    )
-                    ax.hist(
-                        vals_bsln,
-                        bins=bins,
-                        label=f"FT - {perc_bsln:.1f}%",
-                        histtype="step",
-                        facecolor="g",
-                    )
-                    ax.hist(
-                        vals_phys,
-                        bins=bins,
-                        label=f"~TP, ~FT, E>25 keV - {perc_phys:.1f}%",
-                        histtype="step",
-                        facecolor="g",
-                    )
-
-                    ax.axvline(-5, color="k", linestyle="--")
-                    ax.axvline(5, color="k", linestyle="--")
-                    ax.axvspan(-15, -5, color="darkgray", alpha=0.2)
-                    ax.axvspan(5, 15, color="darkgray", alpha=0.2)
-                    ax.set_ylabel("Counts")
-                    ax.set_xlabel("Classifiers")
-                    ax.legend(
-                        title=f"{det} (pos {det_info['detectors'][det]['position']})",
-                        loc="upper right",
-                    )
-                    ax.set_yscale("log")
-                    ax.grid(False)
-                    ax.set_xlim(-10, 10)
-
-                # hide any unused subplots
-                for j in range(i + 1, len(axes)):
-                    axes[j].axis("off")
-
-                fig.suptitle(
-                    f"{period} {run} - string {string} - {par} - last cycle: {last_cycle}"
-                )
-                fig.tight_layout()
-
-                if save_pdf:
-                    pdf_folder = os.path.join(
-                        output_folder, f"{period}/{run}/mtg/pdf", f"st{string}"
-                    )
-                    os.makedirs(pdf_folder, exist_ok=True)
-                    plt.savefig(
-                        os.path.join(
-                            pdf_folder,
-                            f"{period}_{run}_string{string}_{par}.pdf",
-                        ),
-                        bbox_inches="tight",
-                    )
-
-                # serialize+plot in a shelve object
-                shelf[f"{period}_{run}_{par}"] = pickle.dumps(fig)
-                plt.close()
-
-
-def qc_ft_failure_rates(
-    auto_dir_path: str,
-    phy_mtg_data: str,
-    output_folder: str,
-    start_key: str,
-    period: str,
-    run: str,
-    det_info: dict,
-    save_pdf: bool,
-):
-    my_file = os.path.join(
-        output_folder, f"{period}/{run}/l200-{period}-{run}-phy-geds.hdf"
-    )
-    str_chns = det_info["str_chns"]
-    utils.logger.debug("...inspecting FT failure rates")
-    if not os.path.exists(my_file):
-        utils.logger.warning(f"...file not found: {my_file}. Return!")
-        return
-
-    end_folder = os.path.join(
-        output_folder,
-        period,
-        run,
-        "mtg",
-    )
-    os.makedirs(end_folder, exist_ok=True)
-    shelve_path = os.path.join(
-        end_folder,
-        f"l200-{period}-{run}-phy-monitoring",
-    )
-
-    with (
-        shelve.open(shelve_path, "c", protocol=pickle.HIGHEST_PROTOCOL) as shelf,
-        pd.HDFStore(my_file, "r") as store,
-    ):
-        df = store["/IsBsln_IsBbLike"]
-        df_DD = store["/IsBsln_IsDelayedDischarge"]
-        df = filter_series_by_ignore_keys(df, utils.IGNORE_KEYS, period)
-        df_DD = filter_series_by_ignore_keys(df_DD, utils.IGNORE_KEYS, period)
-        df_clean = df[~df_DD]
-        color_cycle = itertools.cycle(plt.cm.tab20.colors)
-
-        for string, det_list in str_chns.items():
-            fig, ax = plt.subplots(figsize=(12, 6))
-
-            for det in det_list:
-                if not det_info["detectors"][det]["processable"]:
-                    continue
-
-                ch = det_info["detectors"][det]["daq_rawid"]
-                pos = det_info["detectors"][det]["position"]
-
-                if ch not in df_clean.columns:
-                    continue
-
-                # Take channel data and resample to hourly counts
-                data = df_clean[ch].copy()
-                hourly_counts = data.resample("1H").sum()
-
-                # convert to mHz: (counts / 3600 sec) * 1000
-                hourly_rate = hourly_counts / 3600 * 1000
-
-                color = next(color_cycle)
-                hourly_rate.plot(
-                    ax=ax,
-                    drawstyle="steps-mid",
-                    label=f"{det} - pos {pos}",
-                    color=color,
-                )
-
-                ax.set_ylabel("FT failure rate [mHz]")
-                ax.legend(ncol=2, fontsize="small", loc="upper left")
-                ax.grid(False)
-
-            fig.suptitle(f"{period} - {run} - string {string}")
-            fig.tight_layout()
-
-            if save_pdf:
-                pdf_folder = os.path.join(
-                    output_folder, f"{period}/{run}/mtg/pdf", f"st{string}"
-                )
-                os.makedirs(pdf_folder, exist_ok=True)
-                plt.savefig(
-                    os.path.join(
-                        pdf_folder,
-                        f"{period}_{run}_string{string}_FT_failure.pdf",
-                    ),
-                    bbox_inches="tight",
-                )
-
-            # serialize+plot in a shelve object
-            shelf[f"{period}_{run}_FT_failure"] = pickle.dumps(fig)
-            plt.close()
+    write_qc_classifier_fractions(output_folder, period, run, classifier_rows)
 
 
 def mhz_to_percent(mhz, avg_total_forced_mhz):
@@ -343,6 +266,29 @@ def percent_to_mhz(pct, avg_total_forced_mhz):
     return (pct / 100) * avg_total_forced_mhz
 
 
+def write_ft_series(
+    output_folder: str,
+    period: str,
+    run: str,
+    name: str,
+    frame,
+    data_type: str = "phy",
+) -> str | None:
+    """Write a forced-trigger monitoring series into the period contract file.
+
+    ``name`` distinguishes the quantities behind the FT figures:
+    ``per_detector`` / ``per_string`` (hourly rates, mHz/kg), ``total_forced``
+    (hourly counts over the array) and ``survival_fraction`` (%).
+    """
+    if frame is None or len(frame) == 0:
+        return None
+    if isinstance(frame, pd.Series):
+        frame = frame.to_frame(name=name)
+    path = period_contract_path(output_folder, period, data_type)
+    contract_writer.write_frame(path, f"ft_summary/{name}/{run}", frame)
+    return path
+
+
 def qc_and_evt_summary_plots(
     auto_dir_path: str,
     phy_mtg_data: str,
@@ -350,10 +296,31 @@ def qc_and_evt_summary_plots(
     start_key: str,
     period: str,
     run: str,
-    last_cycle: str,
     det_info: dict,
-    save_pdf: bool,
 ):
+    """
+    Publish FT failure rates, event rates and the discharge dead time.
+
+    Data-only: the figures are drawn from the contract by
+    ``plots.summary.plot_ft_summary`` / ``plot_event_rate_qc``.
+
+    Parameters
+    ----------
+    auto_dir_path : str
+        Path to tmp-auto public data files.
+    phy_mtg_data : str
+        Path to the folder holding the run's v1 monitoring files.
+    output_folder : str
+        Monitoring output root (period contract file location).
+    start_key : str
+        First cycle of the run (detector-info vintage).
+    period : str
+        Period to inspect.
+    run : str
+        Run under inspection.
+    det_info : dict
+        Dictionary with channel names, IDs, and mapping to string and position.
+    """
     utils.logger.debug("...inspecting FT failure rates")
     evt_files_phy = sorted(
         glob.glob(f"{auto_dir_path}/generated/tier/evt/phy/{period}/{run}/*.lh5")
@@ -364,7 +331,6 @@ def qc_and_evt_summary_plots(
             glob.glob(f"{auto_dir_path}/generated/tier/pet/phy/{period}/{run}/*.lh5")
         )
 
-    # energies  = read_as("evt/geds", evt_files_phy, 'ak', field_mask=['energy'])
     ged_pul = read_as(
         "evt/coincident", evt_files_phy, "ak", field_mask=["geds", "puls"]
     )
@@ -390,251 +356,191 @@ def qc_and_evt_summary_plots(
         field_mask=["is_empty_bits", "rawid"],
     )
 
-    # build dataframe for FT FAILING events
+    # build dataframe for FT FAILING events (vectorized: one count matrix fill
+    # instead of a python loop over every event)
     mask = forced.is_forced & ~is_bb.is_bb_like & ~is_dis.is_delayed_discharge
     temp = is_fail.rawid[mask]
-    y = {ch: np.zeros(len(forced.timestamp[mask])) for ch in set(ak.flatten(temp))}
-    for i in range(len(temp)):
-        if len(temp[i]) == 0:
-            continue
-        for ch in temp[i]:
-            y[ch][i] += 1
+    n_events = len(temp)
+    flat_ch = ak.to_numpy(ak.flatten(temp))
+    channels = np.unique(flat_ch)
+    counts = np.zeros((n_events, len(channels)))
+    if flat_ch.size:
+        event_idx = np.repeat(np.arange(n_events), ak.to_numpy(ak.num(temp)))
+        np.add.at(counts, (event_idx, np.searchsorted(channels, flat_ch)), 1)
+    y = {ch: counts[:, j] for j, ch in enumerate(channels)}
     y["timestamp"] = ak.to_numpy(forced.timestamp[mask])
 
     df = pd.DataFrame(y)
     df["timestamp"] = pd.to_datetime(df["timestamp"], unit="s")
     df.set_index("timestamp", inplace=True)
-    daily_cnt = df.resample("H").sum()
-
-    # Folders
-    end_folder = os.path.join(output_folder, period, run, "mtg")
-    os.makedirs(end_folder, exist_ok=True)
-    shelve_path = os.path.join(end_folder, f"l200-{period}-{run}-phy-monitoring")
+    daily_cnt = df.resample("h").sum()
 
     str_counts = {}
-    color_cycle = itertools.cycle(plt.cm.tab20.colors)
-
-    # --- all forced triggers (denominator across all strings)
-    df_all = pd.DataFrame(
-        {"timestamp": ak.to_numpy(forced.timestamp[forced.is_forced])}
-    )
-    df_all["timestamp"] = pd.to_datetime(df_all["timestamp"], unit="s")
-    df_all.set_index("timestamp", inplace=True)
-    total_forced = df_all.resample("H").size()  # counts/hour, all strings
-    avg_total_forced_mhz = (total_forced.mean() / 3600) * 1000
+    det_rates = {}
     on_mass = 0
 
-    # ONE PERIOD, ALL RUNS
-    with shelve.open(shelve_path, "c", protocol=pickle.HIGHEST_PROTOCOL) as shelf:
-        # --- Per-string plots ---
-        for string, det_list in det_info["str_chns"].items():
-            fig, ax = plt.subplots(figsize=(12, 6))
+    for string, det_list in det_info["str_chns"].items():
+        string_counts = None
+        string_mass = 0
+        for det in det_list:
+            if not det_info["detectors"][det]["processable"]:
+                continue
+            ch = det_info["detectors"][det]["daq_rawid"]
+            if ch not in daily_cnt.columns:
+                continue
 
-            string_counts = None
-            string_mass = 0
+            mass = det_info["detectors"][det]["mass_in_kg"]
+            if det_info["detectors"][det]["usability"] == "on":
+                on_mass += mass
 
-            for det in det_list:
-                if not det_info["detectors"][det]["processable"]:
-                    continue
-                ch = det_info["detectors"][det]["daq_rawid"]
-                if ch not in daily_cnt.columns:
-                    continue
-
-                mass = det_info["detectors"][det]["mass_in_kg"]
-                if det_info["detectors"][det]["usability"] == "on":
-                    on_mass += mass
-
-                hourly_rate = daily_cnt[ch] / 3600 * 1000 / mass
-                color = next(color_cycle)
-                hourly_rate.plot(ax=ax, drawstyle="steps-mid", label=det, color=color)
-
-                det_counts = daily_cnt[ch]
-
-                string_counts = (
-                    det_counts
-                    if string_counts is None
-                    else string_counts.add(det_counts, fill_value=0)
-                )
-
-                string_mass += mass
-
-            if string_counts is not None and string_mass > 0:
-                str_counts[string] = string_counts / 3600 * 1000 / string_mass
-            else:
-                str_counts[string] = None
-
-            m2p = partial(mhz_to_percent, avg_total_forced_mhz=avg_total_forced_mhz)
-            p2m = partial(percent_to_mhz, avg_total_forced_mhz=avg_total_forced_mhz)
-            secax = ax.secondary_yaxis("right", functions=(m2p, p2m))
-            secax.set_ylabel("FT failure fraction (%)")
-
-            ax.set_ylabel("Normalized FT failure rate (mHz/kg)")
-            ax.legend(
-                ncol=2,
-                fontsize="small",
-                loc="upper left",
-                title=f"Last cycle: {last_cycle}",
+            det_rates[det] = daily_cnt[ch] / 3600 * 1000 / mass
+            det_counts = daily_cnt[ch]
+            string_counts = (
+                det_counts
+                if string_counts is None
+                else string_counts.add(det_counts, fill_value=0)
             )
-            ax.grid(False)
-            fig.suptitle(f"{period} - {run} - string {string}")
-            fig.tight_layout()
+            string_mass += mass
 
-            if save_pdf:
-                pdf_folder = os.path.join(
-                    output_folder, period, run, "mtg/pdf", f"st{string}"
-                )
-                os.makedirs(pdf_folder, exist_ok=True)
-                plt.savefig(
-                    os.path.join(
-                        pdf_folder, f"{period}_{run}_string{string}_FT_failure.pdf"
-                    ),
-                    bbox_inches="tight",
-                )
+        if string_counts is not None and string_mass > 0:
+            str_counts[string] = string_counts / 3600 * 1000 / string_mass
+        else:
+            str_counts[string] = None
 
-            shelf[f"{period}_{run}_string{string}_FT_failure"] = pickle.dumps(fig)
-            plt.close(fig)
+    # the numbers behind the FT figures, published as data
+    write_ft_series(output_folder, period, run, "per_detector", pd.DataFrame(det_rates))
+    write_ft_series(
+        output_folder,
+        period,
+        run,
+        "per_string",
+        pd.DataFrame({str(k): v for k, v in str_counts.items() if v is not None}),
+    )
 
-        # --- Combined plot of all strings ---
-        fig, ax = plt.subplots(figsize=(12, 6))
-        color_cycle = itertools.cycle(plt.cm.tab20.colors)
-        for string, counts in str_counts.items():
-            if counts is not None:
-                color = next(color_cycle)
-                counts.plot(
-                    ax=ax, drawstyle="steps-mid", label=f"String {string}", color=color
-                )
+    # --- FT survival fraction ---
+    mask_forced = forced.is_forced
+    mask_survived = mask_forced & is_bb.is_bb_like & ~is_dis.is_delayed_discharge
+    ts_all = pd.to_datetime(forced.timestamp[mask_forced], unit="s")
+    ts_survived = pd.to_datetime(forced.timestamp[mask_survived], unit="s")
+    df_all = pd.DataFrame({"count": 1}, index=ts_all)
+    df_survived = pd.DataFrame({"count": 1}, index=ts_survived)
+    total_forced = df_all.resample("h").sum()["count"]
+    surviving = df_survived.resample("h").sum()["count"]
+    surviving_frac = surviving / total_forced * 100
+    write_ft_series(output_folder, period, run, "total_forced", total_forced)
+    write_ft_series(output_folder, period, run, "survival_fraction", surviving_frac)
 
-        ax.set_ylabel("Normalized FT failure rate (mHz/kg)")
-        ax.set_title(f"{period} - {run} - All strings")
-        ax.legend(
-            ncol=2,
-            fontsize="small",
-            loc="upper left",
-            title=f"Last cycle: {last_cycle}",
-        )
-        ax.grid(False)
-        fig.tight_layout()
-
-        if save_pdf:
-            pdf_folder = os.path.join(output_folder, period, run, "mtg/pdf")
-            os.makedirs(pdf_folder, exist_ok=True)
-            plt.savefig(
-                os.path.join(pdf_folder, f"{period}_{run}_all_strings_FT_failure.pdf"),
-                bbox_inches="tight",
-            )
-
-        shelf[f"{period}_{run}_all_strings_FT_failure"] = pickle.dumps(fig)
-        plt.close(fig)
-
-        # --- FT survival fraction ---
-        mask_forced = forced.is_forced
-        mask_survived = mask_forced & is_bb.is_bb_like & ~is_dis.is_delayed_discharge
-        ts_all = pd.to_datetime(forced.timestamp[mask_forced], unit="s")
-        ts_survived = pd.to_datetime(forced.timestamp[mask_survived], unit="s")
-        df_all = pd.DataFrame({"count": 1}, index=ts_all)
-        df_survived = pd.DataFrame({"count": 1}, index=ts_survived)
-        total_forced = df_all.resample("H").sum()["count"]
-        surviving = df_survived.resample("H").sum()["count"]
-        surviving_frac = surviving / total_forced * 100
-
-        fig, ax = plt.subplots(figsize=(12, 6))
-        surviving_frac.plot(ax=ax, drawstyle="steps-mid", color="red")
-        ax.set_ylabel("FT surviving events (%)")
-        ax.set_title(f"{period} - All strings combined")
-        ax.grid(False)
-        fig.tight_layout()
-
-        if save_pdf:
-            pdf_folder = os.path.join(output_folder, period, run, "mtg/pdf")
-            os.makedirs(pdf_folder, exist_ok=True)
-            plt.savefig(
-                os.path.join(pdf_folder, f"{period}_{run}_all_strings_FT_SF.pdf"),
-                bbox_inches="tight",
-            )
-
-        shelf[f"{period}_{run}_all_strings_FT_SF"] = pickle.dumps(fig)
-        plt.close(fig)
-
-        # --- Event rates ---
-        fig, ax = plt.subplots(figsize=(10, 3.5))
-
-        # base sample
-        base = (
+    # --- Event rates ---
+    base = (
+        ged_pul.geds & ~ged_pul.puls & ~forced.is_forced & ~is_dis.is_delayed_discharge
+    )
+    ser = pd.to_datetime(
+        forced.timestamp[ged_pul.geds & ~ged_pul.puls & ~forced.is_forced], unit="s"
+    )
+    ser_dis = pd.to_datetime(
+        forced.timestamp[
             ged_pul.geds
             & ~ged_pul.puls
             & ~forced.is_forced
-            & ~is_dis.is_delayed_discharge
+            & is_dis.is_delayed_discharge
+        ],
+        unit="s",
+    )
+    ser_pass = pd.to_datetime(forced.timestamp[base & is_bb.is_bb_like], unit="s")
+    ser_fail = pd.to_datetime(forced.timestamp[base & ~is_bb.is_bb_like], unit="s")
+
+    write_event_rate_qc(
+        output_folder,
+        period,
+        run,
+        {
+            "All events": ser,
+            "Delayed discharges": ser_dis,
+            "Failing QC": ser_fail,
+            "Surviving QC": ser_pass,
+        },
+        on_mass,
+    )
+
+    # --- Dead time from discharge windows ---
+    mask_puls = ged_pul.puls
+    mask_puls_no_dis = ged_pul.puls & ~is_dis.is_delayed_discharge
+
+    length = len(ak.flatten(ak.where(mask_puls)))
+    length_no_dis = len(ak.flatten(ak.where(mask_puls_no_dis)))
+
+    # pulser period is assumed to be of 20 s
+    livetime_total = length * 20
+    livetime_no_dis = length_no_dis * 20
+
+    dead_time_s = livetime_total - livetime_no_dis
+    dead_time_pct = (dead_time_s / livetime_total * 100) if livetime_total > 0 else 0.0
+    write_dead_time(output_folder, period, run, dead_time_s, dead_time_pct)
+
+    utils.logger.info(
+        f"...dead time from discharges: {dead_time_s:.1f} s ({dead_time_pct:.4f} %)"
+    )
+
+
+def compute_detector_summary(results: dict, det_info: dict, pars: dict) -> pd.DataFrame:
+    """Per-detector summary of a monitoring parameter (the box-plot data).
+
+    One row per detector: the mean/std/min/max of its values over the run, its
+    Qbb resolution from the calibration pars, and its position and usability
+    from the channel map. No matplotlib involved, so the numbers can be
+    written to the contract and re-read without a figure.
+    """
+    detectors = det_info["detectors"]
+    rows = []
+    for ged, item in results.items():
+        if ged not in detectors:
+            continue
+        meta_info = detectors[ged]
+
+        if item is None or len(item) == 0:
+            mean = std = min_val = max_val = np.nan
+        else:
+            mean = np.nanmean(item)
+            std = np.nanstd(item)
+            min_val = np.nanmin(item)
+            max_val = np.nanmax(item)
+        try:
+            fwhm = get_energy_key(pars[ged]["results"]["ecal"])["eres_linear"][
+                "Qbb_fwhm_in_kev"
+            ]
+        except (KeyError, TypeError):
+            fwhm = np.nan
+
+        rows.append(
+            {
+                "ged": ged,
+                "string": meta_info["string"],
+                "pos": meta_info["position"],
+                "mean": mean,
+                "std": std,
+                "min": min_val,
+                "max": max_val,
+                "fwhm": fwhm,
+                "usability": meta_info.get("usability", None),
+            }
         )
+    return pd.DataFrame(rows)
 
-        ser = pd.to_datetime(
-            forced.timestamp[ged_pul.geds & ~ged_pul.puls & ~forced.is_forced], unit="s"
-        )
-        ser_dis = pd.to_datetime(
-            forced.timestamp[
-                ged_pul.geds
-                & ~ged_pul.puls
-                & ~forced.is_forced
-                & is_dis.is_delayed_discharge
-            ],
-            unit="s",
-        )
 
-        ser_pass = pd.to_datetime(forced.timestamp[base & is_bb.is_bb_like], unit="s")
-        ser_fail = pd.to_datetime(forced.timestamp[base & ~is_bb.is_bb_like], unit="s")
-
-        for s, label, color in [
-            (ser, "All events", "dimgrey"),
-            (ser_dis, "Delayed discharges", "darkorange"),
-            (ser_fail, "Failing QC", "crimson"),
-            (ser_pass, "Surviving QC", "dodgerblue"),
-        ]:
-            if s.empty:
-                continue
-            freq, bin_edges = np.histogram(
-                s, bins=pd.date_range(start=s.min(), end=s.max(), freq="H")
-            )
-            ax.stairs(freq / 3600 * 1000 / on_mass, bin_edges, label=label, color=color)
-
-        ax.set_ylabel("Hourly rate normalized by ON mass (mHz/kg)")
-        ax.legend(
-            title=f"Last cycle: {last_cycle}\nON mass = {on_mass:.1f} kg",
-            loc="upper right",
-        )
-        ax.grid(False)
-        fig.tight_layout()
-
-        if save_pdf:
-            pdf_folder = os.path.join(output_folder, period, run, "mtg/pdf")
-            os.makedirs(pdf_folder, exist_ok=True)
-            plt.savefig(
-                os.path.join(pdf_folder, f"{period}_{run}_event_rate_qc.pdf"),
-                bbox_inches="tight",
-            )
-        shelf[f"{period}_{run}_event_rate_qc"] = pickle.dumps(fig)
-        plt.close(fig)
-
-        # --- Dead time from discharge windows ---
-        mask_puls = ged_pul.puls
-        mask_puls_no_dis = ged_pul.puls & ~is_dis.is_delayed_discharge
-
-        length = len(ak.flatten(ak.where(mask_puls)))
-        length_no_dis = len(ak.flatten(ak.where(mask_puls_no_dis)))
-
-        # pulser period is assumed to be of 20 s
-        livetime_total = length * 20
-        livetime_no_dis = length_no_dis * 20
-
-        dead_time_s = livetime_total - livetime_no_dis
-        dead_time_pct = (
-            (dead_time_s / livetime_total * 100) if livetime_total > 0 else 0.0
-        )
-
-        shelf[f"{period}_{run}_dead_time_pct"] = dead_time_pct
-        shelf[f"{period}_{run}_dead_time_s"] = dead_time_s
-
-        utils.logger.info(
-            f"...dead time from discharges: {dead_time_s:.1f} s ({dead_time_pct:.4f} %)"
-        )
+def write_detector_summary(
+    output_folder: str,
+    period: str,
+    run: str,
+    metric: str,
+    frame: pd.DataFrame,
+    data_type: str = "phy",
+) -> str | None:
+    """Write a per-detector summary table into the period contract file."""
+    if frame is None or frame.empty:
+        return None
+    path = period_contract_path(output_folder, period, data_type)
+    contract_writer.write_frame(path, f"detector_summary/{metric}/{run}", frame)
+    return path
 
 
 def box_summary_plot(
@@ -643,15 +549,16 @@ def box_summary_plot(
     pars: dict,
     det_info: dict,
     results: dict,
-    last_cycle: str,
     info: dict,
     output_dir: str,
     data_type: str,
-    save_pdf: bool,
     run_to_apply=None,
 ):
     """
-    Box plot summary for FEP gain variations for multiple detectors.
+    Publish the per-detector summary of one monitoring parameter.
+
+    Data-only (the name survives from the figure it used to draw): the box
+    figure is drawn from the contract by ``plots.summary.plot_detector_summary``.
 
     Parameters
     ----------
@@ -665,192 +572,162 @@ def box_summary_plot(
         Dictionary with channel names, IDs, and mapping to string and position.
     results : dict
         Dictionary with arrays values (per detector); None if invalid.
-    last_cycle : str
-        Last cycle of the inspect list; format: YYYYMMDDThhmmssZ.
     info : dict
-        Dictionary containing info on a parameter basis (eg label name, file title, colours, limits, ...).
+        Dictionary containing info on a parameter basis (label, title, limits).
     output_dir : str
-        Output folder for saving plots and shelve data.
+        Monitoring output root (period contract file location).
     data_type : str
-        Type of data, either 'cal' or 'phy'.
-    save_pdf : bool
-        If True, save the summary plot as a PDF.
+        Type of data, either 'cal' or 'phy' (or lac/ssc/rdc).
     run_to_apply :
         Run to apply (eg see ssc data).
     """
-    utils.logger.debug("...making summary box plots for %s", info["title"])
-    detectors = det_info["detectors"]
-    plot_data = []
-    for ged, item in results.items():
-        if ged not in detectors:
+    utils.logger.debug("...summarizing %s per detector", info["title"])
+    df_plot = compute_detector_summary(results, det_info, pars)
+    write_detector_summary(
+        output_dir, period, run, info["title"], df_plot, data_type=data_type
+    )
+    if df_plot.empty:
+        raise errors.DataError(
+            f"box_summary_plot: no detector results for '{info['title']}' "
+            "(empty or missing input data)"
+        )
+
+
+def compute_qc_rate_mhz(frame: pd.DataFrame, period: str) -> pd.Series | None:
+    """Per-detector rate in mHz over a QC flag frame's time span.
+
+    ``frame`` is a (time x rawid) frame of per-event flags, as stored in the
+    v1 monitoring HDF; IGNORE_KEYS ranges are dropped first. Returns None when
+    the frame carries no usable time span.
+    """
+    filtered = filter_series_by_ignore_keys(frame, utils.IGNORE_KEYS, period)
+    if filtered.empty:
+        return None
+    span = (filtered.index.max() - filtered.index.min()).total_seconds()
+    if not span > 0:
+        return None
+    return filtered.sum(axis=0) / span * 1000
+
+
+def write_event_rate_qc(
+    output_folder: str,
+    period: str,
+    run: str,
+    series_by_label: dict,
+    on_mass: float,
+    data_type: str = "phy",
+) -> str | None:
+    """
+    Write the QC-split hourly event rates behind the event-rate figure.
+
+    Parameters
+    ----------
+    output_folder : str
+        Monitoring output root (the folder containing ``<period>/``).
+    period, run : str
+        Run the rates belong to.
+    series_by_label : dict
+        Label -> DatetimeIndex of event times; each is histogrammed hourly and
+        normalised to mHz/kg with ``on_mass``.
+    on_mass : float
+        Total ON detector mass in kg (kept as its own column, so consumers can
+        undo the normalisation).
+    data_type : str
+        Data type key of the period contract file.
+
+    Returns
+    -------
+    key: str or None
+        The key written, or None when every series is empty.
+    """
+    columns = {}
+    for label, times in (series_by_label or {}).items():
+        if times is None or len(times) == 0:
             continue
-
-        meta_info = detectors[ged]
-
-        if item is None or len(item) == 0:
-            mean = std = min_val = max_val = np.nan
-        else:
-            mean = np.nanmean(item)
-            std = np.nanstd(item)
-            min_val = np.nanmin(item)
-            max_val = np.nanmax(item)
-        try:
-            fwhm = pars[ged]["results"]["ecal"]["cuspEmax_ctc_cal"]["eres_linear"][
-                "Qbb_fwhm_in_kev"
-            ]
-        except (KeyError, TypeError):
-            fwhm = np.nan
-
-        plot_data.append(
-            {
-                "ged": ged,
-                "string": meta_info["string"],
-                "pos": meta_info["position"],
-                "mean": mean,
-                "std": std,
-                "min": min_val,
-                "max": max_val,
-                "fwhm": fwhm,
-                "usability": meta_info.get("usability", None),
-            }
+        counts, edges = np.histogram(
+            times, bins=pd.date_range(start=times.min(), end=times.max(), freq="h")
         )
-
-    df_plot = pd.DataFrame(plot_data)
-    # sort by string, and then position
-    df = df_plot.sort_values(["string", "pos"]).reset_index(drop=True)
-
-    fig, ax = plt.subplots(figsize=(12, 6))
-    x = np.arange(len(df))
-
-    if info["title"] in ["FEP_gain_stab", "pulser_stab", "baseln_stab"]:
-        plt.axhline(0, color="gray", lw=0.5)
-
-    if not df["fwhm"].isna().all():
-        fwhm_label = (
-            r"$\pm$FWHM/2"
-            if info["title"] == "FEP_gain_stab"
-            else r"$\pm$FWHM (threshold)"
+        rate = pd.Series(
+            counts / 3600 * 1000 / on_mass, index=pd.DatetimeIndex(edges[:-1])
         )
-        ax.bar(
-            x,
-            df["fwhm"],
-            bottom=-df["fwhm"] / 2,
-            width=0.4,
-            color="orange",
-            alpha=0.2,
-            label=fwhm_label,
-        )
+        columns[label.lower().replace(" ", "_")] = rate
+    if not columns:
+        return None
+    frame = pd.DataFrame(columns)
+    frame["on_mass_kg"] = on_mass
+    path = period_contract_path(output_folder, period, data_type)
+    return contract_writer.write_frame(path, f"event_rate_qc/{run}", frame)
 
-    ax.bar(
-        x,
-        2 * df["std"],  # total height = twice 1 std
-        bottom=df["mean"] - df["std"],  # center bar on mean
-        width=0.6,
-        color="skyblue",
-        alpha=0.7,
-        label="±1σ",
-    )
 
-    ax.scatter(x, df["mean"], color="black", zorder=3, label="Mean")
+def write_slow_control(
+    output_folder: str,
+    period: str,
+    run: str,
+    parameter: str,
+    frame: pd.DataFrame,
+    data_type: str = "phy",
+) -> str | None:
+    """
+    Publish one slow-control parameter for a run to the period contract file.
 
-    ax.errorbar(
-        x,
-        df["mean"],
-        yerr=[df["mean"] - df["min"], df["max"] - df["mean"]],
-        fmt="none",
-        ecolor="#0266c9" if info["title"] != "FEP_gain_stab" else "red",
-        capsize=4,
-        label="Min/Max",
-    )
+    Parameters
+    ----------
+    output_folder : str
+        Monitoring output root (the folder containing ``<period>/``).
+    period, run : str
+        Run the readings were queried for.
+    parameter : str
+        SC parameter as named in ``SC-params.yaml`` (``DaqLeft-Temp1``); the
+        key uses underscores, matching the dashboard's selector vocabulary.
+    frame : pandas.DataFrame
+        ``SlowControl.data``: ``tstamp``, ``value``, ``unit``, ``lower_lim``,
+        ``upper_lim`` columns.
+    data_type : str
+        Data type key of the period contract file.
 
-    ax.set_xticks(x)
-    xtick_labels = ax.set_xticklabels(df["ged"], rotation=90)
-    for i, label in enumerate(xtick_labels):
-        if df.iloc[i]["usability"] in ["off", "false", False]:
-            label.set_color("red")
-        if df.iloc[i]["usability"] in ["ac"]:
-            label.set_color("darkorange")
+    Returns
+    -------
+    key: str or None
+        The key written, or None when the frame is empty.
+    """
+    if frame is None or frame.empty:
+        return None
+    series = frame.set_index(pd.DatetimeIndex(frame["tstamp"], name="datetime"))
+    series = series[["value", "unit", "lower_lim", "upper_lim"]].sort_index()
+    path = period_contract_path(output_folder, period, data_type)
+    key = f"slow_control/{parameter.replace('-', '_')}/{run}"
+    return contract_writer.write_frame(path, key, series)
 
-    ax.axvline(-0.5, color="gray", ls="--", alpha=0.5)
-    ymin, ymax = ax.get_ylim()
-    label_y = ymin * (ymax / ymin) ** 0.05 if ymin > 0 else -4
-    label_y = label_y if info["title"] != "baseln_spike" else 1
-    unique_strings = df["string"].unique()
-    for s in unique_strings:
-        idx = df.index[df["string"] == s]
-        left, right = idx.min(), idx.max()
-        ax.axvline(right + 0.5, color="gray", ls="--", alpha=0.5)
-        ax.text(left, label_y, f"String {s}", rotation=90)
 
-    ax.set_ylabel(info["ylabel"])
-    ax.set_title(f"{period} {run}")
-
-    if info["title"] in ["baseln_stab"]:
-        ax.axhline(
-            -10,
-            ls="--",
-            color="black",
-            label=r"$\pm$" + f"{info['limits'][1]}% threshold",
-        )
-        ax.axhline(10, ls="--", color="black")
-        ax.axhspan(10, 500, color="gray", alpha=0.25)
-        ax.axhspan(-10, -500, color="gray", alpha=0.25)
-    if info["title"] in ["baseln_spike"]:
-        ax.axhline(
-            50, ls="--", color="black", label=f"{info['limits'][1]} ADC upper threshold"
-        )
-        ax.axhspan(50, 500, color="gray", alpha=0.25)
-
-    if info["title"] == "FEP_gain_stab":
-        ax.axhline(-2, ls="--", color="black", label=r"$\pm$2 keV threshold")
-        ax.axhline(2, ls="--", color="black")
-        ax.axhspan(2, 500, color="gray", alpha=0.25)
-        ax.axhspan(-2, -500, color="gray", alpha=0.25)
-        plt.ylim(-6, 6)
-    if info["title"] == "pulser_stab":
-        plt.ylim(-6, 6)
-    if info["title"] in ["baseln_stab"]:
-        plt.ylim(-20, 20)
-    if info["title"] in ["baseln_spike"]:
-        plt.ylim(0, 100)
-
-    # Create custom legend entries for usability colors
-    legend_patches = []
-    handles, labels = ax.get_legend_handles_labels()
-    legend_patches.append(Patch(color="red", label="Usability: off"))
-    legend_patches.append(Patch(color="darkorange", label="Usability: ac"))
-    all_handles = handles + legend_patches
-    plot_title = f"Last cycle: {last_cycle}" if last_cycle is not None else None
-    ax.legend(handles=all_handles, loc="upper right", title=plot_title)
-    ax.grid(False)
-    plt.tight_layout()
-
-    if save_pdf:
-        pdf_folder = os.path.join(output_dir, f"{period}/{run}/mtg/pdf")
-        os.makedirs(pdf_folder, exist_ok=True)
-        plt.savefig(
-            os.path.join(
-                pdf_folder,
-                f"{period}_{run}_{info['title']}.pdf",
-            ),
-            bbox_inches="tight",
-        )
-
-    # serialize+plot in a shelve object
-    serialized_plot = pickle.dumps(fig)
-    with shelve.open(
-        os.path.join(
-            output_dir,
-            period,
-            run,
-            f"mtg/l200-{period}-{run}-{data_type}-monitoring",
-        ),
-        "c",
-        protocol=pickle.HIGHEST_PROTOCOL,
-    ) as shelf:
-        shelf[f"{period}_{run}_{info['title']}"] = serialized_plot
-
-    plt.close()
+def write_qc_rates(
+    output_folder: str,
+    period: str,
+    run: str,
+    rates_by_par: dict,
+    detectors: dict,
+    data_type: str = "phy",
+) -> str | None:
+    """Write per-(flag, detector) QC rates into the period contract file."""
+    rawid_to_name = {info.get("daq_rawid"): name for name, info in detectors.items()}
+    rows = []
+    for par, rates in rates_by_par.items():
+        if rates is None:
+            continue
+        for rawid, rate in rates.items():
+            rows.append(
+                {
+                    "run": run,
+                    "flag": par,
+                    "rawid": int(rawid),
+                    "detector": rawid_to_name.get(int(rawid)),
+                    "rate_mhz": float(rate),
+                }
+            )
+    if not rows:
+        return None
+    path = period_contract_path(output_folder, period, data_type)
+    contract_writer.write_frame(path, f"qc_average/{run}", pd.DataFrame(rows))
+    return path
 
 
 def qc_average(
@@ -859,17 +736,19 @@ def qc_average(
     det_info: dict,
     period: str,
     run: str,
-    last_cycle: str,
-    save_pdf: bool,
     pars_to_inspect: list | None = None,
 ):
     """
-    Evaluate the average rate of passing quality cuts for a given run and period across the whole array for different QC flags.
+    Evaluate the average QC rates and publish them to the period contract.
+
+    Data-only: the figures are drawn from the contract by
+    ``plots.qc.plot_qc_average``. The IsDischarge/IsSaturated rate limits and
+    the total discharge dead-time limit still land in ``qcp_summary.yaml``.
 
     Parameters
     ----------
     auto_dir_path : str
-        Path to tmp-auto public data files (eg /data2/public/prodenv/prod-blind/tmp-auto).
+        Path to tmp-auto public data files.
     output_folder : str
         Path to generated monitoring hdf files.
     det_info : dict
@@ -878,10 +757,6 @@ def qc_average(
         Period to inspect.
     run : str
         Run under inspection.
-    last_cycle : str
-        Last cycle of the inspect list; format: YYYYMMDDThhmmssZ.
-    save_pdf : bool
-        True if you want to save pdf files too; default: False.
     pars_to_inspect : list
         List of parameters (boolean flags) to inspect.
     """
@@ -911,18 +786,6 @@ def qc_average(
         utils.logger.warning(f"...file not found: {my_file}. Return!")
         return
 
-    end_folder = os.path.join(
-        output_folder,
-        period,
-        run,
-        "mtg",
-    )
-    os.makedirs(end_folder, exist_ok=True)
-    shelve_path = os.path.join(
-        end_folder,
-        f"l200-{period}-{run}-phy-monitoring",
-    )
-
     usability_map_file = os.path.join(
         output_folder,
         period,
@@ -931,148 +794,133 @@ def qc_average(
     )
     output = utils.load_yaml_or_default(usability_map_file, detectors)
 
-    with (
-        shelve.open(shelve_path, "c", protocol=pickle.HIGHEST_PROTOCOL) as shelf,
-        pd.HDFStore(my_file, "r") as store,
-    ):
+    dead_time = read_dead_time(output_folder, period, run)
+    if dead_time is None:
+        utils.logger.warning(
+            "\033[93mno dead time recorded for %s-%s; "
+            "evaluating IsDischarge without it\033[0m",
+            period,
+            run,
+        )
+    dt_condition = bool(
+        dead_time is not None
+        and dead_time["dead_time_pct"]
+        > utils.MTG_PLOT_INFO["tot_discharge_dead_time"]["limits"][1]
+    )
+
+    rates_by_par = {}
+    with pd.HDFStore(my_file, "r") as store:
         for par in pars_to_inspect:
             key = f"/IsPhysics_{par}"
             if key not in store:
                 utils.logger.debug("...skipping %s (not found in HDF)", par)
                 continue
+            rates = compute_qc_rate_mhz(store[key], period)
+            if rates is None:
+                utils.logger.debug("...no usable time span for %s. Skip it!", par)
+                continue
+            rates_by_par[par] = rates
 
-            geds_df_abs = store[key]
-            geds_df_abs = filter_series_by_ignore_keys(
-                geds_df_abs, utils.IGNORE_KEYS, period
-            )
-
-            # time span
-            time_min, time_max = geds_df_abs.index.min(), geds_df_abs.index.max()
-            diff = (time_max - time_min).total_seconds()
-
-            # rates in mHz
-            rates = geds_df_abs.sum(axis=0) / diff * 1000
-
-            fig, ax = plt.subplots(figsize=(12, 4), sharex=True)
-            ax.set_title(f"period: {period} - run: {run} - passing {par}")
-            dt_condition = False
-            if par == "IsDischarge":
-                dt = shelf.get(f"{period}_{run}_dead_time_pct", None)
-                ax.set_title(
-                    f"period: {period} - run: {run} - passing {par} - tot dead time {dt:.3f}%"
-                )
-                dt_condition = bool(
-                    dt > utils.MTG_PLOT_INFO["tot_discharge_dead_time"]["limits"][1]
-                )
-
-            x_labels, xs, ys = [], [], []
-            string_indices = {}
-            ct = -1
-
-            for string, det_list in str_chns.items():
-                indices = []
-
+            if par not in ("IsDischarge", "IsSaturated"):
+                continue
+            info = utils.MTG_PLOT_INFO[par]
+            limit = info["limits"][1]  # no lower limit for rates
+            # the hourly series behind the verdict, for the issue's excursion stats
+            hourly = compute_qc_rate_series(store[key], period, detectors=detectors)
+            dt_info = utils.MTG_PLOT_INFO["tot_discharge_dead_time"]
+            for det_list in str_chns.values():
                 for det_name in det_list:
-                    det = detectors[det_name]
-                    rawid = det["daq_rawid"]
-
-                    ct += 1
-                    x_labels.append(det_name)
-                    indices.append(ct)
+                    rawid = detectors[det_name]["daq_rawid"]
                     if rawid not in rates:
                         utils.logger.debug(
                             f"{det_name} ({rawid}) missing in dataframe for {par}"
                         )
                         continue
-
-                    ys.append(rates[rawid])
-                    xs.append(ct)
-
-                    if par in ["IsDischarge", "IsSaturated"]:
-                        condition = bool(
-                            (rates[rawid] > utils.MTG_PLOT_INFO[par]["limits"][1]).any()
-                        )  # no lower limit for rates
-                        utils.update_evaluation_in_memory(
-                            output,
-                            det_name,
+                    condition = bool((rates[rawid] > limit).any())
+                    utils.update_evaluation_in_memory(
+                        output, det_name, "phy", info["title"], not condition
+                    )
+                    if condition:
+                        series = (
+                            hourly[det_name]
+                            if hourly is not None and det_name in hourly
+                            else None
+                        )
+                        utils.issues.record_detail(
+                            period,
+                            run,
                             "phy",
-                            utils.MTG_PLOT_INFO[par]["title"],
-                            not condition,
+                            det_name,
+                            info["title"],
+                            observed=float(rates[rawid]),
+                            threshold=[None, limit],
+                            unit=info.get("unit"),
+                            window=(
+                                [str(series.index[0]), str(series.index[-1])]
+                                if series is not None and len(series)
+                                else None
+                            ),
+                            excursion=utils.issues.evaluate_excursion(
+                                series, None, limit
+                            ),
+                        )
+                    utils.update_evaluation_in_memory(
+                        output, det_name, "phy", dt_info["title"], not dt_condition
+                    )
+                    if dt_condition:
+                        utils.issues.record_detail(
+                            period,
+                            run,
+                            "phy",
+                            det_name,
+                            dt_info["title"],
+                            observed=float(dead_time["dead_time_pct"]),
+                            threshold=list(dt_info["limits"]),
+                            unit=dt_info.get("unit"),
                         )
 
-                        utils.update_evaluation_in_memory(
-                            output,
-                            det_name,
-                            "phy",
-                            utils.MTG_PLOT_INFO["tot_discharge_dead_time"]["title"],
-                            not dt_condition,
-                        )
-
-                string_indices[string] = indices
-
-            ax.scatter(xs, ys, color="dodgerblue", marker="o")
-
-            ax.set_ylabel(f"Average rate {par}=True (mHz)")
-            ax.set_yscale("log")
-            ax.set_xticks(range(len(x_labels)))
-            ax.set_xticklabels(x_labels, rotation=90)
-            ax.grid(False)
-
-            ymin, ymax = ax.get_ylim()
-            label_y = ymin * (ymax / ymin) ** 0.05 if ymin > 0 else 0.1
-            for string, indices in string_indices.items():
-                left, right = min(indices), max(indices)
-                if string == 1:
-                    ax.axvline(left - 0.5, ls="--", color="k", alpha=0.5)
-                ax.axvline(right + 0.5, ls="--", color="k", alpha=0.5)
-                ax.text(
-                    left,
-                    label_y,
-                    f"String {string}",
-                    rotation=90,
-                    ha="center",
-                    va="bottom",
-                    fontsize=8,
-                )
-
-            if par in ["IsDischarge", "IsSaturated"]:
-                upper_limit = (
-                    ax.get_ylim()[1]
-                    if ax.get_ylim()[1] > 5
-                    else utils.MTG_PLOT_INFO[par]["limits"][1] * 1.1
-                )
-                ax.axhspan(
-                    utils.MTG_PLOT_INFO[par]["limits"][1],
-                    upper_limit,
-                    color="gray",
-                    alpha=0.25,
-                )
-                ax.axhline(
-                    utils.MTG_PLOT_INFO[par]["limits"][1],
-                    ls="--",
-                    color="black",
-                    label=f"{utils.MTG_PLOT_INFO[par]['limits'][1]} mHz upper threshold",
-                )
-
-            ax.legend(title=f"Last cycle: {last_cycle}")
-            plt.tight_layout()
-
-            if par in ["IsDischarge", "IsSaturated"]:
-                plot_name = f"{period}_{run}_{utils.MTG_PLOT_INFO[par]['title']}_avg"
-            else:
-                plot_name = f"{period}_{run}_{par}_avg"
-
-            if save_pdf:
-                pdf_dir = os.path.join(end_folder, "pdf")
-                os.makedirs(pdf_dir, exist_ok=True)
-                pdf_name = os.path.join(pdf_dir, f"{plot_name}.pdf")
-                fig.savefig(pdf_name)
-
-            shelf[plot_name] = pickle.dumps(fig)
-            plt.close(fig)
+    write_qc_rates(output_folder, period, run, rates_by_par, detectors)
 
     with open(usability_map_file, "w") as f:
         yaml.dump(output, f)
+
+
+def compute_qc_rate_series(
+    frame: pd.DataFrame, period: str, cadence: str = "1h", detectors: dict | None = None
+) -> pd.DataFrame | None:
+    """Per-detector QC flag rate versus time, in mHz.
+
+    Resamples the whole (time x rawid) frame at once — equivalent to the
+    per-detector resampling the figure does, column by column. Columns are
+    renamed to detector names when a channel map is given.
+    """
+    filtered = filter_series_by_ignore_keys(frame, utils.IGNORE_KEYS, period)
+    if filtered.empty:
+        return None
+    seconds = pd.Timedelta(cadence).total_seconds()
+    rates = filtered.resample(cadence).sum() / seconds * 1000
+    if detectors:
+        rawid_to_name = {
+            info.get("daq_rawid"): name for name, info in detectors.items()
+        }
+        rates = rates.rename(columns=lambda c: rawid_to_name.get(int(c), c))
+    return rates
+
+
+def write_qc_rate_series(
+    output_folder: str,
+    period: str,
+    run: str,
+    flag: str,
+    rates: pd.DataFrame,
+    data_type: str = "phy",
+) -> str | None:
+    """Write a QC rate-versus-time frame into the period contract file."""
+    if rates is None or rates.empty:
+        return None
+    path = period_contract_path(output_folder, period, data_type)
+    contract_writer.write_frame(path, f"qc_rate_series/{flag}/{run}", rates)
+    return path
 
 
 def qc_time_series(
@@ -1081,17 +929,18 @@ def qc_time_series(
     det_info: dict,
     period: str,
     run: str,
-    last_cycle: str,
-    save_pdf: bool,
     pars_to_inspect: list | None = None,
 ):
     """
-    Evaluate rate over time of passing quality cuts for a given run and period across the whole array for different QC flags.
+    Publish the rate-vs-time of each QC flag to the period contract file.
+
+    Data-only: the per-string figures are drawn from the contract by
+    ``plots.qc.plot_qc_rate_series``.
 
     Parameters
     ----------
     auto_dir_path : str
-        Path to tmp-auto public data files (eg /data2/public/prodenv/prod-blind/tmp-auto).
+        Path to tmp-auto public data files.
     output_folder : str
         Path to generated monitoring hdf files.
     det_info : dict
@@ -1100,10 +949,6 @@ def qc_time_series(
         Period to inspect.
     run : str
         Run under inspection.
-    last_cycle : str
-        Last cycle of the inspect list; format: YYYYMMDDThhmmssZ.
-    save_pdf : bool
-        True if you want to save pdf files too; default: False.
     pars_to_inspect : list
         List of parameters (boolean flags) to inspect.
     """
@@ -1126,1039 +971,24 @@ def qc_time_series(
         output_folder, f"{period}/{run}/l200-{period}-{run}-phy-geds.hdf"
     )
     detectors = det_info["detectors"]
-    str_chns = det_info["str_chns"]
     utils.logger.debug("...inspecting QC time series")
     if not os.path.exists(my_file):
         utils.logger.warning(f"...file not found: {my_file}. Return!")
         return
 
-    end_folder = os.path.join(
-        output_folder,
-        period,
-        run,
-        "mtg",
-    )
-    os.makedirs(end_folder, exist_ok=True)
-    shelve_path = os.path.join(
-        end_folder,
-        f"l200-{period}-{run}-phy-monitoring",
-    )
-
-    color_cycle = itertools.cycle(plt.cm.tab20.colors)
-
-    with (
-        shelve.open(shelve_path, "c", protocol=pickle.HIGHEST_PROTOCOL) as shelf,
-        pd.HDFStore(my_file, "r") as store,
-    ):
-
+    with pd.HDFStore(my_file, "r") as store:
         for par in pars_to_inspect:
             key = f"/IsPhysics_{par}"
             if key not in store:
                 utils.logger.debug("...skipping %s (not found in HDF)", key)
                 continue
-
-            geds_df_abs = store[key]
-            geds_df_abs = filter_series_by_ignore_keys(
-                geds_df_abs, utils.IGNORE_KEYS, period
+            write_qc_rate_series(
+                output_folder,
+                period,
+                run,
+                par,
+                compute_qc_rate_series(store[key], period, detectors=detectors),
             )
-
-            for string, channel_list in str_chns.items():
-                fig, ax = plt.subplots(figsize=(12, 4))
-
-                for channel_name in channel_list:
-                    det = detectors[channel_name]
-                    rawid = det["daq_rawid"]
-                    pos = det["position"]
-
-                    if rawid not in geds_df_abs.columns:
-                        utils.logger.debug(
-                            f"{channel_name} ({rawid}) missing in dataframe for {par}"
-                        )
-                        continue
-
-                    data = geds_df_abs[rawid].copy()
-                    true_count = data.sum()
-                    time_min, time_max = data.index.min(), data.index.max()
-                    diff = (time_max - time_min).total_seconds()
-
-                    true_rate_mHz = round(true_count / diff * 1000, 2)
-                    hourly_rate = data.resample("1H").sum() / 3600 * 1000
-
-                    color = next(color_cycle)
-                    hourly_rate.plot(
-                        ax=ax,
-                        drawstyle="steps-mid",
-                        label=f"{channel_name} - pos {pos} - {true_rate_mHz} mHz",
-                        color=color,
-                    )
-
-                ax.grid(False)
-                ax.set_ylabel(f"{period} {run} - 1h {par} rate (mHz)")
-                fig.suptitle(f"{period} {run} - String: {string}")
-                if par in ["IsDischarge", "IsSaturated"]:
-                    upper_limit = (
-                        ax.get_ylim()[1]
-                        if ax.get_ylim()[1] > 5
-                        else utils.MTG_PLOT_INFO[par]["limits"][1] * 1.1
-                    )
-                    ax.axhspan(
-                        utils.MTG_PLOT_INFO[par]["limits"][1],
-                        upper_limit,
-                        color="gray",
-                        alpha=0.25,
-                    )
-                    ax.axhline(
-                        utils.MTG_PLOT_INFO[par]["limits"][1],
-                        ls="--",
-                        color="black",
-                        label=f"{utils.MTG_PLOT_INFO[par]['limits'][1]} mHz upper threshold",
-                    )
-                ax.legend(title=f"Last cycle: {last_cycle}")
-                plt.tight_layout()
-
-                if par in ["IsDischarge", "IsSaturated"]:
-                    plot_name = f"{period}_{run}_string{string}_{utils.MTG_PLOT_INFO[par]['title']}"  # "_rate" already in the title
-                else:
-                    plot_name = f"{period}_{run}_string{string}_{par}_rate"
-
-                if save_pdf:
-                    pdf_dir = os.path.join(end_folder, "pdf", f"st{string}")
-                    os.makedirs(pdf_dir, exist_ok=True)
-                    pdf_name = os.path.join(pdf_dir, f"{plot_name}.pdf")
-                    fig.savefig(pdf_name)
-
-                # serialize+save plot
-                shelf[plot_name] = pickle.dumps(fig)
-                plt.close(fig)
-
-
-def get_energy_key(
-    ecal_results: dict,
-) -> dict:
-    """
-    Retrieve the energy calibration results from a given dictionary.
-
-    This function searches for specific keys ('cuspEmax_ctc_runcal' or 'cuspEmax_ctc_cal') in the input `ecal_results` dictionary.
-    It returns a sub-dictionary if one of the keys is found, otherwise an empty dictionary is returned.
-
-    Parameters
-    ----------
-    ecal_results : dict
-        Dictionary containing energy calibration results.
-    """
-    cut_dict = {}
-    for key in ["cuspEmax_ctc_runcal", "cuspEmax_ctc_cal"]:
-        if key in ecal_results:
-            cut_dict = ecal_results[key]
-            break
-    else:
-        utils.logger.debug("No cuspEmax key")
-        return cut_dict
-
-    return cut_dict
-
-
-def get_calibration_file(folder_par: str) -> dict:
-    """
-    Return the content of the JSON/YAML calibration file in folder_par.
-
-    Parameters
-    ----------
-    folder_par : str
-        Path to the folder containing calibration summary files.
-    """
-    files = os.listdir(folder_par)
-    json_files = [f for f in files if f.endswith(".json")]
-    yaml_files = [f for f in files if f.endswith((".yaml", ".yml"))]
-
-    if json_files:
-        filepath = os.path.join(folder_par, json_files[0])
-        with open(filepath) as f:
-            pars_dict = json.load(f)
-    elif yaml_files:
-        filepath = os.path.join(folder_par, yaml_files[0])
-        with open(filepath) as f:
-            pars_dict = yaml.load(f, Loader=yaml.CLoader)
-    else:
-        raise FileNotFoundError(f"No JSON or YAML file found in {folder_par}")
-
-    return pars_dict
-
-
-def extract_fep_peak(pars_dict: dict, channel: str):
-    """
-    Return fep_peak_pos, fep_peak_pos_err, fep_gain, fep_gain_err.
-
-    Parameters
-    ----------
-    pars_dict : dict
-        Dictionary containing calibration outputs.
-    channel : str
-        Channel name or IDs.
-    """
-    if channel not in pars_dict:
-        return np.nan, np.nan, np.nan, np.nan
-
-    # for FEP peak, we want to look at the behaviour over time; take 'ecal' results (not partition ones!)
-    ecal_results = pars_dict[channel]["results"]["ecal"]
-    pk_fits = get_energy_key(ecal_results).get("pk_fits", {})
-
-    try:
-        fep_energy = [p for p in sorted(pk_fits) if 2613 < float(p) < 2616][0]
-        try:
-            fep_peak_pos = pk_fits[fep_energy]["parameters_in_ADC"]["mu"]
-            fep_peak_pos_err = pk_fits[fep_energy]["uncertainties_in_ADC"]["mu"]
-        except (KeyError, TypeError):
-            fep_peak_pos = pk_fits[fep_energy]["parameters"]["mu"]
-            fep_peak_pos_err = pk_fits[fep_energy]["uncertainties"]["mu"]
-
-        fep_gain = fep_peak_pos / 2614.5
-        fep_gain_err = fep_peak_pos_err / 2614.5
-
-    except (KeyError, TypeError, IndexError):
-        return np.nan, np.nan, np.nan, np.nan
-
-    return fep_peak_pos, fep_peak_pos_err, fep_gain, fep_gain_err
-
-
-def extract_resolution_at_q_bb(
-    pars_dict: dict, channel: str, key_result: str, fit: str = "linear"
-):
-    """
-    Return Qbb_fwhm (linear resolution) and Qbb_fwhm_quad (quadratic resolution).
-
-    Parameters
-    ----------
-    pars_dict : dict
-        Dictionary containing calibration outputs.
-    channel : str
-        Channel name or IDs (eg ch10000).
-    key_result : str
-        Key name used to extract the resolution results from the parsed file.
-    fit : str
-        Fitting method used for energy resolution, either 'linear' or 'quadratic'.
-    """
-    if channel not in pars_dict:
-        return np.nan, np.nan
-
-    result = pars_dict[channel]["results"][key_result].get("cuspEmax_ctc_cal", {})
-    eres_linear = result.get("eres_linear") or {}
-    Qbb_keys = [k for k in eres_linear if "Qbb_fwhm_in_" in k]
-    if not Qbb_keys:
-        return np.nan, np.nan
-
-    Qbb_fwhm = result["eres_linear"][Qbb_keys[0]]
-    Qbb_fwhm_quad = result["eres_quadratic"][Qbb_keys[0]] if fit != "linear" else np.nan
-
-    return Qbb_fwhm, Qbb_fwhm_quad
-
-
-def evaluate_fep_cal(
-    pars_dict: dict, channel: str, fep_peak_pos: float, fep_peak_pos_err: float
-):
-    """
-    Return calibrated FEP position (fep_cal) and error (fep_cal_err).
-
-    Parameters
-    ----------
-    pars_dict : dict
-        Dictionary containing calibration outputs.
-    channel : str
-        Channel name or IDs.
-    fep_peak_pos : float
-        Uncalibrated FEP position.
-    fep_peak_pos_err : float
-        Uncalibrated FEP position error.
-    """
-    if channel not in pars_dict:
-        return np.nan, np.nan
-
-    ecal_results = get_energy_key(pars_dict[channel]["pars"]["operations"])
-    expr = ecal_results["expression"]
-    params = ecal_results["parameters"]
-
-    fep_cal = eval(expr, {}, {**params, "cuspEmax_ctc": fep_peak_pos})
-    fep_cal_err = eval(expr, {}, {**params, "cuspEmax_ctc": fep_peak_pos_err})
-
-    return fep_cal, fep_cal_err
-
-
-def get_run_start_end_times(
-    sto,
-    tiers: list,
-    period: str,
-    run: str,
-    tier: str,
-):
-    """
-    Determine the start and end timestamps for a given run, including the special case for additional final calibration runs.
-
-    Parameters
-    ----------
-    sto
-        Store object to read timestamps from LH5 files.
-    tiers : list of str
-        Paths to tier data folders based on the inspected processed version.
-    period : str
-        Period to inspect.
-    run : str
-        Run to inspect.
-    tier : str
-        Tier level for the analysis ('hit', 'phy', etc.).
-    """
-    folder_tier = os.path.join(tiers[0 if tier == "hit" else 1], "cal", period, run)
-    dir_path = os.path.join(tiers[-1], "phy", period)
-    pattern = re.compile(
-        r"^l\d+-p\d+-r\d+-(cal|hit|raw)-\d{8}T\d{6}Z-tier_(dsp|hit|raw)\.lh5$"
-    )
-
-    run_files = sorted(f for f in os.listdir(folder_tier) if pattern.match(f))
-
-    # for when we have a calib run but zero phy runs for a given period
-    if os.path.isdir(dir_path) and run not in os.listdir(dir_path):
-        run_end_time = pd.to_datetime(
-            sto.read(
-                "ch1027201/dsp/timestamp", os.path.join(folder_tier, run_files[-1])
-            )[-1],
-            unit="s",
-        )
-        run_start_time = run_end_time
-    else:
-        run_start_time = pd.to_datetime(
-            sto.read(
-                "ch1027201/dsp/timestamp", os.path.join(folder_tier, run_files[0])
-            )[0],
-            unit="s",
-        )
-        run_end_time = pd.to_datetime(
-            sto.read(
-                "ch1027201/dsp/timestamp", os.path.join(folder_tier, run_files[-1])
-            )[-1],
-            unit="s",
-        )
-
-    return run_start_time, run_end_time
-
-
-def get_calib_data_dict(
-    calib_data: dict,
-    channel_info: list,
-    tiers: list,
-    pars: list,
-    period: str,
-    run: str,
-    tier: str,
-    key_result: str,
-    fit: str,
-    data_type: str,
-):
-    """
-    Extract calibration information for a given run and appends it to the provided dictionary.
-
-    This function loads calibration parameters for a specific detector channel and run,
-    parses energy calibration results and resolution information, and evaluates
-    derived values such as gain and calibration constants. It appends the extracted data
-    to the provided `calib_data` dictionary, which is expected to contain keys like
-    "fep", "fep_err", "cal_const", "cal_const_err", "run_start", "run_end", "res", and "res_quad".
-
-    Parameters
-    ----------
-    calib_data : dict
-        Dictionary that accumulates calibration results across runs.
-    channel_info : list
-        List of [channel ID, channel name].
-    tiers : list of str
-        Paths to tier data folders based on the inspected processed version.
-    pars : list of str
-        Paths to parameter .yaml/.json files.
-    period : str
-        Period to inspect.
-    run : str
-        Run to inspect.
-    tier : str
-        Tier level for the analysis ('hit', 'phy', etc.).
-    key_result : str
-        Key name used to extract the resolution results from the parsed file.
-    fit : str
-        Fitting method used for energy resolution, either 'linear' or 'quadratic'.
-    data_type : str
-    """
-    sto = lh5.LH5Store()
-    channel = channel_info[0]
-    channel_name = channel_info[1]
-
-    validity_file = os.path.join(pars[2 if tier == "hit" else 3], "validity.yaml")
-    with open(validity_file) as f:
-        validity_dict = yaml.load(f, Loader=yaml.CLoader)
-
-    # find first key of current run
-    run_path = os.path.join(tiers[2 if tier == "hit" else 3], data_type, period, run)
-    if not os.path.exists(run_path):
-        return calib_data
-    start_key = sorted(os.listdir(run_path))[0].split("-")[4]
-    # use key to load the right yaml file
-    valid_entries = [e for e in validity_dict if e["valid_from"] <= start_key]
-    if valid_entries:
-        apply = max(valid_entries, key=lambda e: e["valid_from"])["apply"][0]
-        run_to_apply = apply.split("/")[-1].split("-")[2]
-    else:
-        utils.logger.debug(
-            f"No valid calibration was found for {period}-{run}. Return."
-        )
-        return calib_data
-
-    folder_par = os.path.join(
-        pars[2 if tier == "hit" else 3], "cal", period, run_to_apply
-    )
-    pars_dict = get_calibration_file(folder_par)
-
-    if not all(k.startswith("ch") for k in pars_dict.keys()):
-        channel = channel_name
-
-    # retrieve calibration parameters
-    fep_peak_pos, fep_peak_pos_err, fep_gain, fep_gain_err = extract_fep_peak(
-        pars_dict, channel
-    )
-    Qbb_fwhm, Qbb_fwhm_quad = extract_resolution_at_q_bb(
-        pars_dict, channel, key_result, fit
-    )
-    fep_cal, fep_cal_err = evaluate_fep_cal(
-        pars_dict, channel, fep_peak_pos, fep_peak_pos_err
-    )
-
-    # get timestamp for additional-final cal run (only for FEP gain display)
-    run_start_time, run_end_time = get_run_start_end_times(
-        sto, tiers, period, run_to_apply, tier
-    )
-
-    calib_data["fep"].append(fep_gain)
-    calib_data["fep_err"].append(fep_gain_err)
-    calib_data["cal_const"].append(fep_cal)
-    calib_data["cal_const_err"].append(fep_cal_err)
-    calib_data["run_start"].append(run_start_time)
-    calib_data["run_end"].append(run_end_time)
-    calib_data["res"].append(Qbb_fwhm)
-    calib_data["res_quad"].append(Qbb_fwhm_quad)
-
-    return calib_data
-
-
-def add_calibration_runs(period: str | list, run_list: list | dict) -> list:
-    """
-    Add special calibration runs to the run list for a given period.
-
-    Parameters
-    ----------
-        period : str | list
-            Either a string or list of periods
-        run_list : list | dict
-            Either a list of runs or a dictionary with period keys
-    """
-    if isinstance(period, list) and isinstance(run_list, dict):
-        # multiple periods
-        for p in period:
-            if p in CALIB_RUNS and p in run_list:
-                run_list[p] = run_list[p] + CALIB_RUNS[p]
-    else:
-        # single period case
-        if period in CALIB_RUNS:
-            if isinstance(run_list, list):
-                run_list.extend(CALIB_RUNS[period])
-            else:
-                # run_list might be a dict but period is a string
-                if period in run_list:
-                    run_list[period] = run_list[period] + CALIB_RUNS[period]
-
-    return run_list
-
-
-def get_tier_keyresult(tiers: list):
-    """
-    Retrieve proper tier name (pht or hit) and key_result (partition_ecal or ecal) depending if partitioning data exists or not.
-
-    Parameters
-    ----------
-    tiers : list
-        Base directory containing the tier and parameter folders.
-    """
-    tier = "hit"
-    key_result = "ecal"
-    if os.path.isdir(tiers[1]):
-        if os.listdir(tiers[1]) != []:
-            tier = "pht"
-            key_result = "partition_ecal"
-
-    return tier, key_result
-
-
-def compute_diff(
-    values: np.ndarray, initial_value: float | int, scale: float | int
-) -> np.ndarray:
-    """
-    Compute relative differences with respect to an initial value. If the initial value is zero, returns an array of nan values.
-
-    Parameters
-    ----------
-    values : np.ndarray
-        Array of values to compute the differences for.
-    initial_value : float
-        Reference value for computing relative differences.
-    scale : float
-        Scaling factor.
-    """
-    if initial_value == 0:
-        return np.full_like(values, np.nan, dtype=float)
-
-    return (values - initial_value) / initial_value * scale
-
-
-def get_calib_pars(
-    path: str,
-    period: str | list,
-    run_list: list,
-    channel_info: list,
-    partition: bool,
-    data_type: str,
-    escale: float,
-    fit="linear",
-) -> dict:
-    """
-    Retrieve and process calibration parameters across a list of runs for a given channel.
-
-    This function loads calibration data from JSON/YAML files for each specified run, computes gain and calibration constant evolution over time, and returns a dictionary of relevant quantities, including their relative changes with respect to the initial values.
-    It optionally appends special calibration runs at the end of a period, if available.
-
-    Parameters
-    ----------
-    path : str
-        Base directory containing the tier and parameter folders.
-    period : str or list
-        Period to inspect. Can be a list if multiple periods are inspected.
-    run_list : list
-        List of run to inspect, or a dictionary mapping periods to lists of runs.
-    channel_info : list
-        List containing [channel ID, channel name].
-    partition : bool
-        True if you want to retrieve partition calibration results.
-    escale : float
-        Scaling factor used to compute relative differences in gain and calibration constant.
-    fit : str, optional
-        Fit method used for energy resolution ("linear" or "quadratic"), by default "linear".
-    """
-    # add special calib runs at the end of a period
-    run_list = add_calibration_runs(period, run_list)
-    run_list = [r for r in run_list if "old" not in str(r)]
-
-    calib_data = {
-        "fep": [],
-        "fep_err": [],
-        "cal_const": [],
-        "cal_const_err": [],
-        "run_start": [],
-        "run_end": [],
-        "res": [],
-        "res_quad": [],
-    }
-
-    tiers, pars = utils.get_tiers_pars_folders(path)
-
-    tier, key_result = get_tier_keyresult(tiers)
-
-    for run in run_list:
-        calib_data = get_calib_data_dict(
-            calib_data,
-            channel_info,
-            tiers,
-            pars,
-            period,
-            run,
-            tier,
-            key_result,
-            fit,
-            data_type,
-        )
-
-    for key, item in calib_data.items():
-        calib_data[key] = np.array(item)
-
-    init_cal_const, init_fep = 0, 0
-    for cal_, fep_ in zip(calib_data["cal_const"], calib_data["fep"]):
-        if init_fep == 0 and fep_ != 0:
-            init_fep = fep_
-        if init_cal_const == 0 and cal_ != 0:
-            init_cal_const = cal_
-
-    calib_data["cal_const_diff"] = compute_diff(
-        calib_data["cal_const"], init_cal_const, escale
-    )
-    calib_data["fep_diff"] = compute_diff(calib_data["fep"], init_fep, escale)
-
-    return calib_data
-
-
-def find_hdf_file(
-    directory: str, include: list[str], exclude: list[str] = None
-) -> str | None:
-    """
-    Find the original HDF monitoring file in a given directory, matching inclusion/exclusion filters.
-
-    Parameters
-    ----------
-    directory : str
-        Path to the folder containing the HDF monitoring files.
-    include: list[str]
-        List of words that the HDF monitoring file to retrieve must contain.
-    exclude: list[str] = None
-        List of words that the HDF monitoring file to retrieve must NOT contain.
-    """
-    exclude = exclude or []
-    files = os.listdir(directory)
-    candidates = [
-        f
-        for f in files
-        if f.endswith(".hdf")
-        and all(tag in f for tag in include)
-        and not any(tag in f for tag in exclude)
-    ]
-
-    return os.path.join(directory, candidates[0]) if candidates else None
-
-
-def read_if_key_exists(hdf_path: str, key: str) -> pd.DataFrame | None:
-    """
-    Read an HDF dataset if the key exists, otherwise return None; handle the case where the parameter is saved under either '/key' or 'key'.
-
-    Parameters
-    ----------
-    hdf_path : str
-        Path to the HDF file.
-    key : str
-        Key to inspect.
-    """
-    with pd.HDFStore(hdf_path, mode="r") as f:
-        try:
-            return f[key]
-        except KeyError:
-            try:
-                return f["/" + key]
-            except KeyError:
-                return None
-
-
-def get_dfs(phy_mtg_data: str, period: str, run_list: list, parameter: str):
-    """
-    Load and concatenate monitoring data from HDF files for a given period and list of runs.
-
-    Parameters
-    ----------
-    phy_mtg_data : str
-        Path to the base directory containing monitoring HDF5 files (typically ending in `/mtg/phy`).
-    period : str
-        Period to inspect.
-    run_list : list
-        List of available runs.
-    parameter : str
-        Parameter name used to construct the HDF key for loading specific datasets (e.g., 'TrapemaxCtcCal' looks for 'IsPulser_TrapemaxCtcCal').
-    """
-    # lists to accumulate dataframes, concatenated at the endo only
-    geds_df_cuspEmax_abs = []
-    geds_df_cuspEmax_abs_corr = []
-    puls_df_cuspEmax_abs = []
-
-    base_dir = os.path.join(phy_mtg_data, period)
-    runs = os.listdir(base_dir)
-    runs = [r for r in runs if re.fullmatch(r"r\d{3}", r)]
-
-    for r in runs:
-        if r not in run_list:
-            continue
-        run_dir = os.path.join(base_dir, r)
-
-        # geds file
-        hdf_geds = find_hdf_file(run_dir, include=["geds"], exclude=["res", "min"])
-        if hdf_geds:
-            geds_abs = read_if_key_exists(hdf_geds, f"IsPulser_{parameter}")
-            if geds_abs is not None:
-                geds_df_cuspEmax_abs.append(geds_abs)
-
-            geds_puls_abs = read_if_key_exists(
-                hdf_geds, f"IsPulser_{parameter}_pulser01anaDiff"
-            )
-            if geds_puls_abs is not None:
-                geds_df_cuspEmax_abs_corr.append(geds_puls_abs)
-        else:
-            utils.logger.debug("...hdf_geds missing in %s", r)
-
-        # pulser file
-        hdf_puls = find_hdf_file(
-            run_dir, include=["pulser01ana"], exclude=["res", "min"]
-        )
-        if hdf_puls:
-            puls_abs = read_if_key_exists(hdf_puls, f"IsPulser_{parameter}")
-            if puls_abs is not None:
-                puls_df_cuspEmax_abs.append(puls_abs)
-        else:
-            utils.logger.debug("...hdf_puls missing in %s", r)
-
-    if (
-        not geds_df_cuspEmax_abs
-        and not geds_df_cuspEmax_abs_corr
-        and not puls_df_cuspEmax_abs
-    ):
-        return None, None, None
-    else:
-        return (
-            (
-                pd.concat(geds_df_cuspEmax_abs, ignore_index=False, axis=0)
-                if geds_df_cuspEmax_abs
-                else pd.DataFrame()
-            ),
-            (
-                pd.concat(geds_df_cuspEmax_abs_corr, ignore_index=False, axis=0)
-                if geds_df_cuspEmax_abs_corr
-                else pd.DataFrame()
-            ),
-            (
-                pd.concat(puls_df_cuspEmax_abs, ignore_index=False, axis=0)
-                if puls_df_cuspEmax_abs
-                else pd.DataFrame()
-            ),
-        )
-
-
-def get_traptmax_tp0est(phy_mtg_data: str, period: str, run_list: list):
-    """
-    Load and concatenate trapTmax and tp0est data from HDF files for a given period and list of runs.
-
-    Parameters
-    ----------
-    phy_mtg_data : str
-        Path to the base directory containing monitoring HDF5 files (typically ending in `/mtg/phy`).
-    period : str
-        Period to inspect.
-    run_list : list
-        List of available runs.
-    """
-    geds_df_trapTmax, geds_df_tp0est = [], []
-    puls_df_trapTmax, puls_df_tp0est = [], []
-
-    base_dir = os.path.join(phy_mtg_data, period)
-    for r in os.listdir(base_dir):
-        if r not in run_list:
-            continue
-        run_dir = os.path.join(base_dir, r)
-
-        # geds
-        hdf_geds = find_hdf_file(run_dir, include=["geds"], exclude=["res", "min"])
-        if hdf_geds:
-            trapTmax = read_if_key_exists(hdf_geds, "IsPulser_TrapTmax")
-            if trapTmax is not None:
-                geds_df_trapTmax.append(trapTmax)
-
-            tp0est = read_if_key_exists(hdf_geds, "IsPulser_Tp0Est")
-            if tp0est is not None:
-                geds_df_tp0est.append(tp0est)
-
-        # pulser
-        hdf_puls = find_hdf_file(
-            run_dir, include=["pulser01ana"], exclude=["res", "min"]
-        )
-        if hdf_puls:
-            trapTmax = read_if_key_exists(hdf_puls, "IsPulser_TrapTmax")
-            if trapTmax is not None:
-                puls_df_trapTmax.append(trapTmax)
-
-            tp0est = read_if_key_exists(hdf_puls, "IsPulser_Tp0Est")
-            if tp0est is not None:
-                puls_df_tp0est.append(tp0est)
-
-    return (
-        (
-            pd.concat(geds_df_trapTmax, ignore_index=False)
-            if geds_df_trapTmax
-            else pd.DataFrame()
-        ),
-        (
-            pd.concat(geds_df_tp0est, ignore_index=False)
-            if geds_df_tp0est
-            else pd.DataFrame()
-        ),
-        (
-            pd.concat(puls_df_trapTmax, ignore_index=False)
-            if puls_df_trapTmax
-            else pd.DataFrame()
-        ),
-        (
-            pd.concat(puls_df_tp0est, ignore_index=False)
-            if puls_df_tp0est
-            else pd.DataFrame()
-        ),
-    )
-
-
-def filter_series_by_ignore_keys(
-    series_to_filter: pd.Series, skip_keys: dict, period: str
-):
-    """
-    Remove data from a time-indexed pandas Series that falls within time ranges specified by start and stop timestamps for a given period.
-
-    Parameters
-    ----------
-    series_to_filter : pd.Series
-        The time-indexed pandas Series to be filtered.
-    skip_keys : dict
-        Dictionary mapping periods to sub-dictionaries containing 'start_keys' and 'stop_keys' lists with timestamp strings in the format '%Y%m%dT%H%M%S%z'.
-    period : str
-        The period to check for keys to ignore. If not present, the series is returned unmodified.
-    """
-    if period not in skip_keys:
-        return series_to_filter
-
-    start_keys = skip_keys[period]["start_keys"]
-    stop_keys = skip_keys[period]["stop_keys"]
-
-    for ki, kf in zip(start_keys, stop_keys):
-        isolated_ki = pd.to_datetime(ki.replace("Z", "+0000"), format="%Y%m%dT%H%M%S%z")
-        isolated_kf = pd.to_datetime(kf.replace("Z", "+0000"), format="%Y%m%dT%H%M%S%z")
-        series_to_filter = series_to_filter[
-            (series_to_filter.index < isolated_ki)
-            | (series_to_filter.index > isolated_kf)
-        ]
-
-    return series_to_filter
-
-
-def filter_by_period(series: pd.Series, period: str | list) -> pd.Series:
-    """
-    Return a series filtered by ignore keys for the given period(s).
-
-    Parameters
-    ----------
-    series : pd.Series
-        Input time series (indexed by timestamps) to filter.
-    period : str or list
-        Period (or list of periods) to inspect.
-    """
-    if isinstance(period, list):
-        for p in period:
-            series = filter_series_by_ignore_keys(series, IGNORE_KEYS, p)
-    else:
-        series = filter_series_by_ignore_keys(series, IGNORE_KEYS, period)
-
-    return series
-
-
-def compute_diff_and_rescaling(
-    series: pd.Series, reference: float, escale: float, variations: bool
-):
-    """
-    Compute relative differences (if 'variations' is True) and rescale values by 'escale'.
-
-    Parameters
-    ----------
-    series : pd.Series
-        Input time series of numerical values.
-    reference : float
-        Reference value used to compute relative differences.
-    escale : float
-        Scaling factor, eg 2039 keV.
-    variations : bool
-        If true, compute relative difference (series - reference)/reference.
-    """
-    if variations:
-        diff = (series - reference) / reference
-    else:
-        diff = series.copy()
-
-    return diff, diff * escale
-
-
-def resample_series(series: pd.Series, resampling_time: str, mask: pd.Series):
-    """
-    Calculate mean/std for resampled time ranges to which a mask is then applied. The function already adds UTC timezones to the series.
-
-    Parameters
-    ----------
-    series : pd.Series
-        Input time series of numerical values.
-    resampling_time : str
-        Resampling frequency, eg '1h'.
-    mask : pd.Series
-        Boolean mask aligned to the datetime index; false values mark timestamps that should be excluded, ie set to nan value.
-    """
-    mean = series.resample(resampling_time).mean()
-    std = series.resample(resampling_time).std()
-
-    # add UTC timezone
-    if mean.index.tz is None:
-        mean = mean.tz_localize("UTC")
-        std = std.tz_localize("UTC")
-    # different timezone, convert to UTC
-    elif mean.index.tz != pytz.UTC:
-        mean = mean.tz_convert("UTC")
-        std = std.tz_convert("UTC")
-
-    # ensure mask has the same timezone as the resampled series
-    if not mask.index.tz:
-        mask = mask.tz_localize("UTC")
-
-    # set to nan when the mask is False
-    mask = mask.reindex(mean.index, fill_value=False)
-    mean[~mask] = np.nan
-    std[~mask] = np.nan
-
-    return mean, std
-
-
-def get_pulser_data(
-    resampling_time: str,
-    period: str | list,
-    dfs: list,
-    channel: str,
-    escale: float,
-    variations=False,
-) -> dict:
-    """
-    Return a dictionary of geds and pulser filtered dataframes for which a time resampling is performed.
-
-    Parameters
-    ----------
-    resampling_time : str
-        Resampling time, eg '1HH' or '10T'.
-    period : str | list
-        Period or list of periods to inspect.
-    dfs : list
-        List of dataframes for geds and pulser events.
-    channel : str
-        Channel to inspect.
-    escale : float
-        Scaling factor used to compute relative differences in gain and calibration constant.
-    variations : bool
-        True if you want to retrieve % variations (default: False).
-    """
-    # geds
-    ser_ged_cusp = dfs[0][channel].sort_index()
-    ser_ged_cusp = filter_by_period(ser_ged_cusp, period)
-    ser_ged_cusp = ser_ged_cusp[
-        ~ser_ged_cusp.index.duplicated(keep="first")
-    ]  # remove duplicates
-    ser_pul_tp0est_new = pd.DataFrame()
-
-    if ser_ged_cusp.empty:
-        utils.logger.debug("...geds series is empty after filtering")
-        return None
-
-    # check if these dfs are empty or not - if not, then remove spikes
-    if isinstance(dfs[6], pd.DataFrame) and not dfs[6].empty:
-        ser_pul_tp0est = dfs[6][1027203].sort_index()
-        ser_pul_tp0est = filter_by_period(ser_pul_tp0est, period)
-        ser_pul_tp0est = ser_pul_tp0est[
-            ~ser_pul_tp0est.index.duplicated(keep="first")
-        ]  # remove duplicates
-
-        low_lim = 4.8e4
-        upp_lim = 5.0e4
-        mask = (ser_pul_tp0est > low_lim) & (ser_pul_tp0est < upp_lim)
-        ser_pul_tp0est_new = ser_pul_tp0est[mask]
-
-        if not ser_pul_tp0est_new.empty:
-            valid_idx = ser_ged_cusp.index.intersection(ser_pul_tp0est_new.index)
-            ser_ged_cusp = ser_ged_cusp.reindex(valid_idx)
-
-    # if before, potential mismatches with ser_pul_tp0est
-    ser_ged_cusp = ser_ged_cusp.dropna()
-    # compute average over the first 10% of elements
-    n_elements = max(int(len(ser_ged_cusp) * 0.10), 1)
-    ged_cusp_av = np.nanmean(ser_ged_cusp.iloc[:n_elements])
-    if np.isnan(ged_cusp_av):
-        utils.logger.debug("...the geds average is NaN")
-        return None
-
-    ser_ged_cuspdiff, ser_ged_cuspdiff_kev = compute_diff_and_rescaling(
-        ser_ged_cusp, ged_cusp_av, escale, variations
-    )
-
-    # hour counts masking
-    mask = ser_ged_cusp.resample(resampling_time).count() > 0
-
-    # resample geds series
-    ged_cusp_hr_av, ged_cusp_hr_std = resample_series(
-        ser_ged_cuspdiff_kev, resampling_time, mask
-    )
-    ged_index = ged_cusp_hr_av.index
-
-    # pulser series
-    ser_pul_cusp = ser_pul_cuspdiff = ser_pul_cuspdiff_kev = pul_cusp_hr_av = (
-        pul_cusp_hr_std
-    ) = None
-    ged_cusp_corr = ged_cusp_corr_kev = ged_cusp_cor_hr_av = ged_cusp_cor_hr_std = None
-    # ...if pulser is available:
-    if not dfs[2].empty:
-        ser_pul_cusp = dfs[2][1027203].sort_index()
-        ser_pul_cusp = ser_pul_cusp[
-            ~ser_pul_cusp.index.duplicated(keep="first")
-        ]  # remove duplicates
-        ser_pul_cusp = filter_by_period(ser_pul_cusp, period)
-
-        # pulser average and diffs
-        if not ser_pul_cusp.empty:
-            # check if these dfs are empty or not - if not, then remove spikes
-            if isinstance(dfs[6], pd.DataFrame) and not dfs[6].empty:
-                if not ser_pul_tp0est_new.empty:
-                    valid_idx = ser_pul_cusp.index.intersection(
-                        ser_pul_tp0est_new.index
-                    )
-                    ser_pul_cusp = ser_pul_cusp.reindex(valid_idx)
-
-            # if before, potential mismatches with ser_pul_tp0est
-            ser_pul_cusp = ser_pul_cusp.dropna()
-            n_elements_pul = max(int(len(ser_pul_cusp) * 0.10), 1)
-            pul_cusp_av = np.nanmean(ser_pul_cusp.iloc[:n_elements_pul])
-            ser_pul_cuspdiff, ser_pul_cuspdiff_kev = compute_diff_and_rescaling(
-                ser_pul_cusp, pul_cusp_av, escale, variations
-            )
-
-            pul_cusp_hr_av, pul_cusp_hr_std = resample_series(
-                ser_pul_cuspdiff_kev, resampling_time, mask
-            )
-            pul_cusp_hr_av = pul_cusp_hr_av.reindex(ged_index)
-            pul_cusp_hr_std = pul_cusp_hr_std.reindex(ged_index)
-
-            # corrected GED
-            common_index = ser_ged_cuspdiff.index.intersection(ser_pul_cuspdiff.index)
-            ged_cusp_corr = (
-                ser_ged_cuspdiff[common_index] - ser_pul_cuspdiff[common_index]
-            )
-            ged_cusp_corr_kev = ged_cusp_corr * escale
-            ged_cusp_cor_hr_av, ged_cusp_cor_hr_std = resample_series(
-                ged_cusp_corr_kev, resampling_time, mask
-            )
-            ged_cusp_cor_hr_av = ged_cusp_cor_hr_av.reindex(ged_index)
-            ged_cusp_cor_hr_std = ged_cusp_cor_hr_std.reindex(ged_index)
-
-    return {
-        "ged": {
-            "cusp": ser_ged_cusp,
-            "cuspdiff": ser_ged_cuspdiff,
-            "cuspdiff_kev": ser_ged_cuspdiff_kev,
-            "kevdiff_av": ged_cusp_hr_av,
-            "kevdiff_std": ged_cusp_hr_std,
-        },
-        "pul_cusp": {
-            "raw": ser_pul_cusp,
-            "rawdiff": ser_pul_cuspdiff,
-            "kevdiff": ser_pul_cuspdiff_kev,
-            "kevdiff_av": pul_cusp_hr_av,
-            "kevdiff_std": pul_cusp_hr_std,
-        },
-        "diff": {
-            "raw": None,
-            "rawdiff": ged_cusp_corr,
-            "kevdiff": ged_cusp_corr_kev,
-            "kevdiff_av": ged_cusp_cor_hr_av,
-            "kevdiff_std": ged_cusp_cor_hr_std,
-        },
-    }
 
 
 def build_new_files(generated_path: str, period: str, run: str, data_type="phy"):
@@ -2195,7 +1025,7 @@ def build_new_files(generated_path: str, period: str, run: str, data_type="phy")
 
     if not os.path.exists(data_file):
         utils.logger.debug(f"File not found: {data_file}. Exit here.")
-        sys.exit()
+        raise errors.DataError("build_new_files failed (see log for details)")
 
     with h5py.File(data_file, "r") as f:
         my_keys = list(f.keys())
@@ -2251,7 +1081,7 @@ def build_new_files(generated_path: str, period: str, run: str, data_type="phy")
 
             # mean dataframe is kept
             if "_mean" in k:
-                original_df.to_hdf(new_file, key=k, mode="a")
+                original_df.to_hdf(new_file, key=k, mode="a", **utils.HDF_COMPRESSION)
                 continue
 
             original_df.index = pd.to_datetime(original_df.index)
@@ -2260,10 +1090,10 @@ def build_new_files(generated_path: str, period: str, run: str, data_type="phy")
             # substitute the original df with the resampled one
             original_df = resampled_df
             # append resampled data to the new file
-            resampled_df.to_hdf(new_file, key=k, mode="a")
+            resampled_df.to_hdf(new_file, key=k, mode="a", **utils.HDF_COMPRESSION)
 
         if idx == 0:
-            json_output = os.path.join(
+            info_output = os.path.join(
                 generated_path,
                 "generated/plt/hit",
                 data_type,
@@ -2271,11 +1101,44 @@ def build_new_files(generated_path: str, period: str, run: str, data_type="phy")
                 run,
                 f"l200-{period}-{run}-{data_type}-geds-info.yaml",
             )
-            with open(json_output, "w") as file:
-                json.dump(info_dict, file, indent=4)
+            with open(info_output, "w") as file:
+                yaml.dump(info_dict, file, sort_keys=False)
 
 
-def plot_time_series(
+def write_stability_series(
+    output_folder: str,
+    period: str,
+    run: str,
+    group: str,
+    name: str,
+    series: dict,
+    data_type: str = "phy",
+) -> str | None:
+    """Write per-detector monitoring series into the period contract file.
+
+    ``series`` maps detector name -> the pandas Series the figure plots, so the
+    frame written here is exactly what was drawn (time x detector).
+    """
+    series = {det: s for det, s in (series or {}).items() if s is not None and len(s)}
+    if not series:
+        return None
+    path = period_contract_path(output_folder, period, data_type)
+    contract_writer.write_frame(path, f"{group}/{name}/{run}", pd.DataFrame(series))
+    return path
+
+
+def write_cal_points(
+    output_folder: str, period: str, run: str, rows: list, data_type: str = "phy"
+) -> str | None:
+    """Write the per-run calibration points marked on the stability figures."""
+    if not rows:
+        return None
+    path = period_contract_path(output_folder, period, data_type)
+    contract_writer.write_frame(path, f"cal_points/{run}", pd.DataFrame(rows))
+    return path
+
+
+def collect_stability_series(
     auto_dir_path: str,
     phy_mtg_data: str,
     output_folder: str,
@@ -2284,33 +1147,30 @@ def plot_time_series(
     runs: list,
     current_run: str,
     det_info: dict,
-    save_pdf: bool,
     escale_val: float,
     last_checked: float | None,
-    last_cycle: str,
     partition: bool,
     quadratic: bool,
-    zoom: bool,
 ):
     """
-    Generate and save time-series plots of calibration and monitoring data for germanium detectors across multiple runs.
+    Collect the gain/parameter stability series and publish them as data.
 
-    This function collects physics and calibration data from HDF5 monitoring files and visualizes stability over time.
-    Channels with no pulser entries are automatically skipped.
-    Corrections are applied to the gain if pulser data is available ('GED corrected'), otherwise uncorrected data is plotted.
-    The plots are saved as pickled objects for later retrieval (eg. in the online Dashboard) and optionally as PDFs:
-
-    - plots saved in shelve database files under ``<output_folder>/<period>/mtg/l200-<period>-phy-monitoring``;
-    - if `save_pdf=True`, PDF copies saved under ``<output_folder>/<period>/mtg/pdf/st<string>/``.
+    The data side of the retired ``plot_time_series``: pulser-corrected and
+    uncorrected gain series over the period, the four per-run parameter
+    series, the calibration points with their resolution thresholds, and the
+    threshold verdicts for ``qcp_summary.yaml``. The per-detector figures are
+    drawn from the contract by ``plots.stability.plot_stability_series``.
 
     Parameters
     ----------
     auto_dir_path : str
-        Path to tmp-auto public data files (eg /data2/public/prodenv/prod-blind/tmp-auto).
+        Path to tmp-auto public data files.
     phy_mtg_data : str
         Path to generated monitoring hdf files.
     output_folder : str
         Path to output folder.
+    data_type : str
+        Data type routing the period contract file.
     period : str
         Period to inspect.
     runs : list
@@ -2319,28 +1179,25 @@ def plot_time_series(
         Run under inspection.
     det_info : dict
         Dictionary containing detector metadata.
-    save_pdf : bool
-        True if you want to save pdf files too; default: False.
     escale_val : float
-        Energy scale at which evaluating the gain differences; default: 2039 keV (76Ge Qbb).
+        Energy scale at which evaluating the gain differences.
     last_checked : float | None
         Timestamp of the last check.
-    last_cycle : str
-        Last cycle of the inspect list; format: YYYYMMDDThhmmssZ.
     partition : bool
-        False if not partition data; default: False.
+        False if not partition data.
     quadratic : bool
-        True if you want to plot the quadratic resolution too; default: False.
-    zoom : bool
-        True to zoom over y axis; default: False.
+        Use the quadratic resolution fit.
+
+    Returns
+    -------
+    results : dict
+        parameter -> {detector: value array}, consumed by box_summary_plot.
     """
-    avail_runs = []
-    for entry in runs:
-        new_entry = entry.replace(",", "").replace("[", "").replace("]", "")
-        avail_runs.append(new_entry)
+    avail_runs = [
+        entry.replace(",", "").replace("[", "").replace("]", "") for entry in runs
+    ]
     dataset = {period: avail_runs}
     period_list = list(dataset.keys())
-    xlim_idx = 1
     fit_flag = "quadratic" if quadratic is True else "linear"
 
     detectors = det_info["detectors"]
@@ -2354,619 +1211,294 @@ def plot_time_series(
     output = utils.load_yaml_or_default(usability_map_file, detectors)
 
     # skip detectors with no pulser entries
-    no_puls_dets = utils.NO_PULS_DETS
     flag_expr = " or ".join(
         f'(channel == "{channel}" and period in {periods})'
-        for channel, periods in no_puls_dets.items()
+        for channel, periods in utils.NO_PULS_DETS.items()
     )
 
-    # gain over period
+    def no_pulser(channel, period):
+        return bool(eval(flag_expr)) if flag_expr else False  # noqa: S307
+
     results = {}
-    for index_i in range(len(period_list)):
-        period = period_list[index_i]
+    gain_shift_series = {}
+    gain_shift_std_series = {}
+    param_series = {}
+    param_std_series = {}
+    pul_cusp_series = {}
+    cal_point_rows = []
+
+    # --- gain over the whole period ---
+    for period in period_list:
         run_list = dataset[period]
-
         (
-            geds_df_cuspEmax_abs,
-            geds_df_cuspEmax_abs_corr,
-            puls_df_cuspEmax_abs,
+            geds_df_abs,
+            geds_df_abs_corr,
+            puls_df_abs,
         ) = get_dfs(phy_mtg_data, period, run_list, "Trapemax")
-        geds_df_trapTmax, geds_df_tp0est, puls_df_trapTmax, puls_df_tp0est = (
-            get_traptmax_tp0est(phy_mtg_data, period, run_list)
-        )
-
-        if (
-            geds_df_cuspEmax_abs is None
-            or geds_df_cuspEmax_abs_corr is None
-            # no need to exit if pulser01ana does not exits, handled it properly now
-            # or puls_df_cuspEmax_abs is None
-        ):
+        spike_veto = get_spike_veto_series(phy_mtg_data, period, run_list)
+        if geds_df_abs is None or geds_df_abs_corr is None:
             utils.logger.debug("Dataframes are None for %s!", period)
             continue
-
-        # check if geds df is empty; if pulser is, means we do not apply any correction
-        # (and thus geds_corr is also empty - the code will handle the case)
-        if (
-            geds_df_cuspEmax_abs.empty
-            # or geds_df_cuspEmax_abs_corr.empty
-            # or puls_df_cuspEmax_abs.empty
-        ):
+        if geds_df_abs.empty:
             utils.logger.debug("Dataframes are empty for %s!", period)
             continue
 
-        dfs = [
-            geds_df_cuspEmax_abs,
-            geds_df_cuspEmax_abs_corr,
-            puls_df_cuspEmax_abs,
-            geds_df_trapTmax,
-            geds_df_tp0est,
-            puls_df_trapTmax,
-            puls_df_tp0est,
-        ]
-
-        end_folder = os.path.join(
-            output_folder,
-            period,
-            "mtg",
-        )
-        os.makedirs(end_folder, exist_ok=True)
-        shelve_path = os.path.join(end_folder, f"l200-{period}-phy-monitoring")
         utils.logger.debug(f"...inspecting gain over {period}")
-        with shelve.open(shelve_path, "c", protocol=pickle.HIGHEST_PROTOCOL) as shelf:
-            for plot_type in ["corr", "uncorr"]:
-                for string, det_list in str_chns.items():
-                    for channel_name in det_list:
-                        channel = detectors[channel_name]["channel_str"]
-                        rawid = detectors[channel_name]["daq_rawid"]
-                        pos = detectors[channel_name]["position"]
+        for string, det_list in str_chns.items():
+            for channel_name in det_list:
+                channel = detectors[channel_name]["channel_str"]
+                rawid = np.int64(detectors[channel_name]["daq_rawid"])
+                pos = detectors[channel_name]["position"]
+                if rawid not in set(geds_df_abs.columns):
+                    utils.logger.debug(f"{channel} is not present in the dataframe!")
+                    continue
 
-                        resampling_time = "1h"  # if len(runs)>1 else "10T"
+                pulser_data = get_pulser_data(
+                    "1h",
+                    period,
+                    geds_df_abs,
+                    rawid,
+                    escale=escale_val,
+                    puls_abs=puls_df_abs,
+                    spike_veto=spike_veto,
+                    variations=True,
+                )
+                pars_data = get_calib_pars(
+                    auto_dir_path,
+                    period,
+                    run_list,
+                    [channel, channel_name],
+                    partition,
+                    data_type,
+                    escale=escale_val,
+                    fit=fit_flag,
+                )
+                cal_point_rows += [
+                    {
+                        "detector": channel_name,
+                        "string": string,
+                        "position": pos,
+                        "run_start": start,
+                        "fep_diff": fep,
+                        "cal_const_diff": const,
+                        "res": res,
+                        "res_quad": res_quad,
+                    }
+                    for start, fep, const, res, res_quad in zip(
+                        pars_data["run_start"],
+                        pars_data["fep_diff"],
+                        pars_data["cal_const_diff"],
+                        pars_data["res"],
+                        pars_data["res_quad"],
+                    )
+                ]
+                if no_pulser(channel, period):
+                    continue
+                # corrected series when PULS01ANA has a signal, else uncorrected
+                if pulser_data["pul"]["kevdiff_av"] is not None:
+                    gain_shift_series.setdefault("corr", {})[channel_name] = (
+                        pulser_data["diff"]["kevdiff_av"]
+                    )
+                    gain_shift_std_series.setdefault("corr", {})[channel_name] = (
+                        pulser_data["diff"]["kevdiff_std"]
+                    )
+                    pul_cusp_series[channel_name] = pulser_data["pul"]["kevdiff_av"]
+                else:
+                    gain_shift_series.setdefault("corr", {})[channel_name] = (
+                        pulser_data["ged"]["kevdiff_av"]
+                    )
+                    gain_shift_std_series.setdefault("corr", {})[channel_name] = (
+                        pulser_data["ged"]["kevdiff_std"]
+                    )
+                gain_shift_series.setdefault("uncorr", {})[channel_name] = pulser_data[
+                    "ged"
+                ]["kevdiff_av"]
+                gain_shift_std_series.setdefault("uncorr", {})[channel_name] = (
+                    pulser_data["ged"]["kevdiff_std"]
+                )
 
-                        rawid = np.int64(rawid)
-                        if rawid not in set(dfs[0].columns):
-                            utils.logger.debug(
-                                f"{channel} is not present in the dataframe!"
-                            )
-                            continue
-
-                        pulser_data = get_pulser_data(
-                            resampling_time,
-                            period,
-                            dfs,
-                            rawid,
-                            escale=escale_val,
-                            variations=True,
-                        )
-
-                        fig, ax = plt.subplots(figsize=(12, 4))
-                        pars_data = get_calib_pars(
-                            auto_dir_path,
-                            period,
-                            run_list,
-                            [channel, channel_name],
-                            partition,
-                            data_type,
-                            escale=escale_val,
-                            fit=fit_flag,
-                        )
-
-                        t0 = pars_data["run_start"]
-                        if not eval(flag_expr):
-                            # PULS01ANA has a signal - we can correct GEDS energies for it!
-                            if (
-                                pulser_data["pul_cusp"]["kevdiff_av"] is not None
-                                and plot_type == "corr"
-                            ):
-                                pul_cusp_av = pulser_data["pul_cusp"][
-                                    "kevdiff_av"
-                                ].values.astype(float)
-                                diff_av = pulser_data["diff"][
-                                    "kevdiff_av"
-                                ].values.astype(float)
-                                diff_std = pulser_data["diff"][
-                                    "kevdiff_std"
-                                ].values.astype(float)
-                                x = pulser_data["diff"]["kevdiff_av"].index.values
-
-                                plt.fill_between(
-                                    x,
-                                    diff_av - diff_std,
-                                    diff_av + diff_std,
-                                    color="k",
-                                    alpha=0.2,
-                                    label=r"±1$\sigma$",
-                                )
-                                plt.plot(x, pul_cusp_av, "C2", label="PULS01ANA")
-                                plt.plot(x, diff_av, "C4", label="GED corrected")
-                            else:
-                                ged_av = pulser_data["ged"]["kevdiff_av"].values.astype(
-                                    float
-                                )
-                                ged_std = pulser_data["ged"][
-                                    "kevdiff_std"
-                                ].values.astype(float)
-                                x = pulser_data["ged"]["kevdiff_av"].index.values
-
-                                plt.fill_between(
-                                    x,
-                                    ged_av - ged_std,
-                                    ged_av + ged_std,
-                                    color="k",
-                                    alpha=0.2,
-                                    label=r"±1$\sigma$",
-                                )
-                                plt.plot(
-                                    x,
-                                    ged_av,
-                                    color="dodgerblue",
-                                    label="GED uncorrected",
-                                )
-
-                        plt.plot(
-                            pars_data["run_start"] - pd.Timedelta(hours=5),
-                            pars_data["fep_diff"],
-                            "kx",
-                            label="FEP gain",
-                        )
-                        plt.plot(
-                            pars_data["run_start"] - pd.Timedelta(hours=5),
-                            pars_data["cal_const_diff"],
-                            "rx",
-                            label="cal. const. diff",
-                        )
-
-                        for ti in pars_data["run_start"]:
-                            plt.axvline(ti, color="dimgrey", ls="--")
-
-                        for i in range(len(t0)):
-                            if i == len(pars_data["run_start"]) - 1:
-                                plt.plot(
-                                    [t0[i], t0[i] + pd.Timedelta(days=7)],
-                                    [pars_data["res"][i] / 2, pars_data["res"][i] / 2],
-                                    "b-",
-                                )
-                                plt.plot(
-                                    [t0[i], t0[i] + pd.Timedelta(days=7)],
-                                    [
-                                        -pars_data["res"][i] / 2,
-                                        -pars_data["res"][i] / 2,
-                                    ],
-                                    "b-",
-                                )
-                                if quadratic:
-                                    plt.plot(
-                                        [t0[i], t0[i] + pd.Timedelta(days=7)],
-                                        [
-                                            pars_data["res_quad"][i] / 2,
-                                            pars_data["res_quad"][i] / 2,
-                                        ],
-                                        color="dodgerblue",
-                                        linestyle="-",
-                                    )
-                                    plt.plot(
-                                        [t0[i], t0[i] + pd.Timedelta(days=7)],
-                                        [
-                                            -pars_data["res_quad"][i] / 2,
-                                            -pars_data["res_quad"][i] / 2,
-                                        ],
-                                        color="dodgerblue",
-                                        linestyle="-",
-                                    )
-                            else:
-                                plt.plot(
-                                    [t0[i], t0[i + 1]],
-                                    [pars_data["res"][i] / 2, pars_data["res"][i] / 2],
-                                    "b-",
-                                )
-                                plt.plot(
-                                    [t0[i], t0[i + 1]],
-                                    [
-                                        -pars_data["res"][i] / 2,
-                                        -pars_data["res"][i] / 2,
-                                    ],
-                                    "b-",
-                                )
-                                if quadratic:
-                                    plt.plot(
-                                        [t0[i], t0[i + 1]],
-                                        [
-                                            pars_data["res_quad"][i] / 2,
-                                            pars_data["res_quad"][i] / 2,
-                                        ],
-                                        color="dodgerblue",
-                                        linestyle="-",
-                                    )
-                                    plt.plot(
-                                        [t0[i], t0[i + 1]],
-                                        [
-                                            -pars_data["res_quad"][i] / 2,
-                                            -pars_data["res_quad"][i] / 2,
-                                        ],
-                                        color="dodgerblue",
-                                        linestyle="-",
-                                    )
-
-                            if str(pars_data["res"][i] / 2 * 1.1) != "nan" and i < len(
-                                pars_data["res"]
-                            ) - (xlim_idx - 1):
-                                plt.text(
-                                    t0[i],
-                                    pars_data["res"][i] / 2 * 1.1,
-                                    "{:.2f}".format(pars_data["res"][i]),
-                                    color="b",
-                                )
-
-                            if quadratic:
-                                if str(
-                                    pars_data["res_quad"][i] / 2 * 1.5
-                                ) != "nan" and i < len(pars_data["res"]) - (
-                                    xlim_idx - 1
-                                ):
-                                    plt.text(
-                                        t0[i],
-                                        pars_data["res_quad"][i] / 2 * 1.5,
-                                        "{:.2f}".format(pars_data["res_quad"][i]),
-                                        color="dodgerblue",
-                                    )
-
-                        fig.suptitle(
-                            f"period: {period} - string: {string} - position: {pos} - ged: {channel_name}"
-                        )
-                        plt.ylabel(r"Energy diff / keV")
-                        plt.plot(
-                            [0, 1],
-                            [0, 1],
-                            "b",
-                            label=r"Q$_{\beta\beta}$ $\pm$FWHM/2 lin. (threshold)",
-                        )
-                        if quadratic:
-                            plt.plot(
-                                [1, 2],
-                                [1, 2],
-                                "dodgerblue",
-                                label=r"Q$_{\beta\beta}$ $\pm$FWHM/2 quad. (threshold)",
-                            )
-
-                        if zoom:
-                            if flag_expr:
-                                plt.ylim(-3, 3)
-                            else:
-                                bound = np.average(
-                                    pulser_data["ged"]["cusp_av"].dropna()
-                                )
-                                plt.ylim(-2.5 * bound, 2.5 * bound)
-                        max_date = pulser_data["ged"]["kevdiff_av"].index.max()
-                        time_difference = max_date.tz_localize(None) - t0[
-                            -xlim_idx
-                        ].tz_localize(None)
-                        plt.xlim(
-                            t0[0] - pd.Timedelta(hours=8),
-                            t0[-xlim_idx] + time_difference * 1.5,
-                        )  # pd.Timedelta(days=7))# --> change me to resize the width of the last run
-                        plt.legend(loc="lower left", title=f"Last cycle: {last_cycle}")
-                        plt.tight_layout()
-
-                        if save_pdf:
-                            mgt_folder = os.path.join(end_folder, "pdf", f"st{string}")
-                            os.makedirs(mgt_folder, exist_ok=True)
-
-                            pdf_name = os.path.join(
-                                mgt_folder,
-                                f"{period}_string{string}_pos{pos}_{channel_name}_{plot_type}_gain_shift.pdf",
-                            )
-                            plt.savefig(pdf_name)
-
-                        # serialize+save the plot
-                        serialized_plot = pickle.dumps(plt.gcf())
-                        shelf[
-                            f"{period}_string{string}_pos{pos}_{channel_name}_{plot_type}_gain_shift"
-                        ] = serialized_plot
-                        plt.close(fig)
-
-                        # structure of pickle files:
-                        #  - p08_string1_pos1_V02160A_param
-                        #  - p08_string1_pos2_V02160B_param
-                        #  - ...
-
-    # parameters (bsln, gain, ...) variations over run
+    # --- parameters (bsln, gain, ...) variations over the current run ---
     utils.logger.debug("...inspecting gain/bsln/etc time series")
     info = utils.MTG_PLOT_INFO
     last_checked = None
 
-    for inspected_parameter in [
-        "BlStd",
-        "TrapemaxCtcCal",
-        "Baseline",
-        "Trapemax",
-    ]:
+    for inspected_parameter in ["BlStd", "TrapemaxCtcCal", "Baseline", "Trapemax"]:
         escale_par = escale_val if inspected_parameter == "TrapemaxCtcCal" else 1
         results.update({inspected_parameter: {}})
 
-        for index_i in range(len(period_list)):
-            period = period_list[index_i]
-
+        for period in period_list:
             (
-                geds_df_cuspEmax_abs,
-                geds_df_cuspEmax_abs_corr,
-                puls_df_cuspEmax_abs,
+                geds_df_abs,
+                geds_df_abs_corr,
+                puls_df_abs,
             ) = get_dfs(phy_mtg_data, period, [current_run], inspected_parameter)
-            geds_df_trapTmax, geds_df_tp0est, puls_df_trapTmax, puls_df_tp0est = (
-                get_traptmax_tp0est(phy_mtg_data, period, [current_run])
-            )
-
-            if (
-                geds_df_cuspEmax_abs is None
-                or geds_df_cuspEmax_abs_corr is None
-                # no need to exit if pulser01ana does not exits, handled it properly now
-                # or puls_df_cuspEmax_abs is None
-            ):
+            spike_veto = get_spike_veto_series(phy_mtg_data, period, [current_run])
+            if geds_df_abs is None or geds_df_abs_corr is None:
                 utils.logger.debug(
                     "Dataframes are None for %s-%s!", period, current_run
                 )
                 continue
-            if geds_df_cuspEmax_abs.empty:
+            if geds_df_abs.empty:
                 utils.logger.debug(
                     "Dataframes are empty for %s-%s!", period, current_run
                 )
                 continue
-            dfs = [
-                geds_df_cuspEmax_abs,
-                geds_df_cuspEmax_abs_corr,
-                puls_df_cuspEmax_abs,
-                geds_df_trapTmax,
-                geds_df_tp0est,
-                puls_df_trapTmax,
-                puls_df_tp0est,
-            ]
 
-            end_folder = os.path.join(
-                output_folder,
-                period,
-                current_run,
-                "mtg",
-            )
-            os.makedirs(end_folder, exist_ok=True)
-            shelve_path = os.path.join(
-                end_folder,
-                f"l200-{period}-{current_run}-phy-monitoring",
-            )
             utils.logger.debug(
                 f"...inspecting {info[inspected_parameter]['title']} over {current_run}"
             )
+            for _string, det_list in str_chns.items():
+                for channel_name in det_list:
+                    channel = detectors[channel_name]["channel_str"]
+                    rawid = np.int64(detectors[channel_name]["daq_rawid"])
+                    if rawid not in set(geds_df_abs.columns):
+                        utils.logger.debug(
+                            f"{channel} is not present in the dataframe!"
+                        )
+                        continue
 
-            with shelve.open(
-                shelve_path, "c", protocol=pickle.HIGHEST_PROTOCOL
-            ) as shelf:
-                for string, det_list in str_chns.items():
-                    for channel_name in det_list:
-                        channel = detectors[channel_name]["channel_str"]
-                        rawid = detectors[channel_name]["daq_rawid"]
-                        pos = detectors[channel_name]["position"]
+                    pulser_data = get_pulser_data(
+                        "1h",
+                        period,
+                        geds_df_abs,
+                        rawid,
+                        escale=escale_par,
+                        puls_abs=puls_df_abs,
+                        spike_veto=spike_veto,
+                        variations=info[inspected_parameter]["percentage"],
+                    )
+                    pars_data = get_calib_pars(
+                        auto_dir_path,
+                        period,
+                        [current_run],
+                        [channel, channel_name],
+                        partition,
+                        data_type,
+                        escale=escale_par,
+                        fit=fit_flag,
+                    )
+                    threshold = (
+                        [-pars_data["res"][0] / 2, pars_data["res"][0] / 2]
+                        if "Trapemax" in inspected_parameter
+                        else info[inspected_parameter]["limits"]
+                    )
+                    t0 = pars_data["run_start"]
+                    if no_pulser(channel, period):
+                        continue
 
-                        resampling_time = "1h"
-                        rawid = np.int64(rawid)
-                        if rawid not in set(dfs[0].columns):
-                            utils.logger.debug(
-                                f"{channel} is not present in the dataframe!"
-                            )
-                            continue
-
-                        pulser_data = get_pulser_data(
-                            resampling_time,
-                            period,
-                            dfs,
-                            rawid,
-                            escale=escale_par,
-                            variations=info[inspected_parameter]["percentage"],
+                    if (
+                        info[inspected_parameter]["percentage"] is True
+                        and float(escale_par) == 1.0
+                    ):
+                        check_kevdiff = pulser_data["ged"]["kevdiff_av"] * 100
+                    else:
+                        check_kevdiff = pulser_data["ged"]["kevdiff_av"]
+                    # check threshold and update YAML summary file
+                    # (for energy, only TrapemaxCtcCal and not Trapemax for now)
+                    if inspected_parameter != "Trapemax":
+                        utils.check_threshold(
+                            check_kevdiff,
+                            channel_name,
+                            last_checked,
+                            t0,
+                            threshold,
+                            info[inspected_parameter]["title"],
+                            output,
+                            period=period,
+                            run=current_run,
                         )
 
-                        fig, ax = plt.subplots(figsize=(12, 4))
-                        pars_data = get_calib_pars(
-                            auto_dir_path,
-                            period,
-                            [current_run],
-                            [channel, channel_name],
-                            partition,
-                            data_type,
-                            escale=escale_par,
-                            fit=fit_flag,
-                        )
-                        threshold = (
-                            [-pars_data["res"][0] / 2, pars_data["res"][0] / 2]
-                            if "Trapemax" in inspected_parameter
-                            else info[inspected_parameter]["limits"]
-                        )
-
-                        t0 = pars_data["run_start"]
-                        if not eval(flag_expr):
-                            check_kevdiff = None
-                            if (
-                                info[inspected_parameter]["percentage"] is True
-                                and float(escale_par) == 1.0
-                            ):
-                                check_kevdiff = pulser_data["ged"]["kevdiff_av"] * 100
-                            else:
-                                check_kevdiff = pulser_data["ged"]["kevdiff_av"]
-                            # check threshold and update YAML summary file
-                            # (for energy, do it only for TrapemaxCtcCal and not Trapemax at the moment)
-                            if inspected_parameter != "Trapemax":
-                                utils.check_threshold(
-                                    check_kevdiff,
-                                    channel_name,
-                                    last_checked,
-                                    t0,
-                                    threshold,
-                                    info[inspected_parameter]["title"],
-                                    output,
-                                )
-
-                            # PULS01ANA has a signal - we can correct GEDS energies for it!
-                            # only in the case of energy parameters
-                            if (
-                                pulser_data["pul_cusp"]["kevdiff_av"] is not None
-                                and inspected_parameter == "TrapemaxCtcCal"
-                            ):
-                                pul_cusp_av = pulser_data["pul_cusp"][
+                    # PULS01ANA correction applies to energy parameters only
+                    if (
+                        pulser_data["pul"]["kevdiff_av"] is not None
+                        and inspected_parameter == "TrapemaxCtcCal"
+                    ):
+                        param_series.setdefault(inspected_parameter, {})[
+                            channel_name
+                        ] = pulser_data["diff"]["kevdiff_av"]
+                        param_std_series.setdefault(inspected_parameter, {})[
+                            channel_name
+                        ] = pulser_data["diff"]["kevdiff_std"]
+                        results[inspected_parameter].update(
+                            {
+                                channel_name: pulser_data["pul"][
                                     "kevdiff_av"
                                 ].values.astype(float)
-                                diff_av = pulser_data["diff"][
+                            }
+                        )
+                    else:
+                        if (
+                            info[inspected_parameter]["percentage"] is True
+                            and float(escale_par) == 1.0
+                        ):
+                            pulser_data["ged"]["kevdiff_av"] *= 100
+                            pulser_data["ged"]["kevdiff_std"] *= 100
+                        param_series.setdefault(inspected_parameter, {})[
+                            channel_name
+                        ] = pulser_data["ged"]["kevdiff_av"]
+                        param_std_series.setdefault(inspected_parameter, {})[
+                            channel_name
+                        ] = pulser_data["ged"]["kevdiff_std"]
+                        results[inspected_parameter].update(
+                            {
+                                channel_name: pulser_data["ged"][
                                     "kevdiff_av"
                                 ].values.astype(float)
-                                diff_std = pulser_data["diff"][
-                                    "kevdiff_std"
-                                ].values.astype(float)
-                                x = pulser_data["diff"]["kevdiff_av"].index.values
-
-                                plt.plot(x, pul_cusp_av, "C2", label="PULS01ANA")
-                                plt.plot(x, diff_av, "C4", label="GED corrected")
-                                plt.fill_between(
-                                    x,
-                                    diff_av - diff_std,
-                                    diff_av + diff_std,
-                                    color="k",
-                                    alpha=0.2,
-                                    label=r"±1$\sigma$",
-                                )
-
-                                results[inspected_parameter].update(
-                                    {channel_name: pul_cusp_av.values.astype(float)}
-                                )
-                            # else, no correction is applied
-                            else:
-                                if (
-                                    info[inspected_parameter]["percentage"] is True
-                                    and float(escale_par) == 1.0
-                                ):
-                                    pulser_data["ged"]["kevdiff_av"] *= 100
-                                    pulser_data["ged"]["kevdiff_std"] *= 100
-
-                                vals_av = pulser_data["ged"][
-                                    "kevdiff_av"
-                                ].values.astype(float)
-                                vals_std = pulser_data["ged"][
-                                    "kevdiff_std"
-                                ].values.astype(float)
-                                x = pulser_data["ged"]["kevdiff_av"].index.values
-
-                                plt.plot(
-                                    x,
-                                    vals_av,
-                                    color=info[inspected_parameter]["colors"][0],
-                                    label="GED uncorrected",
-                                )
-                                plt.fill_between(
-                                    x,
-                                    vals_av - vals_std,
-                                    vals_av + vals_std,
-                                    color="k",
-                                    alpha=0.2,
-                                    label=r"±1$\sigma$",
-                                )
-
-                                results[inspected_parameter].update(
-                                    {
-                                        channel_name: pulser_data["ged"][
-                                            "kevdiff_av"
-                                        ].values.astype(float)
-                                    }
-                                )
-
-                        # plot resolution only for the energy parameters
-                        if inspected_parameter == "TrapemaxCtcCal":
-                            plt.plot(
-                                [t0[0], t0[0] + pd.Timedelta(days=7)],
-                                [pars_data["res"][0] / 2, pars_data["res"][0] / 2],
-                                color=info[inspected_parameter]["colors"][1],
-                                ls="-",
-                            )
-                            plt.plot(
-                                [t0[0], t0[0] + pd.Timedelta(days=7)],
-                                [-pars_data["res"][0] / 2, -pars_data["res"][0] / 2],
-                                color=info[inspected_parameter]["colors"][1],
-                                ls="-",
-                            )
-
-                            if str(pars_data["res"][0] / 2 * 1.1) != "nan" and 0 < len(
-                                pars_data["res"]
-                            ) - (xlim_idx - 1):
-                                plt.text(
-                                    t0[0],
-                                    pars_data["res"][0] / 2 * 1.1,
-                                    "{:.2f}".format(pars_data["res"][0]),
-                                    color=info[inspected_parameter]["colors"][1],
-                                )
-                            plt.plot(
-                                [0, 1],
-                                [0, 1],
-                                color=info[inspected_parameter]["colors"][1],
-                                label=r"Q$_{\beta\beta}$ $\pm$FWHM/2 lin. (threshold)",
-                            )
-                        else:
-                            if threshold[1] is not None:
-                                plt.plot(
-                                    [t0[0], t0[0] + pd.Timedelta(days=7)],
-                                    [
-                                        threshold[1],
-                                        threshold[1],
-                                    ],
-                                    color=info[inspected_parameter]["colors"][1],
-                                    ls="-",
-                                    label="Threshold",
-                                )
-                            if threshold[0] is not None:
-                                plt.plot(
-                                    [t0[0], t0[0] + pd.Timedelta(days=7)],
-                                    [
-                                        threshold[0],
-                                        threshold[0],
-                                    ],
-                                    color=info[inspected_parameter]["colors"][1],
-                                    ls="-",
-                                    label=(
-                                        None
-                                        if threshold[1] is not None
-                                        else "Threshold"
-                                    ),
-                                )
-
-                        plt.ylabel(info[inspected_parameter]["ylabel"])
-                        fig.suptitle(
-                            f"period: {period} - string: {string} - position: {pos} - ged: {channel_name}"
+                            }
                         )
 
-                        if zoom is True:
-                            bound = np.average(
-                                pulser_data["ged"]["kevdiff_std"].dropna()
-                            )
-                            plt.ylim(-3.5 * bound, 3.5 * bound)
-
-                        max_date = pulser_data["ged"]["kevdiff_av"].index.max()
-                        time_difference = max_date.tz_localize(None) - t0[
-                            -xlim_idx
-                        ].tz_localize(None)
-                        plt.xlim(
-                            t0[0] - pd.Timedelta(hours=0.5),
-                            t0[-xlim_idx] + time_difference * 1.1,
-                        )
-                        plt.legend(loc="lower left", title=f"Last cycle: {last_cycle}")
-                        plt.tight_layout()
-
-                        if save_pdf:
-                            mgt_folder = os.path.join(end_folder, "pdf", f"st{string}")
-                            os.makedirs(mgt_folder, exist_ok=True)
-
-                            pdf_name = os.path.join(
-                                mgt_folder,
-                                f"{period}_{current_run}_string{string}_pos{pos}_{channel_name}_{info[inspected_parameter]['title']}.pdf",
-                            )
-                            plt.savefig(pdf_name)
-
-                        # serialize+save the plot
-                        serialized_plot = pickle.dumps(plt.gcf())
-                        shelf[
-                            f"{period}_{current_run}_string{string}_pos{pos}_{channel_name}_{info[inspected_parameter]['title']}"
-                        ] = serialized_plot
-                        plt.close(fig)
+    for plot_type, series in gain_shift_series.items():
+        write_stability_series(
+            output_folder,
+            period,
+            current_run,
+            "gain_shift",
+            plot_type,
+            series,
+            data_type=data_type,
+        )
+    for plot_type, series in gain_shift_std_series.items():
+        write_stability_series(
+            output_folder,
+            period,
+            current_run,
+            "gain_shift",
+            f"{plot_type}_std",
+            series,
+            data_type=data_type,
+        )
+    for parameter, series in param_series.items():
+        write_stability_series(
+            output_folder,
+            period,
+            current_run,
+            "param_stability",
+            parameter,
+            series,
+            data_type=data_type,
+        )
+    for parameter, series in param_std_series.items():
+        write_stability_series(
+            output_folder,
+            period,
+            current_run,
+            "param_stability",
+            f"{parameter}_std",
+            series,
+            data_type=data_type,
+        )
+    write_stability_series(
+        output_folder,
+        period,
+        current_run,
+        "pul_cusp",
+        "kevdiff",
+        pul_cusp_series,
+        data_type=data_type,
+    )
+    write_cal_points(
+        output_folder, period, current_run, cal_point_rows, data_type=data_type
+    )
 
     with open(usability_map_file, "w") as f:
         yaml.dump(output, f)
