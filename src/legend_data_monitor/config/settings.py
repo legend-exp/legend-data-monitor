@@ -13,6 +13,15 @@ import yaml
 
 pkg = importlib.resources.files("legend_data_monitor")
 
+# experiment constants the code used to inline (energy estimator and peaks, QC
+# pseudo-parameters, headline plots, ...); aux channels are NOT here, they are
+# derived from the channel map by utils.aux_channels
+with open(pkg / "settings" / "experiment.yaml") as f:
+    EXPERIMENT = yaml.load(f, Loader=yaml.CLoader)
+
+#: parameters whose whole point is the QC columns (see EXPERIMENT)
+QC_PARAMETERS = frozenset(EXPERIMENT["qc_parameters"])
+
 # load dictionary with plot info (= units, thresholds, label, ...)
 with open(pkg / "settings" / "par-settings.yaml") as f:
     PLOT_INFO = yaml.load(f, Loader=yaml.CLoader)

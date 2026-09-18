@@ -1,5 +1,4 @@
 import glob
-import json
 import os
 
 import awkward as ak
@@ -25,12 +24,14 @@ from .loading.calib_files import (  # noqa: F401
     evaluate_fep_cal,
     extract_fep_peak,
     extract_resolution_at_q_bb,
+    find_energy_key,
     get_calib_data_dict,
     get_calib_pars,
     get_calibration_file,
     get_energy_key,
     get_run_start_end_times,
     get_tier_keyresult,
+    uncalibrated_variable,
 )
 from .processing.series import (  # noqa: F401
     compute_diff,
@@ -40,7 +41,7 @@ from .processing.series import (  # noqa: F401
     find_hdf_file,
     get_dfs,
     get_pulser_data,
-    get_traptmax_tp0est,
+    get_spike_veto_series,
     read_if_key_exists,
     resample_series,
 )
@@ -504,7 +505,7 @@ def compute_detector_summary(results: dict, det_info: dict, pars: dict) -> pd.Da
             min_val = np.nanmin(item)
             max_val = np.nanmax(item)
         try:
-            fwhm = pars[ged]["results"]["ecal"]["cuspEmax_ctc_cal"]["eres_linear"][
+            fwhm = get_energy_key(pars[ged]["results"]["ecal"])["eres_linear"][
                 "Qbb_fwhm_in_kev"
             ]
         except (KeyError, TypeError):
@@ -1092,7 +1093,7 @@ def build_new_files(generated_path: str, period: str, run: str, data_type="phy")
             resampled_df.to_hdf(new_file, key=k, mode="a", **utils.HDF_COMPRESSION)
 
         if idx == 0:
-            json_output = os.path.join(
+            info_output = os.path.join(
                 generated_path,
                 "generated/plt/hit",
                 data_type,
@@ -1100,8 +1101,8 @@ def build_new_files(generated_path: str, period: str, run: str, data_type="phy")
                 run,
                 f"l200-{period}-{run}-{data_type}-geds-info.yaml",
             )
-            with open(json_output, "w") as file:
-                json.dump(info_dict, file, indent=4)
+            with open(info_output, "w") as file:
+                yaml.dump(info_dict, file, sort_keys=False)
 
 
 def write_stability_series(
@@ -1230,28 +1231,17 @@ def collect_stability_series(
     for period in period_list:
         run_list = dataset[period]
         (
-            geds_df_cuspEmax_abs,
-            geds_df_cuspEmax_abs_corr,
-            puls_df_cuspEmax_abs,
+            geds_df_abs,
+            geds_df_abs_corr,
+            puls_df_abs,
         ) = get_dfs(phy_mtg_data, period, run_list, "Trapemax")
-        geds_df_trapTmax, geds_df_tp0est, puls_df_trapTmax, puls_df_tp0est = (
-            get_traptmax_tp0est(phy_mtg_data, period, run_list)
-        )
-        if geds_df_cuspEmax_abs is None or geds_df_cuspEmax_abs_corr is None:
+        spike_veto = get_spike_veto_series(phy_mtg_data, period, run_list)
+        if geds_df_abs is None or geds_df_abs_corr is None:
             utils.logger.debug("Dataframes are None for %s!", period)
             continue
-        if geds_df_cuspEmax_abs.empty:
+        if geds_df_abs.empty:
             utils.logger.debug("Dataframes are empty for %s!", period)
             continue
-        dfs = [
-            geds_df_cuspEmax_abs,
-            geds_df_cuspEmax_abs_corr,
-            puls_df_cuspEmax_abs,
-            geds_df_trapTmax,
-            geds_df_tp0est,
-            puls_df_trapTmax,
-            puls_df_tp0est,
-        ]
 
         utils.logger.debug(f"...inspecting gain over {period}")
         for string, det_list in str_chns.items():
@@ -1259,12 +1249,19 @@ def collect_stability_series(
                 channel = detectors[channel_name]["channel_str"]
                 rawid = np.int64(detectors[channel_name]["daq_rawid"])
                 pos = detectors[channel_name]["position"]
-                if rawid not in set(dfs[0].columns):
+                if rawid not in set(geds_df_abs.columns):
                     utils.logger.debug(f"{channel} is not present in the dataframe!")
                     continue
 
                 pulser_data = get_pulser_data(
-                    "1h", period, dfs, rawid, escale=escale_val, variations=True
+                    "1h",
+                    period,
+                    geds_df_abs,
+                    rawid,
+                    escale=escale_val,
+                    puls_abs=puls_df_abs,
+                    spike_veto=spike_veto,
+                    variations=True,
                 )
                 pars_data = get_calib_pars(
                     auto_dir_path,
@@ -1298,16 +1295,14 @@ def collect_stability_series(
                 if no_pulser(channel, period):
                     continue
                 # corrected series when PULS01ANA has a signal, else uncorrected
-                if pulser_data["pul_cusp"]["kevdiff_av"] is not None:
+                if pulser_data["pul"]["kevdiff_av"] is not None:
                     gain_shift_series.setdefault("corr", {})[channel_name] = (
                         pulser_data["diff"]["kevdiff_av"]
                     )
                     gain_shift_std_series.setdefault("corr", {})[channel_name] = (
                         pulser_data["diff"]["kevdiff_std"]
                     )
-                    pul_cusp_series[channel_name] = pulser_data["pul_cusp"][
-                        "kevdiff_av"
-                    ]
+                    pul_cusp_series[channel_name] = pulser_data["pul"]["kevdiff_av"]
                 else:
                     gain_shift_series.setdefault("corr", {})[channel_name] = (
                         pulser_data["ged"]["kevdiff_av"]
@@ -1333,32 +1328,21 @@ def collect_stability_series(
 
         for period in period_list:
             (
-                geds_df_cuspEmax_abs,
-                geds_df_cuspEmax_abs_corr,
-                puls_df_cuspEmax_abs,
+                geds_df_abs,
+                geds_df_abs_corr,
+                puls_df_abs,
             ) = get_dfs(phy_mtg_data, period, [current_run], inspected_parameter)
-            geds_df_trapTmax, geds_df_tp0est, puls_df_trapTmax, puls_df_tp0est = (
-                get_traptmax_tp0est(phy_mtg_data, period, [current_run])
-            )
-            if geds_df_cuspEmax_abs is None or geds_df_cuspEmax_abs_corr is None:
+            spike_veto = get_spike_veto_series(phy_mtg_data, period, [current_run])
+            if geds_df_abs is None or geds_df_abs_corr is None:
                 utils.logger.debug(
                     "Dataframes are None for %s-%s!", period, current_run
                 )
                 continue
-            if geds_df_cuspEmax_abs.empty:
+            if geds_df_abs.empty:
                 utils.logger.debug(
                     "Dataframes are empty for %s-%s!", period, current_run
                 )
                 continue
-            dfs = [
-                geds_df_cuspEmax_abs,
-                geds_df_cuspEmax_abs_corr,
-                puls_df_cuspEmax_abs,
-                geds_df_trapTmax,
-                geds_df_tp0est,
-                puls_df_trapTmax,
-                puls_df_tp0est,
-            ]
 
             utils.logger.debug(
                 f"...inspecting {info[inspected_parameter]['title']} over {current_run}"
@@ -1367,7 +1351,7 @@ def collect_stability_series(
                 for channel_name in det_list:
                     channel = detectors[channel_name]["channel_str"]
                     rawid = np.int64(detectors[channel_name]["daq_rawid"])
-                    if rawid not in set(dfs[0].columns):
+                    if rawid not in set(geds_df_abs.columns):
                         utils.logger.debug(
                             f"{channel} is not present in the dataframe!"
                         )
@@ -1376,9 +1360,11 @@ def collect_stability_series(
                     pulser_data = get_pulser_data(
                         "1h",
                         period,
-                        dfs,
+                        geds_df_abs,
                         rawid,
                         escale=escale_par,
+                        puls_abs=puls_df_abs,
+                        spike_veto=spike_veto,
                         variations=info[inspected_parameter]["percentage"],
                     )
                     pars_data = get_calib_pars(
@@ -1424,7 +1410,7 @@ def collect_stability_series(
 
                     # PULS01ANA correction applies to energy parameters only
                     if (
-                        pulser_data["pul_cusp"]["kevdiff_av"] is not None
+                        pulser_data["pul"]["kevdiff_av"] is not None
                         and inspected_parameter == "TrapemaxCtcCal"
                     ):
                         param_series.setdefault(inspected_parameter, {})[
@@ -1435,7 +1421,7 @@ def collect_stability_series(
                         ] = pulser_data["diff"]["kevdiff_std"]
                         results[inspected_parameter].update(
                             {
-                                channel_name: pulser_data["pul_cusp"][
+                                channel_name: pulser_data["pul"][
                                     "kevdiff_av"
                                 ].values.astype(float)
                             }

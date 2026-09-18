@@ -679,7 +679,9 @@ def plot_psd_stability(
 
     saved = []
     for det_name in detectors:
-        frame = contract_reader.read_frame(path, f"psd_stability/{run}/{det_name}").sort_values("run")
+        frame = contract_reader.read_frame(
+            path, f"psd_stability/{run}/{det_name}"
+        ).sort_values("run")
         run_labels = list(frame["run"])
         mean_vals = frame["mean"].to_numpy(dtype=float)
         sigma_vals = frame["sigma"].to_numpy(dtype=float)

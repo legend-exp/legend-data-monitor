@@ -100,11 +100,11 @@ def get_partitions_params(
                     pars_per_ch = all_params_ch[det_name]
                     data_det = data_ph[det_name]
                     ecal = data_det["results"]["ecal"]
-                    results = ecal["cuspEmax_ctc_cal"]
+                    estimator, results = monitoring.find_energy_key(ecal)
+                    if not results:
+                        continue
                     peak_fits = results["pk_fits"]
-                    cal_op = data_det["pars"]["operations"]["cuspEmax_ctc_cal"][
-                        "parameters"
-                    ]
+                    cal_op = data_det["pars"]["operations"][estimator]["parameters"]
                     cal_pars = list(cal_op.values())
 
                     pars_per_ch["gains"][key] = results["eres_linear"]["parameters"][
@@ -114,7 +114,7 @@ def get_partitions_params(
                         "uncertainties"
                     ]["b"]
                     pars_per_ch["ctc_alpha_par"][key] = data_det["pars"]["operations"][
-                        "cuspEmax_ctc"
+                        monitoring.uncalibrated_variable(estimator)
                     ]["parameters"]["a"]
 
                     if det_name not in ref_cal_pars_map:
@@ -800,7 +800,7 @@ def read_dataflow_stability(
     period: str,
     run: str,
     detector: str,
-    estimator: str = "cuspEmax_ctc_cal",
+    estimator: str | None = None,
     key: str = "2614_stability",
     data_type: str = "cal",
 ) -> dict | None:
@@ -835,7 +835,11 @@ def read_dataflow_stability(
         return None
     if not entry:
         return None
-    arrays = (entry.get("ecal", {}).get(estimator, {}) or {}).get(key)
+    ecal = entry.get("ecal", {})
+    estimators = [estimator] if estimator else utils.EXPERIMENT["energy"]["estimators"]
+    arrays = next(
+        (a for e in estimators if (a := (ecal.get(e, {}) or {}).get(key))), None
+    )
     if not arrays:
         return None
     return {name: np.asarray(values) for name, values in arrays.items()}
@@ -945,6 +949,12 @@ def check_calibration(
     os.makedirs(os.path.join(output_folder, period, run, "mtg"), exist_ok=True)
     utils.logger.debug("...inspecting FEP, calib peaks, stability in calibrations")
 
+    # estimator column and peak windows (settings/experiment.yaml)
+    energy_column = utils.EXPERIMENT["energy"]["estimators"][-1]
+    fep_low, fep_high = utils.EXPERIMENT["energy"]["fep_window_kev"]
+    fep_search = utils.EXPERIMENT["energy"]["peaks"]["fep"]["search_kev"]
+    low_search = utils.EXPERIMENT["energy"]["peaks"]["low"]["search_kev"]
+
     hit_files = sorted(
         glob.glob(
             os.path.join(tmp_auto_dir, "generated/tier/hit/cal", period, run, "*")
@@ -964,22 +974,22 @@ def check_calibration(
         hit_files_data = read_channel_events(
             hit_files,
             item["channel_str"],
-            ["cuspEmax_ctc_cal", "timestamp", "is_valid_cal"],
+            [energy_column, "timestamp", "is_valid_cal"],
         )
         if hit_files_data is None:
             continue
 
         mask = (
             hit_files_data.is_valid_cal
-            & (hit_files_data.cuspEmax_ctc_cal > 2600)
-            & (hit_files_data.cuspEmax_ctc_cal < 2630)
+            & (hit_files_data[energy_column] > fep_low)
+            & (hit_files_data[energy_column] < fep_high)
         )
         timestamps = hit_files_data[mask].timestamp.to_numpy()
         if timestamps.size == 0:
             continue
         t_first = float(timestamps[0])
         timestamps -= timestamps[0]
-        energies = hit_files_data[mask].cuspEmax_ctc_cal.to_numpy()
+        energies = hit_files_data[mask][energy_column].to_numpy()
 
         fep_mean_results[ged], fep_stats[ged] = fep_gain_variation(
             period,
@@ -1003,8 +1013,8 @@ def check_calibration(
         )  # check for cuspEmax_ctc_runcal or cuspEmax_ctc_cal
 
         # find FEP and low-E peaks (keys digits changed in the past, so let's be generic)
-        fep_peaks = [p for p in pk_fits if 2613 < p < 2616]
-        low_peaks = [p for p in pk_fits if 580 < p < 586]
+        fep_peaks = [p for p in pk_fits if fep_search[0] < p < fep_search[1]]
+        low_peaks = [p for p in pk_fits if low_search[0] < p < low_search[1]]
 
         fep_valid = False
         low_valid = False
@@ -1128,12 +1138,27 @@ def record_fep_detail(
     )
 
 
+_PEAKS = utils.EXPERIMENT["energy"]["peaks"]
+_FIXED_THR = utils.EXPERIMENT["energy"]["escale_fixed_threshold_kev"]
+_ERR_MULT = utils.EXPERIMENT["energy"]["escale_error_multiplier"]
+
 ESCALE_METRICS = {
-    # metric -> (parameter, peak energy, fixed threshold, error multiplier)
-    "escale_fwhm_FEP": ("fwhms_peaks", 2614.511, None, 3),
-    "escale_fwhm_583": ("fwhms_peaks", 583.191, None, 3),
-    "escale_FEP_pos": ("mus_keV_first_cal_peaks", 2614.511, 0.65375, None),
-    "escale_SEP_residual": ("residuals", 2103.511, 0.65375, None),
+    # metric -> (parameter, peak energy, fixed threshold, error multiplier);
+    # peaks and band widths come from settings/experiment.yaml
+    "escale_fwhm_FEP": ("fwhms_peaks", _PEAKS["fep"]["energy_kev"], None, _ERR_MULT),
+    "escale_fwhm_583": ("fwhms_peaks", _PEAKS["low"]["energy_kev"], None, _ERR_MULT),
+    "escale_FEP_pos": (
+        "mus_keV_first_cal_peaks",
+        _PEAKS["fep"]["energy_kev"],
+        _FIXED_THR,
+        None,
+    ),
+    "escale_SEP_residual": (
+        "residuals",
+        _PEAKS["sep"]["energy_kev"],
+        _FIXED_THR,
+        None,
+    ),
 }
 _ESCALE_ERR_FIELD = {"fwhms_peaks": "fwhms_err_peaks"}
 
@@ -1382,6 +1407,12 @@ def check_calibration_lac_ssc(
     os.makedirs(os.path.join(output_folder, period, run, "mtg"), exist_ok=True)
     utils.logger.debug("...inspecting FEP, calib peaks, stability in calibrations")
 
+    # estimator column and peak windows (settings/experiment.yaml)
+    energy_column = utils.EXPERIMENT["energy"]["estimators"][-1]
+    fep_low, fep_high = utils.EXPERIMENT["energy"]["fep_window_kev"]
+    fep_search = utils.EXPERIMENT["energy"]["peaks"]["fep"]["search_kev"]
+    low_search = utils.EXPERIMENT["energy"]["peaks"]["low"]["search_kev"]
+
     # load ssc/lac data
     hit_files = sorted(
         glob.glob(
@@ -1407,22 +1438,22 @@ def check_calibration_lac_ssc(
         hit_files_data = read_channel_events(
             hit_files,
             item["channel_str"],
-            ["cuspEmax_ctc_cal", "timestamp", "is_valid_cal"],
+            [energy_column, "timestamp", "is_valid_cal"],
         )
         if hit_files_data is None:
             continue
 
         mask = (
             hit_files_data.is_valid_cal
-            & (hit_files_data.cuspEmax_ctc_cal > 2600)
-            & (hit_files_data.cuspEmax_ctc_cal < 2630)
+            & (hit_files_data[energy_column] > fep_low)
+            & (hit_files_data[energy_column] < fep_high)
         )
         timestamps = hit_files_data[mask].timestamp.to_numpy()
         if timestamps.size == 0:
             continue
         t_first = float(timestamps[0])
         timestamps -= timestamps[0]
-        energies = hit_files_data[mask].cuspEmax_ctc_cal.to_numpy()
+        energies = hit_files_data[mask][energy_column].to_numpy()
 
         fep_mean_results[ged], fep_stats[ged] = fep_gain_variation(
             period,
@@ -1441,8 +1472,8 @@ def check_calibration_lac_ssc(
         pk_fits = monitoring.get_energy_key(ecal_results).get("pk_fits", {})
 
         # find FEP and low-E peaks (keys digits changed in the past, so let's be generic)
-        fep_peaks = [p for p in pk_fits if 2613 < p < 2616]
-        low_peaks = [p for p in pk_fits if 580 < p < 586]
+        fep_peaks = [p for p in pk_fits if fep_search[0] < p < fep_search[1]]
+        low_peaks = [p for p in pk_fits if low_search[0] < p < low_search[1]]
 
         fep_valid = False
         low_valid = False

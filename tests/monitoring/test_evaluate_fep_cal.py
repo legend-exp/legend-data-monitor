@@ -54,3 +54,32 @@ def test_expression_with_offset_only():
     fep_cal, fep_cal_err = evaluate_fep_cal(pars, "ch1", 200.0, 0.5)
     assert fep_cal == float(200 + 10)
     assert fep_cal_err == float(0.5 + 10)
+
+
+def test_expression_variable_follows_the_estimator():
+    """A runcal file binds cuspEmax_ctc too, and must not silently yield NaN."""
+    from legend_data_monitor.monitoring import evaluate_fep_cal
+
+    pars = {
+        "ch1": {
+            "pars": {
+                "operations": {
+                    "cuspEmax_ctc_runcal": {
+                        "expression": "cuspEmax_ctc * m + b",
+                        "parameters": {"m": 2.0, "b": 1.0},
+                    }
+                }
+            }
+        }
+    }
+    fep_cal, fep_cal_err = evaluate_fep_cal(pars, "ch1", 10.0, 0.5)
+    assert fep_cal == 21.0 and fep_cal_err == 2.0
+
+
+def test_no_estimator_gives_nan():
+    import numpy as np
+
+    from legend_data_monitor.monitoring import evaluate_fep_cal
+
+    pars = {"ch1": {"pars": {"operations": {"other": {}}}}}
+    assert all(np.isnan(v) for v in evaluate_fep_cal(pars, "ch1", 10.0, 0.5))

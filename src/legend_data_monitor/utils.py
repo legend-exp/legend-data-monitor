@@ -41,6 +41,7 @@ logger.addHandler(stream_handler)
 from .config.settings import (  # noqa: E402,F401
     CALIB_RUNS,
     COLUMNS_TO_LOAD,
+    EXPERIMENT,
     FLAGS_RENAME,
     HDF_COMPRESSION,
     IGNORE_KEYS,
@@ -50,6 +51,7 @@ from .config.settings import (  # noqa: E402,F401
     PARAMETER_TIERS,
     PERIOD_TO_DB,
     PLOT_INFO,
+    QC_PARAMETERS,
     REMOVE_DETS,
     REMOVE_KEYS,
     SC_PARAMETERS,
@@ -474,12 +476,7 @@ def check_plot_settings(conf: dict) -> bool:
             # check if all necessary fields for param settings were provided
             for field in options:
                 # when plot_structure is summary or you simply want to load QCs, plot_style is not needed...
-                if plot_settings["parameters"] in (
-                    "exposure",
-                    "quality_cuts",
-                    "geds/quality/is_not_bb_like/is_delayed_discharge",
-                    "geds/quality/is_bb_like",
-                ):
+                if plot_settings["parameters"] in {"exposure"} | QC_PARAMETERS:
                     continue
 
                 # ...otherwise, it is required
@@ -525,12 +522,7 @@ def check_plot_settings(conf: dict) -> bool:
                 return False
 
             # ToDo: neater way to skip the whole loop but still do special checks; break? ugly...
-            if plot_settings["parameters"] in (
-                "exposure",
-                "quality_cuts",
-                "geds/quality/is_not_bb_like/is_delayed_discharge",
-                "geds/quality/is_bb_like",
-            ):
+            if plot_settings["parameters"] in {"exposure"} | QC_PARAMETERS:
                 continue
 
             # other non-exposure checks
@@ -797,20 +789,13 @@ def get_all_plot_parameters(subsystem: str, config: dict):
     ]
 
     # only QC present in evt tier; no classifiers
-    is_entries_evt = [
-        "geds/quality/is_not_bb_like/is_delayed_discharge",
-        "geds/quality/is_bb_like",
-    ]
+    is_entries_evt = list(EXPERIMENT["qc_parameters_evt"])
 
     all_parameters = []
     if subsystem in config["subsystems"]:
         for plot in config["subsystems"][subsystem]:
             parameters = config["subsystems"][subsystem][plot]["parameters"]
-            if parameters not in (
-                "quality_cuts",
-                "geds/quality/is_not_bb_like/is_delayed_discharge",
-                "geds/quality/is_bb_like",
-            ):
+            if parameters not in QC_PARAMETERS:
                 if isinstance(parameters, str):
                     all_parameters.append(parameters)
                 else:
@@ -843,10 +828,7 @@ def get_all_plot_parameters(subsystem: str, config: dict):
                 all_parameters.extend(is_entries)
             if config["subsystems"][subsystem][plot].get("qc_classifiers") is True:
                 all_parameters.extend(is_classifiers)
-            if parameters in (
-                "geds/quality/is_not_bb_like/is_delayed_discharge",
-                "geds/quality/is_bb_like",
-            ):
+            if parameters in is_entries_evt:
                 all_parameters.extend(is_entries_evt)
 
     return all_parameters
@@ -2261,6 +2243,56 @@ def _build_detector_info_cached(metadata_path, start_key=None):
             str_chns[string].append(det)
 
     return {"detectors": detectors, "str_chns": dict(str_chns)}
+
+
+def aux_channels(metadata_path, start_key=None) -> dict:
+    """
+    Resolve the auxiliary channels from the channel map.
+
+    These are not configured anywhere: the map identifies them by system and
+    name, so they follow the production cycle instead of a hardcoded rawid.
+    ``puls`` holds both the pulser and its analogue reference (the latter
+    named ``...ANA``); the muon and FC-baseline systems hold one real entry
+    each, alongside disconnected ``BF``/``DUMMY`` placeholders.
+
+    Parameters
+    ----------
+    metadata_path : str
+        LEGEND metadata root (``<prod>/inputs``).
+    start_key : str, optional
+        Timestamp key selecting the channel map; latest when omitted.
+
+    Returns
+    -------
+    dict
+        Any of ``pulser``, ``pulser01ana``, ``muon``, ``FCbsln`` that the map
+        defines, mapped to their rawid.
+    """
+    return dict(_aux_channels_cached(metadata_path, start_key))
+
+
+@lru_cache(maxsize=None)
+def _aux_channels_cached(metadata_path, start_key=None):
+    lmeta = LegendMetadata(metadata_path)
+    chmap = lmeta.channelmap(start_key) if start_key else lmeta.channelmap()
+    found = {}
+    for name, info in chmap.items():
+        if not isinstance(info, dict) or "BF" in str(name) or "DUMMY" in str(name):
+            continue
+        rawid = info.get("daq", {}).get("rawid")
+        if rawid is None:
+            continue
+        system = info.get("system")
+        if system == "puls":
+            key = "pulser01ana" if str(name).upper().endswith("ANA") else "pulser"
+        elif system == "auxs":
+            key = "muon"
+        elif system == "bsln":
+            key = "FCbsln"
+        else:
+            continue
+        found[key] = int(rawid)
+    return tuple(sorted(found.items()))
 
 
 def build_detector_info_per_period(auto_dir_path: str, run_dict: dict, period: str):

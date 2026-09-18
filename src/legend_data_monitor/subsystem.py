@@ -50,12 +50,7 @@ def prewarm_aux(aux_channel, dataset, params) -> None:
         p
         for p in params
         if p not in utils.SPECIAL_PARAMETERS
-        and p
-        not in (
-            "quality_cuts",
-            "geds/quality/is_not_bb_like/is_delayed_discharge",
-            "geds/quality/is_bb_like",
-        )
+        and p not in utils.QC_PARAMETERS
         and utils.PARAMETER_TIERS.get(p) != "hit"
     ]
     if not params:
@@ -611,11 +606,7 @@ class Subsystem:
                     params,
                 )
                 return
-            if param in [
-                "quality_cuts",
-                "geds/quality/is_not_bb_like/is_delayed_discharge",
-                "geds/quality/is_bb_like",
-            ]:
+            if param in utils.QC_PARAMETERS:
                 utils.logger.warning(
                     "\033[93m'%s' does not require the ratio/diff wrt the AUX channel. Skip this step.\033[0m",
                     params,
@@ -820,13 +811,11 @@ class Subsystem:
                     # we get PULS01
                     if self.below_period_3_excluded():
                         return entry["system"] == "puls" and entry["daq"][ch_flag] == 1
-                    # we get PULS01ANA
+                    # PULS01, i.e. the puls entry that is not the analogue one
                     if self.above_period_3_included():
-                        return (
-                            entry["system"] == "puls"
-                            # and entry["daq"][ch_flag] == 1027203
-                            and entry["daq"][ch_flag] == 1027201
-                        )
+                        return entry["system"] == "puls" and not str(
+                            entry["name"]
+                        ).upper().endswith("ANA")
             # special case for pulser AUX
             if self.type == "pulser01ana":
                 if self.experiment == "L60":
@@ -838,10 +827,9 @@ class Subsystem:
                     if self.below_period_3_excluded():
                         return entry["system"] == "puls" and entry["daq"][ch_flag] == 3
                     if self.above_period_3_included():
-                        return (
-                            entry["system"] == "puls"
-                            and entry["daq"][ch_flag] == 1027203
-                        )
+                        return entry["system"] == "puls" and str(
+                            entry["name"]
+                        ).upper().endswith("ANA")
             # special case for baseline
             if self.type == "FCbsln":
                 if self.experiment == "L60":
@@ -850,10 +838,7 @@ class Subsystem:
                     if self.below_period_3_excluded():
                         return entry["system"] == "bsln" and entry["daq"][ch_flag] == 0
                     if self.above_period_3_included():
-                        return (
-                            entry["system"] == "bsln"
-                            and entry["daq"][ch_flag] == 1027200
-                        )
+                        return entry["system"] == "bsln"
             # special case for muon channel
             if self.type == "muon":
                 if self.experiment == "L60":
@@ -862,10 +847,9 @@ class Subsystem:
                     if self.below_period_3_excluded():
                         return entry["system"] == "auxs" and entry["daq"][ch_flag] == 2
                     if self.above_period_3_included():
-                        return (
-                            entry["system"] == "auxs"
-                            and entry["daq"][ch_flag] == 1027202
-                        )
+                        return entry["system"] == "auxs" and str(
+                            entry["name"]
+                        ).upper().startswith("MUON")
             # for geds or spms
             return entry["system"] == self.type
 

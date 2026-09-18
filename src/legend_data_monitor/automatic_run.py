@@ -119,16 +119,7 @@ def auto_run(
         },
         "saving": "overwrite",
         "slow_control": {
-            "parameters": [
-                "DaqLeft-Temp1",
-                "DaqLeft-Temp2",
-                "DaqRight-Temp1",
-                "DaqRight-Temp2",
-                "RREiT",
-                "RRNTe",
-                "RRSTe",
-                "ZUL_T_RR",
-            ]
+            "parameters": list(utils.EXPERIMENT["slow_control_parameters"])
         },
     }
 
@@ -414,12 +405,10 @@ def auto_run(
 
 
 # headline (flag, param, unit) triples rendered as per-string PNGs after each
-# contract build; missing keys are skipped so datatype/config changes stay safe
+# contract build; missing keys are skipped so datatype/config changes stay safe.
+# Defined per subsystem in settings/experiment.yaml.
 HEADLINE_PNG_KEYS = [
-    ("IsPulser", "TrapemaxCtcCal", "keV"),
-    ("IsPhysics", "TrapemaxCtcCal", "keV"),
-    ("IsPulser", "Baseline", "ADC"),
-    ("IsPulser", "BlStd", "ADC"),
+    tuple(entry) for entry in utils.EXPERIMENT["headline_plots"]["geds"]
 ]
 
 
@@ -444,8 +433,6 @@ def render_run_plots(
     list
         Absolute paths of the figures written.
     """
-    import pandas as pd
-
     # SAVED_PLOT lines are a consumer contract, so always announce on some
     # logger; the per-task one when running in the pipeline, else the package's
     logger = logger if logger is not None else utils.logger
