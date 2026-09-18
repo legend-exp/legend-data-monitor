@@ -1,7 +1,7 @@
 import glob
-import os
 import re
-from functools import lru_cache
+from functools import cache
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -414,8 +414,10 @@ class AnalysisData:
                 # ToDo: already loaded before in Subsystem => 1) load mass already then, 2) inherit channel map from Subsystem ?
                 # get channel map at this timestamp
 
-                map_file = os.path.join(
-                    self.path, self.version, "inputs/hardware/configuration/channelmaps"
+                map_file = str(
+                    Path(self.path)
+                    / self.version
+                    / "inputs/hardware/configuration/channelmaps"
                 )
                 full_channel_map = TextDB(map_file).on(timestamp=first_timestamp)
 
@@ -450,10 +452,10 @@ class AnalysisData:
 
                 # --- calculate exposure for each detector
                 # get diodes map
-                dets_file = os.path.join(
-                    self.path,
-                    self.version,
-                    "inputs/hardware/detectors/germanium/diodes",
+                dets_file = str(
+                    Path(self.path)
+                    / self.version
+                    / "inputs/hardware/detectors/germanium/diodes"
                 )
                 dets_map = TextDB(dets_file)
 
@@ -519,7 +521,7 @@ class AnalysisData:
         elif self.saving == "append":
             subsys = self.get_subsys() if self.aux_info is None else self.aux_info
             # the file does not exist, so we get the mean as usual
-            if not os.path.exists(self.plt_path + "-" + subsys + ".hdf"):
+            if not Path(self.plt_path + "-" + subsys + ".hdf").exists():
                 self.data = self.add_channel_mean_column()
 
             # the file exist: we have to combine previous data with new data, and re-compute the mean over the first 10% of data (that now, are more than before)
@@ -664,7 +666,7 @@ class AnalysisData:
 # -------------------------------------------------------------------------
 
 
-@lru_cache(maxsize=None)
+@cache
 def _get_bitmask_expr_dict(path: str, version: str) -> dict | None:
     """Parse the evt config and return the ``hit.<flag> == <value>`` mapping used to convert bitmask columns to booleans.
 
@@ -678,8 +680,8 @@ def _get_bitmask_expr_dict(path: str, version: str) -> dict | None:
     subdir = possible_dirs[-1]
 
     for subdir in possible_dirs:
-        filepath_pattern = os.path.join(
-            path, version, "inputs/dataprod/config", subdir, file_pattern
+        filepath_pattern = str(
+            Path(path) / version / "inputs/dataprod/config" / subdir / file_pattern
         )
         files = glob.glob(filepath_pattern)
         if files:
@@ -695,12 +697,12 @@ def _get_bitmask_expr_dict(path: str, version: str) -> dict | None:
             "expression"
         ]
     except KeyError:
-        filepath_pattern = os.path.join(
-            path,
-            version,
-            "inputs/dataprod/config",
-            subdir,
-            "*-geds_qc-evt_config.yaml",
+        filepath_pattern = str(
+            Path(path)
+            / version
+            / "inputs/dataprod/config"
+            / subdir
+            / "*-geds_qc-evt_config.yaml"
         )
         filepath = glob.glob(filepath_pattern)[0]
         with open(filepath) as file:
@@ -714,12 +716,12 @@ def _get_bitmask_expr_dict(path: str, version: str) -> dict | None:
             "geds___quality___is_not_bb_like___is_delayed_discharge"
         ]["expression"]
     except KeyError:
-        filepath_pattern = os.path.join(
-            path,
-            version,
-            "inputs/dataprod/config",
-            subdir,
-            "*-geds_qc-evt_config.yaml",
+        filepath_pattern = str(
+            Path(path)
+            / version
+            / "inputs/dataprod/config"
+            / subdir
+            / "*-geds_qc-evt_config.yaml"
         )
         filepath = glob.glob(filepath_pattern)[0]
         with open(filepath) as file:
@@ -854,10 +856,10 @@ def get_aux_df(
             aux_data["datetime"].dt.to_pydatetime()[0].timestamp()
         )
         if aux_ch == "pulser01ana":
-            map_file = os.path.join(
-                plot_settings["path"],
-                plot_settings["version"],
-                "inputs/hardware/configuration/channelmaps",
+            map_file = str(
+                Path(plot_settings["path"])
+                / plot_settings["version"]
+                / "inputs/hardware/configuration/channelmaps"
             )
             chmap = TextDB(map_file).on(timestamp=first_timestamp)
 

@@ -6,13 +6,13 @@ import matplotlib
 
 matplotlib.use("Agg")
 
-import numpy as np  # noqa: E402
-import pandas as pd  # noqa: E402
+import numpy as np
+import pandas as pd
 
-from legend_data_monitor import monitoring  # noqa: E402
-from legend_data_monitor.contract import writer  # noqa: E402
-from legend_data_monitor.plots import qc  # noqa: E402
-from legend_data_monitor.processing import binning  # noqa: E402
+from legend_data_monitor import monitoring
+from legend_data_monitor.contract import writer
+from legend_data_monitor.plots import qc
+from legend_data_monitor.processing import binning
 
 PERIOD, RUN = "p22", "r000"
 

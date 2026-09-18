@@ -7,8 +7,8 @@ and the per-detector box summary, saved with the exact legacy PDF names.
 """
 
 import itertools
-import os
 from functools import partial
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -33,7 +33,7 @@ _EVENT_RATE_SERIES = [
 
 def _read_key(path, key, logger):
     """One contract frame, or None (with a warning) when it is missing."""
-    if not os.path.isfile(path):
+    if not Path(path).is_file():
         (logger or utils.logger).warning("missing contract file %s", path)
         return None
     try:
@@ -45,11 +45,11 @@ def _read_key(path, key, logger):
 
 def _read_detector_map(output_folder, period, run, data_type, logger):
     """Read the run contract's detector map (name, rawid, string, position)."""
-    path = os.path.join(
-        output_folder,
-        period,
-        run,
-        f"l200-{period}-{run}-{data_type}-geds-schema2.hdf",
+    path = str(
+        Path(output_folder)
+        / period
+        / run
+        / f"l200-{period}-{run}-{data_type}-geds-schema2.hdf"
     )
     return _read_key(path, "detector_map", logger)
 
@@ -57,15 +57,15 @@ def _read_detector_map(output_folder, period, run, data_type, logger):
 def _save_figure(fig, pdf_dir, stem, save_pdf, png_dir, logger, saved):
     """Save one figure as PDF (legacy name/dir) plus optional PNG copy."""
     if save_pdf:
-        os.makedirs(pdf_dir, exist_ok=True)
-        path = os.path.abspath(os.path.join(pdf_dir, f"{stem}.pdf"))
+        Path(pdf_dir).mkdir(parents=True, exist_ok=True)
+        path = str((Path(pdf_dir) / f"{stem}.pdf").absolute())
         fig.savefig(path, bbox_inches="tight")
         if logger is not None:
             logs.log_saved_plot(logger, path)
         saved.append(path)
     if png_dir is not None:
-        os.makedirs(png_dir, exist_ok=True)
-        path = os.path.abspath(os.path.join(png_dir, f"{stem}.png"))
+        Path(png_dir).mkdir(parents=True, exist_ok=True)
+        path = str((Path(png_dir) / f"{stem}.png").absolute())
         fig.savefig(path, bbox_inches="tight")
         if logger is not None:
             logs.log_saved_plot(logger, path)
@@ -352,7 +352,7 @@ def plot_ft_summary(
     survival = _read_key(contract, f"ft_summary/survival_fraction/{run}", logger)
 
     saved = []
-    pdf_root = os.path.join(output_folder, period, run, "mtg/pdf")
+    pdf_root = str(Path(output_folder) / period / run / "mtg/pdf")
 
     if per_detector is not None:
         if detector_map is None:
@@ -383,7 +383,7 @@ def plot_ft_summary(
                 )
                 _save_figure(
                     fig,
-                    os.path.join(pdf_root, f"st{string}"),
+                    str(Path(pdf_root) / f"st{string}"),
                     f"{period}_{run}_string{string}_FT_failure",
                     save_pdf,
                     png_dir,
@@ -478,7 +478,7 @@ def plot_event_rate_qc(
     fig = _event_rate_figure(frame, last_cycle)
     _save_figure(
         fig,
-        os.path.join(output_folder, period, run, "mtg/pdf"),
+        str(Path(output_folder) / period / run / "mtg/pdf"),
         f"{period}_{run}_event_rate_qc",
         save_pdf,
         png_dir,
@@ -558,7 +558,7 @@ def plot_detector_summary(
     fig = _detector_summary_figure(period, run, frame, info, last_cycle)
     _save_figure(
         fig,
-        os.path.join(output_folder, period, run, "mtg/pdf"),
+        str(Path(output_folder) / period / run / "mtg/pdf"),
         f"{period}_{run}_{info['title']}",
         save_pdf,
         png_dir,

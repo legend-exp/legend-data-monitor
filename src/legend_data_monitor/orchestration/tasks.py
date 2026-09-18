@@ -56,7 +56,7 @@ def run_tasks(tasks: list, log_root: str) -> tuple[list, int]:
         )
         try:
             task.func(logger=task_log)
-        except BaseException as exc:  # noqa: B036 - isolation is the point here
+        except BaseException as exc:
             if isinstance(exc, (KeyboardInterrupt, SystemExit)):
                 raise
             task_log.error(

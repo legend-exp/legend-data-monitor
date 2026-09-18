@@ -1,6 +1,5 @@
 import glob
 import importlib.resources
-import os
 import re
 from pathlib import Path
 
@@ -54,7 +53,7 @@ def auto_run(
             if cluster == "nersc"
             else "/data2/public/prodenv/prod-blind/"
         )
-    auto_dir_path = os.path.join(auto_dir, ref_version)
+    auto_dir_path = str(Path(auto_dir) / ref_version)
     found = False
     for tier in [
         "hit",
@@ -69,10 +68,10 @@ def auto_run(
         "bkg",
         "tst",
     ]:
-        search_directory = os.path.join(
-            auto_dir_path, "generated/tier", tier, data_type
+        search_directory = str(
+            Path(auto_dir_path) / "generated/tier" / tier / data_type
         )
-        if os.path.isdir(search_directory):
+        if Path(search_directory).is_dir():
             found = True
             utils.logger.debug(f"Valid folder: {search_directory}")
             break
@@ -83,7 +82,9 @@ def auto_run(
 
     def search_latest_folder(my_dir):
         directories = [
-            d for d in os.listdir(my_dir) if os.path.isdir(os.path.join(my_dir, d))
+            d
+            for d in [p.name for p in Path(my_dir).iterdir()]
+            if Path(str(Path(my_dir) / d)).is_dir()
         ]
         directories.sort(key=lambda x: Path(my_dir, x).stat().st_ctime)
         return directories[-1]
@@ -92,14 +93,14 @@ def auto_run(
     period = (
         search_latest_folder(search_directory) if input_period is None else input_period
     )
-    search_directory = os.path.join(search_directory, period)
-    if not os.path.isdir(search_directory):
+    search_directory = str(Path(search_directory) / period)
+    if not Path(search_directory).is_dir():
         raise errors.ConfigError(f"period directory does not exist: {search_directory}")
 
     # Run to monitor
     run = search_latest_folder(search_directory) if input_run is None else input_run
-    source_dir = os.path.join(search_directory, run)
-    if not os.path.isdir(source_dir):
+    source_dir = str(Path(search_directory) / run)
+    if not Path(source_dir).is_dir():
         raise errors.ConfigError(f"run directory does not exist: {source_dir}")
     utils.logger.info(f"You are inspecting {period}-{run}")
 
@@ -146,34 +147,36 @@ def auto_run(
         "subsystems": subsystems_dict,
     }
 
-    phy_folder = os.path.join(
-        output_folder, ref_version, "generated/plt/hit", data_type
+    phy_folder = str(
+        Path(output_folder) / ref_version / "generated/plt/hit" / data_type
     )
-    qcp_path = os.path.join(
-        phy_folder, period, run, f"l200-{period}-{run}-qcp_summary.yaml"
+    qcp_path = str(
+        Path(phy_folder) / period / run / f"l200-{period}-{run}-qcp_summary.yaml"
     )
-    os.makedirs(os.path.join(phy_folder, period, run, "mtg/pdf"), exist_ok=True)
+    Path(str(Path(phy_folder) / period / run / "mtg/pdf")).mkdir(
+        parents=True, exist_ok=True
+    )
 
     # ===========================================================================================
     # Detect not-yet-analyzed files (rsync bookkeeping)
     # ===========================================================================================
 
-    rsync_path = os.path.join(
-        output_folder, ref_version, "generated", "tmp", "mtg", period, run
+    rsync_path = str(
+        Path(output_folder) / ref_version / "generated" / "tmp" / "mtg" / period / run
     )
-    os.makedirs(rsync_path, exist_ok=True)
-    timestamp_file = os.path.join(rsync_path, "last_checked_timestamp.txt")
+    Path(rsync_path).mkdir(parents=True, exist_ok=True)
+    timestamp_file = str(Path(rsync_path) / "last_checked_timestamp.txt")
 
     last_checked = None
-    if os.path.exists(timestamp_file):
+    if Path(timestamp_file).exists():
         with open(timestamp_file) as file:
             last_checked = file.read().strip()
 
-    current_files = os.listdir(source_dir)
+    current_files = [p.name for p in Path(source_dir).iterdir()]
     new_files = []
     for file in current_files:
-        file_path = os.path.join(source_dir, file)
-        current_timestamp = os.path.getmtime(file_path)
+        file_path = str(Path(source_dir) / file)
+        current_timestamp = Path(file_path).stat().st_mtime
         if last_checked is None or current_timestamp > float(last_checked):
             new_files.append(file)
 
@@ -208,7 +211,7 @@ def auto_run(
         utils.logger.info(f"New files found: {' '.join(new_files)}")
         # create the file containing the keys with correct format to be later
         # used by legend-data-monitor (recreated every time; NOT append)
-        keys_file = os.path.join(rsync_path, "new_keys.filekeylist")
+        keys_file = str(Path(rsync_path) / "new_keys.filekeylist")
         with open(keys_file, "w") as f:
             for new_file in new_files:
                 f.write(new_file.split("-tier")[0] + "\n")
@@ -221,8 +224,9 @@ def auto_run(
             # split lines into chunks and write to multiple files
             for idx, i in enumerate(range(0, num_lines, chunk_size), start=1):
                 chunk = key_lines[i : i + chunk_size]
-                output_file = os.path.join(
-                    rsync_path, f"new_keys_part_{i // chunk_size + 1}.filekeylist"
+                output_file = str(
+                    Path(rsync_path)
+                    / f"new_keys_part_{i // chunk_size + 1}.filekeylist"
                 )
                 with open(output_file, "w") as out_f:
                     out_f.writelines(chunk)
@@ -239,13 +243,13 @@ def auto_run(
             core.auto_control_plots(my_config, keys_file, "", {}, render=render_plots)
 
     def task_build_monitoring_hdf(logger=None):
-        files_folder = os.path.join(output_folder, ref_version)
+        files_folder = str(Path(output_folder) / ref_version)
         monitoring.build_new_files(files_folder, period, run, data_type=data_type)
         contract_build.build_all_contract_files(
             files_folder,
             period,
             run,
-            metadata_path=os.path.join(auto_dir_path, "inputs"),
+            metadata_path=str(Path(auto_dir_path) / "inputs"),
             data_type=data_type,
         )
         monitoring.write_spms_production_keys(
@@ -259,17 +263,17 @@ def auto_run(
 
     def task_lar_summary(logger=None):
         """Summarise the LAr veto performance of the run from the evt tier (~20 s)."""
-        evt_dir = os.path.join(
-            auto_dir_path, "generated/tier/evt", data_type, period, run
+        evt_dir = str(
+            Path(auto_dir_path) / "generated/tier/evt" / data_type / period / run
         )
-        files = sorted(glob.glob(os.path.join(evt_dir, "*.lh5")))
+        files = sorted(glob.glob(str(Path(evt_dir) / "*.lh5")))
         if not files:
             utils.logger.info("...no evt files for %s/%s; no LAr summary", period, run)
             return
         names = {
             info["daq_rawid"]: name
             for name, info in utils.build_spms_info(
-                os.path.join(auto_dir_path, "inputs")
+                str(Path(auto_dir_path) / "inputs")
             ).items()
         }
         written = monitoring.write_lar_summary(
@@ -278,10 +282,10 @@ def auto_run(
         utils.logger.info("...LAr summary keys written: %s", written)
 
         # per-SiPM SPE spectra: validates the PE calibration in force (~5 min)
-        hit_dir = os.path.join(
-            auto_dir_path, "generated/tier/hit", data_type, period, run
+        hit_dir = str(
+            Path(auto_dir_path) / "generated/tier/hit" / data_type / period / run
         )
-        hit_files = sorted(glob.glob(os.path.join(hit_dir, "*.lh5")))
+        hit_files = sorted(glob.glob(str(Path(hit_dir) / "*.lh5")))
         written = monitoring.write_spe_spectrum(
             phy_folder,
             period,
@@ -301,26 +305,26 @@ def auto_run(
         summed light come from the per-PMT dsp rows and the ge-coincidence
         fractions from evt/coincident.
         """
-        dsp_dir = os.path.join(
-            auto_dir_path, "generated/tier/dsp", data_type, period, run
+        dsp_dir = str(
+            Path(auto_dir_path) / "generated/tier/dsp" / data_type / period / run
         )
-        dsp_files = sorted(glob.glob(os.path.join(dsp_dir, "*.lh5")))
+        dsp_files = sorted(glob.glob(str(Path(dsp_dir) / "*.lh5")))
         if not dsp_files:
             utils.logger.info("...no dsp files for %s/%s; no muon summary", period, run)
             return
         names = {
             info["daq_rawid"]: name
             for name, info in utils.build_pmts_info(
-                os.path.join(auto_dir_path, "inputs")
+                str(Path(auto_dir_path) / "inputs")
             ).items()
         }
         if not names:
             utils.logger.info("...no pmts in the channel map; no muon summary")
             return
-        evt_dir = os.path.join(
-            auto_dir_path, "generated/tier/evt", data_type, period, run
+        evt_dir = str(
+            Path(auto_dir_path) / "generated/tier/evt" / data_type / period / run
         )
-        evt_files = sorted(glob.glob(os.path.join(evt_dir, "*.lh5")))
+        evt_files = sorted(glob.glob(str(Path(evt_dir) / "*.lh5")))
         written = monitoring.write_muon_summary(
             phy_folder,
             period,
@@ -342,9 +346,9 @@ def auto_run(
         once this run exists, so they are safe -- and each strip re-verifies
         the contract holds every key before removing anything.
         """
-        files_folder = os.path.join(output_folder, ref_version)
-        period_dir = os.path.join(phy_folder, period)
-        for done_run in sorted(os.listdir(period_dir)):
+        files_folder = str(Path(output_folder) / ref_version)
+        period_dir = str(Path(phy_folder) / period)
+        for done_run in sorted([p.name for p in Path(period_dir).iterdir()]):
             if done_run >= run or not re.fullmatch(r"r\d+", done_run):
                 continue
             for subsystem in contract_schema.SUBSYSTEMS:
@@ -360,7 +364,7 @@ def auto_run(
         `legend-data-monitor plot_run` without touching the production tree.
         """
         saved = render_run_plots(
-            os.path.join(output_folder, ref_version),
+            str(Path(output_folder) / ref_version),
             period,
             run,
             data_type,
@@ -371,19 +375,26 @@ def auto_run(
     def task_slow_control(logger=None):
         core.retrieve_scdb(scdb, port, pswd)
 
-    mtg_folder = os.path.join(
-        output_folder, ref_version, "generated/plt/hit", data_type
+    mtg_folder = str(
+        Path(output_folder) / ref_version / "generated/plt/hit" / data_type
     )
 
     def task_phy_summary_plots(logger=None):
-        os.makedirs(mtg_folder, exist_ok=True)
-        avail_runs = sorted(os.listdir(os.path.join(mtg_folder, period)))
+        Path(mtg_folder).mkdir(parents=True, exist_ok=True)
+        avail_runs = sorted(
+            [p.name for p in Path(str(Path(mtg_folder) / period)).iterdir()]
+        )
         avail_runs = [ar for ar in avail_runs if re.fullmatch(r"r\d{3}", ar)]
         if not avail_runs:
             utils.logger.debug("...no available runs to summarize")
             return
         start_key = (
-            sorted(os.listdir(os.path.join(search_directory, avail_runs[0])))[0]
+            sorted(
+                [
+                    p.name
+                    for p in Path(str(Path(search_directory) / avail_runs[0])).iterdir()
+                ]
+            )[0]
         ).split("-")[4]
         summary_plots(
             auto_dir_path=auto_dir_path,
@@ -403,12 +414,19 @@ def auto_run(
         )
 
     def task_qc_plots(logger=None):
-        avail_runs = sorted(os.listdir(os.path.join(mtg_folder, period)))
+        avail_runs = sorted(
+            [p.name for p in Path(str(Path(mtg_folder) / period)).iterdir()]
+        )
         avail_runs = [ar for ar in avail_runs if re.fullmatch(r"r\d{3}", ar)]
         if not avail_runs:
             return
         start_key = (
-            sorted(os.listdir(os.path.join(search_directory, avail_runs[0])))[0]
+            sorted(
+                [
+                    p.name
+                    for p in Path(str(Path(search_directory) / avail_runs[0])).iterdir()
+                ]
+            )[0]
         ).split("-")[4]
         qc_avg_series(
             auto_dir_path=auto_dir_path,
@@ -428,19 +446,26 @@ def auto_run(
         magnitudes every producer stashed for its verdict live in-process until
         this single emission picks them up.
         """
-        avail_runs = sorted(os.listdir(os.path.join(mtg_folder, period)))
+        avail_runs = sorted(
+            [p.name for p in Path(str(Path(mtg_folder) / period)).iterdir()]
+        )
         avail_runs = [ar for ar in avail_runs if re.fullmatch(r"r\d{3}", ar)]
         if not avail_runs:
             return
         start_key = (
-            sorted(os.listdir(os.path.join(search_directory, avail_runs[0])))[0]
+            sorted(
+                [
+                    p.name
+                    for p in Path(str(Path(search_directory) / avail_runs[0])).iterdir()
+                ]
+            )[0]
         ).split("-")[4]
         det_info = utils.build_detector_info(
-            os.path.join(auto_dir_path, "inputs"), start_key=start_key
+            str(Path(auto_dir_path) / "inputs"), start_key=start_key
         )
         monitoring.check_spms_thresholds(mtg_folder, period, run, data_type=data_type)
         spms_info = utils.build_spms_info(
-            os.path.join(auto_dir_path, "inputs"), start_key=start_key
+            str(Path(auto_dir_path) / "inputs"), start_key=start_key
         )
         utils.check_cal_phy_thresholds(
             mtg_folder,
@@ -477,23 +502,18 @@ def auto_run(
     else:
         utils.logger.debug("No new files were detected.")
 
-    log_root = logs.log_tree_root(os.path.join(output_folder, ref_version))
+    log_root = logs.log_tree_root(str(Path(output_folder) / ref_version))
     results, exit_code = tasks.run_tasks(task_list, log_root)
 
     # update the last checked timestamp only when everything succeeded, so a
     # failed invocation is retried on the next cron cycle
     if exit_code == tasks.EXIT_OK and current_files:
         with open(timestamp_file, "w") as file:
-            file.write(
-                str(
-                    os.path.getmtime(
-                        max(
-                            [os.path.join(source_dir, f) for f in current_files],
-                            key=os.path.getmtime,
-                        )
-                    )
-                )
+            newest = max(
+                (Path(source_dir) / f for f in current_files),
+                key=lambda p: p.stat().st_mtime,
             )
+            file.write(str(newest.stat().st_mtime))
 
     return exit_code
 
@@ -538,15 +558,15 @@ def render_run_plots(
     # SAVED_PLOT lines are a consumer contract, so always announce on some
     # logger; the per-task one when running in the pipeline, else the package's
     logger = logger if logger is not None else utils.logger
-    run_dir = os.path.join(files_folder, "generated/plt/hit", data_type, period, run)
-    v2_file = os.path.join(run_dir, f"l200-{period}-{run}-{data_type}-geds-schema2.hdf")
+    run_dir = str(Path(files_folder) / "generated/plt/hit" / data_type / period / run)
+    v2_file = str(Path(run_dir) / f"l200-{period}-{run}-{data_type}-geds-schema2.hdf")
     spms_file = v2_file.replace("-geds-schema2.hdf", "-spms-schema2.hdf")
-    if not os.path.isfile(v2_file) and not os.path.isfile(spms_file):
+    if not Path(v2_file).is_file() and not Path(spms_file).is_file():
         logger.warning("no contract-v2 file to render PNGs from: %s", v2_file)
         return []
     saved = []
     detector_map = None
-    if os.path.isfile(v2_file):
+    if Path(v2_file).is_file():
         detector_map = contract_reader.read_frame(v2_file, "detector_map")
         for flag, param, unit in HEADLINE_PNG_KEYS:
             try:
@@ -567,7 +587,7 @@ def render_run_plots(
                     logger=logger,
                 )
 
-    if os.path.isfile(spms_file):
+    if Path(spms_file).is_file():
         spms_map = contract_reader.read_frame(spms_file, "detector_map")
         for flag, param, unit in SPMS_HEADLINE_PNG_KEYS:
             try:
@@ -589,7 +609,7 @@ def render_run_plots(
                 )
 
     # the full monitoring figure set, from the period contract file(s)
-    output_folder = os.path.join(files_folder, "generated/plt/hit", data_type)
+    output_folder = str(Path(files_folder) / "generated/plt/hit" / data_type)
     common = dict(
         detector_map=detector_map,
         data_type=data_type,
@@ -621,7 +641,7 @@ _render_headline_pngs = render_run_plots
 
 def _qcp_file_is_populated(filepath: str) -> bool:
     """Return True if the qcp summary file exists and has at least one non-null cal entry."""
-    if not os.path.isfile(filepath):
+    if not Path(filepath).is_file():
         return False
     with open(filepath) as f:
         data = yaml.safe_load(f)
@@ -706,7 +726,7 @@ def summary_plots(
         Draw the figures from the contract after the data pass; default: True.
     """
     det_info = utils.build_detector_info(
-        os.path.join(auto_dir_path, "inputs"), start_key=start_key
+        str(Path(auto_dir_path) / "inputs"), start_key=start_key
     )
 
     # stability series (data pass; figures come from the contract below)
@@ -727,7 +747,7 @@ def summary_plots(
 
     # load proper calibration (eg for lac/ssc/rdc data or back-dated calibs)
     tier = "pht" if partition is True else "hit"
-    validity_file = os.path.join(auto_dir_path, "generated/par", tier, "validity.yaml")
+    validity_file = str(Path(auto_dir_path) / "generated/par" / tier / "validity.yaml")
     with open(validity_file) as f:
         validity_dict = yaml.load(f, Loader=yaml.CLoader)
 
@@ -746,18 +766,18 @@ def summary_plots(
         return
 
     # don't run any check if there are no runs
-    cal_path = os.path.join(auto_dir_path, "generated/par", tier, "cal", period)
-    cal_runs = os.listdir(cal_path)
+    cal_path = str(Path(auto_dir_path) / "generated/par" / tier / "cal" / period)
+    cal_runs = [p.name for p in Path(cal_path).iterdir()]
     if len(cal_runs) == 0:
         utils.logger.debug("No available calibration runs to inspect. Returning.")
         return
 
-    cal_path = os.path.join(auto_dir_path, "generated/par", tier, "cal", period)
+    cal_path = str(Path(auto_dir_path) / "generated/par" / tier / "cal" / period)
     pars_files_list = sorted(glob.glob(f"{cal_path}/*/*.yaml"))
     if not pars_files_list:
         pars_files_list = sorted(glob.glob(f"{cal_path}/*/*.json"))
     det_info = utils.build_detector_info(
-        os.path.join(auto_dir_path, "inputs"), start_key=start_key
+        str(Path(auto_dir_path) / "inputs"), start_key=start_key
     )
 
     pars_path = [p for p in pars_files_list if run_to_apply in p][0]
@@ -854,7 +874,7 @@ def check_calib(
         True if you want to save pdf files too; default: False.
     """
     tier = "pht" if partition is True else "hit"
-    validity_file = os.path.join(auto_dir_path, "generated/par", tier, "validity.yaml")
+    validity_file = str(Path(auto_dir_path) / "generated/par" / tier / "validity.yaml")
     with open(validity_file) as f:
         validity_dict = yaml.load(f, Loader=yaml.CLoader)
 
@@ -873,19 +893,19 @@ def check_calib(
         return
 
     # don't run any check if there are no runs
-    cal_path = os.path.join(auto_dir_path, "generated/par", tier, "cal", period)
-    cal_runs = os.listdir(cal_path)
+    cal_path = str(Path(auto_dir_path) / "generated/par" / tier / "cal" / period)
+    cal_runs = [p.name for p in Path(cal_path).iterdir()]
     if len(cal_runs) == 0:
         utils.logger.debug("No available calibration runs to inspect. Returning.")
         return
     first_run = len(cal_runs) == 1
 
-    cal_path = os.path.join(auto_dir_path, "generated/par", tier, "cal", period)
+    cal_path = str(Path(auto_dir_path) / "generated/par" / tier / "cal" / period)
     pars_files_list = sorted(glob.glob(f"{cal_path}/*/*.yaml"))
     if not pars_files_list:
         pars_files_list = sorted(glob.glob(f"{cal_path}/*/*.json"))
     det_info = utils.build_detector_info(
-        os.path.join(auto_dir_path, "inputs"), start_key=start_key
+        str(Path(auto_dir_path) / "inputs"), start_key=start_key
     )
 
     if data_type not in ["lac", "ssc", "rdc"]:
@@ -998,7 +1018,7 @@ def qc_avg_series(
         Draw the figures from the contract after the data pass; default: True.
     """
     det_info = utils.build_detector_info(
-        os.path.join(auto_dir_path, "inputs/"), start_key=start_key
+        str(Path(auto_dir_path) / "inputs/"), start_key=start_key
     )
 
     monitoring.qc_average(auto_dir_path, output_folder, det_info, period, current_run)

@@ -1,5 +1,5 @@
-import os
 import subprocess
+from pathlib import Path
 
 import yaml
 from dbetto import TextDB
@@ -40,15 +40,15 @@ def retrieve_exposure(
         first_timestamp = runinfo[period][run]["phy"]["start_key"]
         full_status_map = utils.get_status_map(path, version, first_timestamp, "geds")
 
-        map_file = os.path.join(
-            path, version, "inputs/hardware/configuration/channelmaps"
+        map_file = str(
+            Path(path) / version / "inputs/hardware/configuration/channelmaps"
         )
         full_channel_map = TextDB(map_file).on(timestamp=first_timestamp)
 
         for hpge in full_channel_map.group("system").geds.map("name").keys():
             diode_path = utils.retrieve_json_or_yaml(
-                os.path.join(
-                    path, version, "inputs/hardware/detectors/germanium/diodes"
+                str(
+                    Path(path) / version / "inputs/hardware/detectors/germanium/diodes"
                 ),
                 hpge,
             )
@@ -145,8 +145,8 @@ def retrieve_scdb(config: str, port: int, pswd: str):
     utils.check_scdb_settings(config)
 
     # the period contract file lives beside the run directories
-    run_dir = os.path.dirname(utils.get_output_path(config))
-    output_folder = os.path.dirname(os.path.dirname(run_dir))
+    run_dir = str(Path(utils.get_output_path(config)).parent)
+    output_folder = str(Path(str(Path(run_dir).parent)).parent)
     period = config["dataset"]["period"]
     run = f"r{int(config['dataset']['runs']):03d}"
 

@@ -23,9 +23,9 @@ scanner can associate plots with the task that produced them.
 """
 
 import logging
-import os
 import traceback
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+from pathlib import Path
 
 LOG_FORMAT = "%(asctime)sZ %(levelname)s %(name)s %(message)s"
 DATE_FORMAT = "%Y-%m-%dT%H:%M:%S"
@@ -43,10 +43,10 @@ def log_tree_root(output_folder: str, invocation_key: str | None = None) -> str:
         given.
     """
     if invocation_key is None:
-        invocation_key = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    root = os.path.join(output_folder, "generated/tmp/log", invocation_key)
-    os.makedirs(root, exist_ok=True)
-    return root
+        invocation_key = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    root = Path(output_folder) / "generated/tmp/log" / invocation_key
+    root.mkdir(parents=True, exist_ok=True)
+    return str(root)
 
 
 def _make_file_logger(name: str, file_path: str) -> logging.Logger:
@@ -68,17 +68,17 @@ def _make_file_logger(name: str, file_path: str) -> logging.Logger:
 def orchestrator_logger(log_root: str) -> logging.Logger:
     """Logger writing one line per task start/end into orchestrator.log."""
     return _make_file_logger(
-        "legend_data_monitor.orchestrator", os.path.join(log_root, "orchestrator.log")
+        "legend_data_monitor.orchestrator", str(Path(log_root) / "orchestrator.log")
     )
 
 
 def task_logger(log_root: str, task: str, period: str, run: str) -> logging.Logger:
     """Logger with a dedicated per-(task, run) log file under the log tree."""
-    task_dir = os.path.join(log_root, task)
-    os.makedirs(task_dir, exist_ok=True)
+    task_dir = Path(log_root) / task
+    task_dir.mkdir(parents=True, exist_ok=True)
     return _make_file_logger(
         f"legend_data_monitor.task.{task}.{period}.{run}",
-        os.path.join(task_dir, f"{task}-{period}-{run}.log"),
+        str(task_dir / f"{task}-{period}-{run}.log"),
     )
 
 
@@ -94,7 +94,8 @@ def format_error_block(task: str, period: str, run: str, exc: BaseException) -> 
 
 def log_saved_plot(logger: logging.Logger, path: str) -> None:
     """Announce a saved figure so log scanners can pick it up."""
-    logger.info("SAVED_PLOT %s", os.path.abspath(path))
+    # the consumer contract is a plain absolute path string, not a repr
+    logger.info("SAVED_PLOT %s", Path(path).absolute())
 
 
 def save_figure(fig, path: str, logger: logging.Logger | None = None, **savefig_kwargs):

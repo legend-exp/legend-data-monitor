@@ -23,6 +23,14 @@ def func(a, b):
     """
 ```
 
+## Github guidelines
+
+Always run `pre-commit run -a` before committing. Keep commit messages, PR bodies,
+and history short and clean; avoid too many commits. Substantial AI contributions
+must be disclosed in the PR (see `AI_POLICY.md`).
+
+Push to the `ggmarshall` fork first; upstream is `legend-exp/legend-data-monitor`.
+
 ## Dev commands
 
 - Venv: uv-managed `.venv` (Python 3.11), package installed editable.
@@ -34,7 +42,8 @@ def func(a, b):
   `tests/baseline/BASELINE.md`; don't treat them as new breakage.
 - Behavior changes must keep the golden snapshot bit-identical:
   `.venv/bin/python tests/baseline/snapshot.py <out> tests/baseline/golden_p19_r001.json --check`
-- Lint is black + isort + flake8 (no ruff), numpy docstrings enforced, `print()`
+- Lint is black + ruff (`.ruff.toml`; ruff covers isort and pyupgrade too),
+  numpy docstrings enforced, `print()`
   banned in `src/` (use the logger). mypy is manual-stage only.
 
 ## Architecture invariants
@@ -57,13 +66,6 @@ def func(a, b):
 - Cluster prodenv roots are hardcoded in `automatic_run.py`; use `--prod_root`
   for local/mock trees. Full e2e coverage (and any cal-tier data) exists only
   on-cluster.
-
-## Github guidelines
-
-Always run `pre-commit run -a` before committing. Keep commit messages, PR bodies,
-and history short and clean; avoid too many commits. Push to the `ggmarshall` fork
-first; upstream is `legend-exp/legend-data-monitor`. Substantial AI contributions
-must be disclosed in the PR (see `AI_POLICY.md`).
 
 ## Repo specific
 

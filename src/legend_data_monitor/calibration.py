@@ -1,5 +1,5 @@
 import glob
-import os
+from pathlib import Path
 
 import awkward as ak
 import lh5
@@ -255,7 +255,11 @@ def check_escale(
     hit_map = utils.build_file_map(auto_dir_path, tier="hit")
     dsp_map = utils.build_file_map(auto_dir_path, tier="dsp")
 
-    run_dict = {period: sorted(r for r in os.listdir(cal_path) if "_old" not in r)}
+    run_dict = {
+        period: sorted(
+            r for r in [p.name for p in Path(cal_path).iterdir()] if "_old" not in r
+        )
+    }
     detectors_name = list(det_info["detectors"].keys())
 
     detector_status = utils.build_detector_info_per_period(
@@ -267,10 +271,10 @@ def check_escale(
     )
     write_escale_summary(output_folder, period, current_run, partitions_params)
 
-    output_dir_run = os.path.join(output_folder, period, current_run)
-    os.makedirs(os.path.join(output_dir_run, "mtg"), exist_ok=True)
-    usability_map_file = os.path.join(
-        output_dir_run, f"l200-{period}-{current_run}-qcp_summary.yaml"
+    output_dir_run = str(Path(output_folder) / period / current_run)
+    Path(str(Path(output_dir_run) / "mtg")).mkdir(parents=True, exist_ok=True)
+    usability_map_file = str(
+        Path(output_dir_run) / f"l200-{period}-{current_run}-qcp_summary.yaml"
     )
     escale_data = utils.load_yaml_or_default(usability_map_file, det_info["detectors"])
 
@@ -602,7 +606,7 @@ def evaluate_psd_usability(
 
     # output_dir is <monitoring root>/<period> here; the writer joins period
     write_psd_stability(
-        os.path.dirname(os.path.normpath(output_dir)),
+        str(Path(output_dir).parent),
         period,
         current_run,
         det_name,
@@ -656,12 +660,12 @@ def check_psd(
         return
 
     # create the folder and parents if missing - for the moment, we store it under the 'phy' folder
-    output_dir_run = os.path.join(output_dir, period, current_run)
-    os.makedirs(os.path.join(output_dir_run, "mtg"), exist_ok=True)
+    output_dir_run = str(Path(output_dir) / period / current_run)
+    Path(str(Path(output_dir_run) / "mtg")).mkdir(parents=True, exist_ok=True)
 
     # Load existing data once (or start empty)
-    usability_map_file = os.path.join(
-        output_dir_run, f"l200-{period}-{current_run}-qcp_summary.yaml"
+    usability_map_file = str(
+        Path(output_dir_run) / f"l200-{period}-{current_run}-qcp_summary.yaml"
     )
 
     detectors_name = list(det_info["detectors"].keys())
@@ -669,7 +673,7 @@ def check_psd(
 
     psd_data = utils.load_yaml_or_default(usability_map_file, det_info["detectors"])
 
-    cal_runs = sorted(os.listdir(cal_path))
+    cal_runs = sorted([p.name for p in Path(cal_path).iterdir()])
     if len(cal_runs) == 1:
         utils.logger.debug(
             "Only one available calibration run. Save all entries as None and exit."
@@ -699,7 +703,7 @@ def check_psd(
             current_run,
             cal_psd_info[det_name],
             det_name,
-            os.path.join(output_dir, period),
+            str(Path(output_dir) / period),
             psd_data,
         )
 
@@ -821,8 +825,13 @@ def read_dataflow_stability(
     """
     import shelve
 
-    pattern = os.path.join(
-        tmp_auto_dir, "generated/plt/hit", data_type, period, run, "*-plt_hit.dat"
+    pattern = str(
+        Path(tmp_auto_dir)
+        / "generated/plt/hit"
+        / data_type
+        / period
+        / run
+        / "*-plt_hit.dat"
     )
     matches = sorted(glob.glob(pattern))
     if not matches:
@@ -869,9 +878,7 @@ def read_channel_events(files: list, channel: str, fields: list):
                 channel + "/hit/", [path], library="ak", field_mask=fields
             )
         except (KeyError, ValueError) as exc:
-            utils.logger.debug(
-                "skipping %s in %s: %s", channel, os.path.basename(path), exc
-            )
+            utils.logger.debug("skipping %s in %s: %s", channel, Path(path).name, exc)
             continue
         if chunk is not None and len(chunk):
             chunks.append(chunk)
@@ -907,15 +914,15 @@ def check_calibration(
         Dictionary containing detector metadata.
     """
     detectors = det_info["detectors"]
-    usability_map_file = os.path.join(
-        output_folder, period, run, f"l200-{period}-{run}-qcp_summary.yaml"
+    usability_map_file = str(
+        Path(output_folder) / period / run / f"l200-{period}-{run}-qcp_summary.yaml"
     )
     output = utils.load_yaml_or_default(usability_map_file, detectors)
     fep_mean_results = {}
     fep_stats = {}
 
-    directory = os.path.join(tmp_auto_dir, "generated/par/hit/cal", period, run)
-    files = sorted(glob.glob(os.path.join(directory, "*par_hit.yaml")))
+    directory = str(Path(tmp_auto_dir) / "generated/par/hit/cal" / period / run)
+    files = sorted(glob.glob(str(Path(directory) / "*par_hit.yaml")))
     if not files:
         utils.logger.debug(f"...no calibration files found for run {run}. Exiting.")
         return
@@ -931,10 +938,10 @@ def check_calibration(
         run_number = int(run[1:])
         for offset in range(1, run_number + 1):  # check run-1, run-2, ...
             prev_run = f"r{run_number - offset:03d}"
-            directory = os.path.join(
-                tmp_auto_dir, "generated/par/hit/cal", period, prev_run
+            directory = str(
+                Path(tmp_auto_dir) / "generated/par/hit/cal" / period / prev_run
             )
-            files = sorted(glob.glob(os.path.join(directory, "*par_hit.yaml")))
+            files = sorted(glob.glob(str(Path(directory) / "*par_hit.yaml")))
             if files:
                 utils.logger.debug(f"...using previous calibration from {prev_run}")
                 prev_pars = utils.read_json_or_yaml(files[0])
@@ -946,7 +953,9 @@ def check_calibration(
             )
             first_run = True
 
-    os.makedirs(os.path.join(output_folder, period, run, "mtg"), exist_ok=True)
+    Path(str(Path(output_folder) / period / run / "mtg")).mkdir(
+        parents=True, exist_ok=True
+    )
     utils.logger.debug("...inspecting FEP, calib peaks, stability in calibrations")
 
     # estimator column and peak windows (settings/experiment.yaml)
@@ -957,7 +966,7 @@ def check_calibration(
 
     hit_files = sorted(
         glob.glob(
-            os.path.join(tmp_auto_dir, "generated/tier/hit/cal", period, run, "*")
+            str(Path(tmp_auto_dir) / "generated/tier/hit/cal" / period / run / "*")
         )
     )
 
@@ -1372,8 +1381,8 @@ def write_fep_gain_contract(
     if not rows:
         return None
 
-    file_path = os.path.join(
-        output_folder, period, f"l200-{period}-{data_type}-monitoring.hdf"
+    file_path = str(
+        Path(output_folder) / period / f"l200-{period}-{data_type}-monitoring.hdf"
     )
     key = f"fep_gain_stab/{run}"
     contract_writer.write_frame(file_path, key, pd.DataFrame(rows))
@@ -1412,17 +1421,17 @@ def check_calibration_lac_ssc(
         Dictionary containing detector metadata.
     """
     detectors = det_info["detectors"]
-    usability_map_file = os.path.join(
-        output_folder, period, run, f"l200-{period}-{run}-qcp_summary.yaml"
+    usability_map_file = str(
+        Path(output_folder) / period / run / f"l200-{period}-{run}-qcp_summary.yaml"
     )
     output = utils.load_yaml_or_default(usability_map_file, detectors)
     fep_mean_results = {}
     fep_stats = {}
 
-    directory = os.path.join(
-        tmp_auto_dir, "generated/par/hit/cal", period, run_to_apply
+    directory = str(
+        Path(tmp_auto_dir) / "generated/par/hit/cal" / period / run_to_apply
     )
-    files = sorted(glob.glob(os.path.join(directory, "*par_hit.yaml")))
+    files = sorted(glob.glob(str(Path(directory) / "*par_hit.yaml")))
     if not files:
         utils.logger.debug(
             f"...no calibration files found for run {run_to_apply}. Exiting."
@@ -1431,7 +1440,9 @@ def check_calibration_lac_ssc(
     pars = utils.read_json_or_yaml(files[0])
 
     # find nearest previous run
-    os.makedirs(os.path.join(output_folder, period, run, "mtg"), exist_ok=True)
+    Path(str(Path(output_folder) / period / run / "mtg")).mkdir(
+        parents=True, exist_ok=True
+    )
     utils.logger.debug("...inspecting FEP, calib peaks, stability in calibrations")
 
     # estimator column and peak windows (settings/experiment.yaml)
@@ -1443,8 +1454,13 @@ def check_calibration_lac_ssc(
     # load ssc/lac data
     hit_files = sorted(
         glob.glob(
-            os.path.join(
-                tmp_auto_dir, "generated/tier/hit", data_type, period, run, "*"
+            str(
+                Path(tmp_auto_dir)
+                / "generated/tier/hit"
+                / data_type
+                / period
+                / run
+                / "*"
             )
         )
     )

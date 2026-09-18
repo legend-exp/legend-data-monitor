@@ -1,9 +1,9 @@
 """Plot-free loaders for calibration summary files and run time metadata."""
 
 import json
-import os
 import re
-from functools import lru_cache
+from functools import cache
+from pathlib import Path
 
 import lh5
 import numpy as np
@@ -81,7 +81,7 @@ def uncalibrated_variable(estimator: str) -> str:
     return estimator
 
 
-@lru_cache(maxsize=None)
+@cache
 def get_calibration_file(folder_par: str) -> dict:
     """
     Return the content of the JSON/YAML calibration file in folder_par.
@@ -94,16 +94,16 @@ def get_calibration_file(folder_par: str) -> dict:
     folder_par : str
         Path to the folder containing calibration summary files.
     """
-    files = os.listdir(folder_par)
+    files = [p.name for p in Path(folder_par).iterdir()]
     json_files = [f for f in files if f.endswith(".json")]
     yaml_files = [f for f in files if f.endswith((".yaml", ".yml"))]
 
     if json_files:
-        filepath = os.path.join(folder_par, json_files[0])
+        filepath = str(Path(folder_par) / json_files[0])
         with open(filepath) as f:
             pars_dict = json.load(f)
     elif yaml_files:
-        filepath = os.path.join(folder_par, yaml_files[0])
+        filepath = str(Path(folder_par) / yaml_files[0])
         with open(filepath) as f:
             pars_dict = yaml.load(f, Loader=yaml.CLoader)
     else:
@@ -254,18 +254,20 @@ def get_run_start_end_times(
     if cache_key in _run_times_cache:
         return _run_times_cache[cache_key]
 
-    folder_tier = os.path.join(tiers[0 if tier == "hit" else 1], "cal", period, run)
-    dir_path = os.path.join(tiers[-1], "phy", period)
+    folder_tier = str(Path(tiers[0 if tier == "hit" else 1]) / "cal" / period / run)
+    dir_path = str(Path(tiers[-1]) / "phy" / period)
     pattern = re.compile(
         r"^l\d+-p\d+-r\d+-(cal|hit|raw)-\d{8}T\d{6}Z-tier_(dsp|hit|raw)\.lh5$"
     )
 
-    run_files = sorted(f for f in os.listdir(folder_tier) if pattern.match(f))
+    run_files = sorted(
+        f for f in [p.name for p in Path(folder_tier).iterdir()] if pattern.match(f)
+    )
 
     if pulser_rawid is None:
         channels = [
             c
-            for c in lh5.ls(os.path.join(folder_tier, run_files[0]))
+            for c in lh5.ls(str(Path(folder_tier) / run_files[0]))
             if c.startswith("ch")
         ]
         timestamp_key = f"{channels[0]}/dsp/timestamp"
@@ -274,19 +276,21 @@ def get_run_start_end_times(
         timestamp_key = f"ch{pulser_rawid}/dsp/timestamp"
 
     # for when we have a calib run but zero phy runs for a given period
-    if os.path.isdir(dir_path) and run not in os.listdir(dir_path):
+    if Path(dir_path).is_dir() and run not in [
+        p.name for p in Path(dir_path).iterdir()
+    ]:
         run_end_time = pd.to_datetime(
-            sto.read(timestamp_key, os.path.join(folder_tier, run_files[-1]))[-1],
+            sto.read(timestamp_key, str(Path(folder_tier) / run_files[-1]))[-1],
             unit="s",
         )
         run_start_time = run_end_time
     else:
         run_start_time = pd.to_datetime(
-            sto.read(timestamp_key, os.path.join(folder_tier, run_files[0]))[0],
+            sto.read(timestamp_key, str(Path(folder_tier) / run_files[0]))[0],
             unit="s",
         )
         run_end_time = pd.to_datetime(
-            sto.read(timestamp_key, os.path.join(folder_tier, run_files[-1]))[-1],
+            sto.read(timestamp_key, str(Path(folder_tier) / run_files[-1]))[-1],
             unit="s",
         )
 
@@ -294,17 +298,17 @@ def get_run_start_end_times(
     return run_start_time, run_end_time
 
 
-@lru_cache(maxsize=None)
+@cache
 def _load_validity_file(validity_file: str) -> tuple:
     """Load and cache a validity.yaml file (read once per run, not per channel)."""
     with open(validity_file) as f:
         return tuple(yaml.load(f, Loader=yaml.CLoader))
 
 
-@lru_cache(maxsize=None)
+@cache
 def _first_run_key(run_path: str) -> str:
     """Return the timestamp key of the first file in a run directory (cached)."""
-    return sorted(os.listdir(run_path))[0].split("-")[4]
+    return sorted([p.name for p in Path(run_path).iterdir()])[0].split("-")[4]
 
 
 def get_calib_data_dict(
@@ -355,12 +359,12 @@ def get_calib_data_dict(
     channel = channel_info[0]
     channel_name = channel_info[1]
 
-    validity_file = os.path.join(pars[2 if tier == "hit" else 3], "validity.yaml")
+    validity_file = str(Path(pars[2 if tier == "hit" else 3]) / "validity.yaml")
     validity_dict = _load_validity_file(validity_file)
 
     # find first key of current run
-    run_path = os.path.join(tiers[2 if tier == "hit" else 3], data_type, period, run)
-    if not os.path.exists(run_path):
+    run_path = str(Path(tiers[2 if tier == "hit" else 3]) / data_type / period / run)
+    if not Path(run_path).exists():
         return calib_data
     start_key = _first_run_key(run_path)
     # use key to load the right yaml file
@@ -374,8 +378,8 @@ def get_calib_data_dict(
         )
         return calib_data
 
-    folder_par = os.path.join(
-        pars[2 if tier == "hit" else 3], "cal", period, run_to_apply
+    folder_par = str(
+        Path(pars[2 if tier == "hit" else 3]) / "cal" / period / run_to_apply
     )
     pars_dict = get_calibration_file(folder_par)
 
@@ -448,14 +452,10 @@ def get_tier_keyresult(tiers: list):
     tiers : list
         Base directory containing the tier and parameter folders.
     """
-    tier = "hit"
-    key_result = "ecal"
-    if os.path.isdir(tiers[1]):
-        if os.listdir(tiers[1]) != []:
-            tier = "pht"
-            key_result = "partition_ecal"
-
-    return tier, key_result
+    partition_dir = Path(tiers[1])
+    if partition_dir.is_dir() and any(partition_dir.iterdir()):
+        return "pht", "partition_ecal"
+    return "hit", "ecal"
 
 
 def get_calib_pars(
@@ -513,7 +513,7 @@ def get_calib_pars(
     # Only a hint: without reachable metadata the first channel in the file is
     # used instead, so a mock or partial tree still works.
     try:
-        pulser_rawid = utils.aux_channels(os.path.join(path, "inputs")).get("pulser")
+        pulser_rawid = utils.aux_channels(str(Path(path) / "inputs")).get("pulser")
     except (FileNotFoundError, KeyError, ValueError) as exc:
         utils.logger.debug("...no channel map for the run timing (%s)", exc)
         pulser_rawid = None

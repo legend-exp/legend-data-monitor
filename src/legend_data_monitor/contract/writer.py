@@ -7,8 +7,8 @@ ranges are exported as *flagged* ranges in the manifest instead of dropped.
 """
 
 import json
-import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+from pathlib import Path
 
 import h5py
 import numpy as np
@@ -62,7 +62,7 @@ def write_hist(
     attrs: dict | None = None,
 ) -> None:
     """Write one histogram under ``key`` (UHI HDF5 layout + min/max sidecars)."""
-    os.makedirs(os.path.dirname(file_path), exist_ok=True)
+    Path(file_path).parent.mkdir(parents=True, exist_ok=True)
     with h5py.File(file_path, "a") as f:
         f.attrs[schema.ROOT_ATTR] = schema.SCHEMA_VERSION
         if key in f:
@@ -192,7 +192,7 @@ def write_distribution_2d(
 def write_frame(file_path: str, key: str, frame: pd.DataFrame) -> str:
     """Write a small pandas frame (run means, detector map, calib pars)."""
     # same courtesy as write_hist: the period directory may not exist yet
-    os.makedirs(os.path.dirname(file_path), exist_ok=True)
+    Path(file_path).parent.mkdir(parents=True, exist_ok=True)
     frame.to_hdf(file_path, key=key, mode="a")
     with h5py.File(file_path, "a") as f:
         f.attrs[schema.ROOT_ATTR] = schema.SCHEMA_VERSION
@@ -280,7 +280,7 @@ def write_manifest(
     manifest = {
         "schema_version": schema.SCHEMA_VERSION,
         "package_version": package_version,
-        "created_utc": datetime.now(timezone.utc).isoformat(),
+        "created_utc": datetime.now(UTC).isoformat(),
         "period": period,
         "run": run,
         "files": files,
@@ -298,8 +298,8 @@ def write_manifest(
         },
         "flagged_ranges": flagged_ranges(period),
     }
-    path = os.path.join(dir_path, schema.manifest_name(period, run, experiment))
-    os.makedirs(dir_path, exist_ok=True)
+    path = Path(dir_path) / schema.manifest_name(period, run, experiment)
+    Path(dir_path).mkdir(parents=True, exist_ok=True)
     with open(path, "w") as f:
         json.dump(manifest, f, indent=1, default=str)
-    return path
+    return str(path)

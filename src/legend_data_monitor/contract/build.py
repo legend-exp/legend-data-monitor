@@ -11,7 +11,7 @@ from the manifest, so the eventual rename (when the v1 writer is retired) is
 transparent.
 """
 
-import os
+from pathlib import Path
 
 import pandas as pd
 
@@ -98,11 +98,11 @@ def build_contract_files(
 
     Returns the manifest path, or None when the v1 input file is absent.
     """
-    run_dir = os.path.join(generated_path, "generated/plt/hit", data_type, period, run)
-    v1_file = os.path.join(
-        run_dir, schema.run_file_name(period, run, data_type, subsystem, experiment)
+    run_dir = Path(generated_path) / "generated/plt/hit" / data_type / period / run
+    v1_file = run_dir / schema.run_file_name(
+        period, run, data_type, subsystem, experiment
     )
-    if not os.path.exists(v1_file):
+    if not v1_file.exists():
         utils.logger.debug("no v1 monitoring file at %s; skipping v2 build", v1_file)
         return None
 
@@ -119,9 +119,9 @@ def build_contract_files(
         rename = {info["daq_rawid"]: name for name, info in detectors.items()}
 
     v2_name = f"{experiment}-{period}-{run}-{data_type}-{subsystem}-schema2.hdf"
-    v2_file = os.path.join(run_dir, v2_name)
-    if keys is None and os.path.exists(v2_file):
-        os.remove(v2_file)
+    v2_file = run_dir / v2_name
+    if keys is None and v2_file.exists():
+        v2_file.unlink()
     wanted = None if keys is None else {k.lstrip("/") for k in keys}
 
     written_keys = []
@@ -242,14 +242,14 @@ def refresh_manifest(
     str or None
         The manifest path, or None when the run has no contract file.
     """
-    run_dir = os.path.join(generated_path, "generated/plt/hit", data_type, period, run)
+    run_dir = Path(generated_path) / "generated/plt/hit" / data_type / period / run
     files = {}
     for subsystem in schema.SUBSYSTEMS:
         name = schema.run_file_name(
             period, run, data_type, f"{subsystem}-schema2", experiment
         )
-        path = os.path.join(run_dir, name)
-        if not os.path.exists(path):
+        path = run_dir / name
+        if not path.exists():
             continue
         files[name] = {
             "keys": sorted(_keys_in_file(path)),
@@ -269,16 +269,12 @@ def _manifest_files(run_dir: str, period: str, run: str, experiment: str) -> dic
     """File entries of the existing manifest whose contract files are still present."""
     import json
 
-    path = os.path.join(run_dir, schema.manifest_name(period, run, experiment))
-    if not os.path.exists(path):
+    path = run_dir / schema.manifest_name(period, run, experiment)
+    if not path.exists():
         return {}
     with open(path) as f:
         files = json.load(f).get("files", {})
-    return {
-        name: entry
-        for name, entry in files.items()
-        if os.path.exists(os.path.join(run_dir, name))
-    }
+    return {name: entry for name, entry in files.items() if (run_dir / name).exists()}
 
 
 def _keys_in_file(v2_file: str) -> list:

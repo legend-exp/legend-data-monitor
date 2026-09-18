@@ -1,34 +1,27 @@
-from unittest.mock import patch
+"""Partitioned data selects the pht tier; the test uses a real directory.
+
+It used to patch os.path.isdir/os.listdir, which pinned the implementation to
+one filesystem API rather than to the behaviour.
+"""
 
 from legend_data_monitor.monitoring import get_tier_keyresult
 
 
-def test_get_tier_keyresult_hit_branch():
-    # tiers[1] does not exist, returns default hit+ecal
-    with (
-        patch("os.path.isdir", return_value=False),
-        patch("os.listdir", return_value=[]),
-    ):
-        tier, key_result = get_tier_keyresult(["tier0", "tier1"])
-        assert tier == "hit"
-        assert key_result == "ecal"
-
-    # tiers[1] exists but is empty, returns default hit+ecal
-    with (
-        patch("os.path.isdir", return_value=True),
-        patch("os.listdir", return_value=[]),
-    ):
-        tier, key_result = get_tier_keyresult(["tier0", "tier1"])
-        assert tier == "hit"
-        assert key_result == "ecal"
+def test_hit_branch_when_the_partition_dir_is_absent(tmp_path):
+    tier, key_result = get_tier_keyresult([str(tmp_path), str(tmp_path / "missing")])
+    assert (tier, key_result) == ("hit", "ecal")
 
 
-def test_get_tier_keyresult_pht_branch():
-    # tiers[1] exists and is not empty, returns pht+partition_ecal
-    with (
-        patch("os.path.isdir", return_value=True),
-        patch("os.listdir", return_value=["some_file"]),
-    ):
-        tier, key_result = get_tier_keyresult(["tier0", "tier1"])
-        assert tier == "pht"
-        assert key_result == "partition_ecal"
+def test_hit_branch_when_the_partition_dir_is_empty(tmp_path):
+    empty = tmp_path / "pht"
+    empty.mkdir()
+    tier, key_result = get_tier_keyresult([str(tmp_path), str(empty)])
+    assert (tier, key_result) == ("hit", "ecal")
+
+
+def test_pht_branch_when_the_partition_dir_has_content(tmp_path):
+    populated = tmp_path / "pht"
+    populated.mkdir()
+    (populated / "some_file").touch()
+    tier, key_result = get_tier_keyresult([str(tmp_path), str(populated)])
+    assert (tier, key_result) == ("pht", "partition_ecal")

@@ -6,10 +6,10 @@ import matplotlib
 
 matplotlib.use("Agg")
 
-import pandas as pd  # noqa: E402
+import pandas as pd
 
-from legend_data_monitor import calibration  # noqa: E402
-from legend_data_monitor.plots import calib  # noqa: E402
+from legend_data_monitor import calibration
+from legend_data_monitor.plots import calib
 
 PERIOD, RUN = "p22", "r000"
 DET = "V01234A"

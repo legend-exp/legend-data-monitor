@@ -502,6 +502,29 @@ Muon page gets rebuilt on contract keys the way the SiPM page was.
   under current lh5 — now caught in the direct loader too (the old
   `KeyError/ValueError` catch predates it).
 
+## pathlib and ruff (2026-09-18)
+
+- **`os.path` -> `pathlib` throughout**: all 366 call sites across 24 modules.
+  Public functions still accept and return `str` where that is a contract --
+  the `SAVED_PLOT` / `ISSUES` log lines and the issue records' `plots[]` are
+  consumed by auto-giorgio -- so `Path` is an internal representation only.
+  `os` survives where it is not about paths (`os.environ`, `os.getpid`).
+  Four tests that patched `os.path.exists`/`os.listdir` now build real
+  directories instead: they were pinning the filesystem API rather than the
+  behaviour, which is also why `test_nonexistent_path` had to patch at all
+  (`/nonexistent` exists on some machines; it now uses an absent tmp_path).
+- **flake8 -> ruff**, matching legend-dataflow and the other repos:
+  `.ruff.toml` selects the families the flake8 plugins covered (bugbear,
+  print, numpy docstrings, pep8-naming) plus isort and pyupgrade, so those two
+  hooks are gone as well. The ignore list keeps enforcement identical to
+  before: flake8-bugbear's opinionated `B9xx` were never enabled here, and the
+  RUF-specific rules have no flake8 equivalent. They are listed with a comment
+  and are worth enabling one at a time -- `B904` (`raise ... from`) and `B905`
+  (`zip(strict=)`) especially.
+  Ruff immediately earned its keep: it found `build_spms_info` defined twice
+  in `utils.py`, a duplicate introduced by a merge resolution that flake8's
+  configuration had not been catching.
+
 ## Remaining
 
 1. ~~**Pickled-figure shelve writers**~~ **DONE (2026-08-20)**, see above. Was:

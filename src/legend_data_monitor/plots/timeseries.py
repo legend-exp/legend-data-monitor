@@ -5,7 +5,7 @@ min/max whisker envelopes, saves PNGs under ``figs/``, and announces each
 file with a ``SAVED_PLOT`` log line so unattended agents can attach them.
 """
 
-import os
+from pathlib import Path
 
 from .. import logs
 from ..monitoring import apply_monitoring_style
@@ -49,8 +49,8 @@ def plot_binned_series(
     hi = binned.to_frame("max")
     detectors = detectors or list(mean.columns)
 
-    figs_dir = os.path.join(out_dir, "figs")
-    os.makedirs(figs_dir, exist_ok=True)
+    figs_dir = str(Path(out_dir) / "figs")
+    Path(figs_dir).mkdir(parents=True, exist_ok=True)
     saved = []
 
     fig, ax = plt.subplots(figsize=(10, 4))
@@ -78,7 +78,7 @@ def plot_binned_series(
         ax.legend(fontsize=6, ncol=2)
     fig.autofmt_xdate()
 
-    path = os.path.join(figs_dir, f"{name}.png")
+    path = str(Path(figs_dir) / f"{name}.png")
     fig.savefig(path, dpi=150, bbox_inches="tight")
     plt.close(fig)
     if logger is not None:

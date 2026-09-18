@@ -1,5 +1,5 @@
 import glob
-import os
+from pathlib import Path
 
 import awkward as ak
 import h5py
@@ -60,8 +60,8 @@ def period_contract_path(
     are drawn from, so consumers no longer have to unpickle a matplotlib
     figure out of a shelve to reach them.
     """
-    return os.path.join(
-        output_folder, period, f"l200-{period}-{data_type}-monitoring.hdf"
+    return str(
+        Path(output_folder) / period / f"l200-{period}-{data_type}-monitoring.hdf"
     )
 
 
@@ -94,7 +94,7 @@ def read_dead_time(
     which may not have run for this run yet.
     """
     path = period_contract_path(output_folder, period, data_type)
-    if not os.path.isfile(path):
+    if not Path(path).is_file():
         return None
     try:
         frame = contract_reader.read_frame(path, f"dead_time/{run}")
@@ -192,12 +192,12 @@ def qc_distributions(
         "IsValidCuspemaxClassifier",
     ]
 
-    my_file = os.path.join(
-        output_folder, f"{period}/{run}/l200-{period}-{run}-phy-geds.hdf"
+    my_file = str(
+        Path(output_folder) / f"{period}/{run}/l200-{period}-{run}-phy-geds.hdf"
     )
     str_chns = det_info["str_chns"]
     utils.logger.debug("...inspecting QC classifiers")
-    if not os.path.exists(my_file):
+    if not Path(my_file).exists():
         utils.logger.warning(f"...file not found: {my_file}. Return!")
         return
 
@@ -251,7 +251,7 @@ def qc_distributions(
                                 "string": string,
                                 "event_type": flag,
                                 "percent_in_range": float(safe_perc(vals)),
-                                "n_events": int(len(vals)),
+                                "n_events": len(vals),
                             }
                         )
 
@@ -776,21 +776,18 @@ def qc_average(
             "IsSaturated",
         ]
 
-    my_file = os.path.join(
-        output_folder, f"{period}/{run}/l200-{period}-{run}-phy-geds.hdf"
+    my_file = str(
+        Path(output_folder) / f"{period}/{run}/l200-{period}-{run}-phy-geds.hdf"
     )
     detectors = det_info["detectors"]
     str_chns = det_info["str_chns"]
     utils.logger.debug("...inspecting QC average values")
-    if not os.path.exists(my_file):
+    if not Path(my_file).exists():
         utils.logger.warning(f"...file not found: {my_file}. Return!")
         return
 
-    usability_map_file = os.path.join(
-        output_folder,
-        period,
-        run,
-        f"l200-{period}-{run}-qcp_summary.yaml",
+    usability_map_file = str(
+        Path(output_folder) / period / run / f"l200-{period}-{run}-qcp_summary.yaml"
     )
     output = utils.load_yaml_or_default(usability_map_file, detectors)
 
@@ -967,12 +964,12 @@ def qc_time_series(
             "IsDischarge",
             "IsSaturated",
         ]
-    my_file = os.path.join(
-        output_folder, f"{period}/{run}/l200-{period}-{run}-phy-geds.hdf"
+    my_file = str(
+        Path(output_folder) / f"{period}/{run}/l200-{period}-{run}-phy-geds.hdf"
     )
     detectors = det_info["detectors"]
     utils.logger.debug("...inspecting QC time series")
-    if not os.path.exists(my_file):
+    if not Path(my_file).exists():
         utils.logger.warning(f"...file not found: {my_file}. Return!")
         return
 
@@ -1014,16 +1011,16 @@ def build_new_files(generated_path: str, period: str, run: str, data_type="phy")
     data_type : str
         Data type to load; default: 'phy'.
     """
-    data_file = os.path.join(
-        generated_path,
-        "generated/plt/hit",
-        data_type,
-        period,
-        run,
-        f"l200-{period}-{run}-{data_type}-geds.hdf",
+    data_file = str(
+        Path(generated_path)
+        / "generated/plt/hit"
+        / data_type
+        / period
+        / run
+        / f"l200-{period}-{run}-{data_type}-geds.hdf"
     )
 
-    if not os.path.exists(data_file):
+    if not Path(data_file).exists():
         utils.logger.debug(f"File not found: {data_file}. Exit here.")
         raise errors.DataError("build_new_files failed (see log for details)")
 
@@ -1035,17 +1032,17 @@ def build_new_files(generated_path: str, period: str, run: str, data_type="phy")
     resampling_times = ["10min", "60min"]
 
     for idx, resample_unit in enumerate(resampling_times):
-        new_file = os.path.join(
-            generated_path,
-            "generated/plt/hit",
-            data_type,
-            period,
-            run,
-            f"l200-{period}-{run}-{data_type}-geds-res_{resample_unit}.hdf",
+        new_file = str(
+            Path(generated_path)
+            / "generated/plt/hit"
+            / data_type
+            / period
+            / run
+            / f"l200-{period}-{run}-{data_type}-geds-res_{resample_unit}.hdf"
         )
         # remove it if already exists so we can start again to append resampled data
-        if os.path.exists(new_file):
-            os.remove(new_file)
+        if Path(new_file).exists():
+            Path(new_file).unlink()
 
         for k in my_keys:
             if "info" in k:
@@ -1093,13 +1090,13 @@ def build_new_files(generated_path: str, period: str, run: str, data_type="phy")
             resampled_df.to_hdf(new_file, key=k, mode="a", **utils.HDF_COMPRESSION)
 
         if idx == 0:
-            info_output = os.path.join(
-                generated_path,
-                "generated/plt/hit",
-                data_type,
-                period,
-                run,
-                f"l200-{period}-{run}-{data_type}-geds-info.yaml",
+            info_output = str(
+                Path(generated_path)
+                / "generated/plt/hit"
+                / data_type
+                / period
+                / run
+                / f"l200-{period}-{run}-{data_type}-geds-info.yaml"
             )
             with open(info_output, "w") as file:
                 yaml.dump(info_dict, file, sort_keys=False)
@@ -1202,11 +1199,11 @@ def collect_stability_series(
 
     detectors = det_info["detectors"]
     str_chns = det_info["str_chns"]
-    usability_map_file = os.path.join(
-        output_folder,
-        period,
-        current_run,
-        f"l200-{period}-{current_run}-qcp_summary.yaml",
+    usability_map_file = str(
+        Path(output_folder)
+        / period
+        / current_run
+        / f"l200-{period}-{current_run}-qcp_summary.yaml"
     )
     output = utils.load_yaml_or_default(usability_map_file, detectors)
 
@@ -1217,7 +1214,7 @@ def collect_stability_series(
     )
 
     def no_pulser(channel, period):
-        return bool(eval(flag_expr)) if flag_expr else False  # noqa: S307
+        return bool(eval(flag_expr)) if flag_expr else False
 
     results = {}
     gain_shift_series = {}
@@ -1530,10 +1527,10 @@ def read_spms_noise(prod_path: str, period: str, run: str, data_type: str = "phy
         Cycle timestamp (``datetime`` index) x SiPM name, float32; empty when
         the run has no par files.
     """
-    folder = os.path.join(prod_path, "generated/par/dsp", data_type, period, run)
+    folder = str(Path(prod_path) / "generated/par/dsp" / data_type / period / run)
     rows = {}
-    for path in sorted(glob.glob(os.path.join(folder, "*-par_dsp_spms.yaml"))):
-        key = os.path.basename(path).split("-")[4]
+    for path in sorted(glob.glob(str(Path(folder) / "*-par_dsp_spms.yaml"))):
+        key = Path(path).name.split("-")[4]
         with open(path) as f:
             pars = yaml.load(f, Loader=yaml.CLoader) or {}
         rows[pd.Timestamp(key, tz="UTC")] = {
@@ -1589,14 +1586,14 @@ def _spms_overrides_in_force(overrides: str, validity: str, start_key: str) -> l
 
     loaded = []
     for path in in_force:
-        full = os.path.join(overrides, path)
-        if not os.path.exists(full):
+        full = str(Path(overrides) / path)
+        if not Path(full).exists():
             # the file names carry a T% wildcard for the validity timestamp:
             # glob the entry's own basename pattern (newest match wins), so an
             # unrelated yaml sharing the directory is never picked up
-            pattern = os.path.basename(path).replace("T%", "*")
+            pattern = Path(path).name.replace("T%", "*")
             candidates = sorted(
-                glob.glob(os.path.join(overrides, os.path.dirname(path), pattern))
+                glob.glob(str(Path(overrides) / str(Path(path).parent) / pattern))
             )
             if not candidates:
                 continue
@@ -1638,9 +1635,9 @@ def read_spms_calibration(prod_path: str, start_key: str) -> pd.DataFrame:
         so the newest file in force says nothing about most of them); empty
         when no override resolves.
     """
-    overrides = os.path.join(prod_path, "inputs/dataprod/overrides/hit")
-    validity = os.path.join(overrides, "validity.yaml")
-    if not os.path.exists(validity):
+    overrides = str(Path(prod_path) / "inputs/dataprod/overrides/hit")
+    validity = str(Path(overrides) / "validity.yaml")
+    if not Path(validity).exists():
         return pd.DataFrame()
     # an override touches only the channels it lists, so a run's SiPMs are
     # calibrated by a spread of files: merge them in order (deeply -- a later
@@ -1708,7 +1705,7 @@ def write_spms_production_keys(
     if start_key is not None:
         try:
             calib = read_spms_calibration(prod_path, start_key)
-        except Exception as exc:  # noqa: BLE001 - auxiliary key, never fatal
+        except Exception as exc:
             # the geds output of this task is already complete; a malformed
             # override tree must not fail the run (it did, with rc=1, on p16/p18)
             utils.logger.warning(
@@ -1769,16 +1766,14 @@ def check_spms_thresholds(
         ``{sipm: {metric: verdict}}`` for the SiPMs graded (plus ``LAr`` for
         the run-level veto fractions); empty when nothing could be read.
     """
-    run_dir = os.path.join(output_folder, period, run)
-    contract = os.path.join(
-        run_dir, f"l200-{period}-{run}-{data_type}-spms-schema2.hdf"
-    )
-    qcp_path = os.path.join(run_dir, f"l200-{period}-{run}-qcp_summary.yaml")
+    run_dir = str(Path(output_folder) / period / run)
+    contract = str(Path(run_dir) / f"l200-{period}-{run}-{data_type}-spms-schema2.hdf")
+    qcp_path = str(Path(run_dir) / f"l200-{period}-{run}-qcp_summary.yaml")
     output = utils.load_yaml_or_default(qcp_path, {})
     graded = {}
-    if not os.path.isfile(contract):
+    if not Path(contract).is_file():
         utils.logger.debug("no spms contract at %s; no SiPM thresholds", contract)
-    for key in SPMS_THRESHOLD_KEYS if os.path.isfile(contract) else []:
+    for key in SPMS_THRESHOLD_KEYS if Path(contract).is_file() else []:
         info = utils.MTG_PLOT_INFO[key]
         flag, _, param = key.partition("_")
         try:
@@ -1895,7 +1890,7 @@ def read_lar_events(files: list) -> tuple:
         try:
             evt = lh5.read_as("evt/", path, library="ak", field_mask=_LAR_EVT_FIELDS)
         except (KeyError, ValueError, OSError) as exc:
-            utils.logger.debug("skipping evt file %s: %s", os.path.basename(path), exc)
+            utils.logger.debug("skipping evt file %s: %s", Path(path).name, exc)
             continue
         if len(evt) == 0:
             continue
@@ -2017,10 +2012,13 @@ def write_lar_summary(
     occupancy.index.name = "datetime"
     written.append(contract_writer.write_frame(path, f"lar_occupancy/{run}", occupancy))
 
-    spms_contract = os.path.join(
-        output_folder, period, run, f"l200-{period}-{run}-{data_type}-spms-schema2.hdf"
+    spms_contract = str(
+        Path(output_folder)
+        / period
+        / run
+        / f"l200-{period}-{run}-{data_type}-spms-schema2.hdf"
     )
-    if os.path.isfile(spms_contract):
+    if Path(spms_contract).is_file():
         vetoed = events[events["is_phys"] & events["vetoed"]]
         for column, param, unit in [
             ("energy_sum", "LarEnergySum", "p.e."),
@@ -2103,14 +2101,14 @@ def read_spe_spectra(
 
     from .processing import binning
 
-    evt_by_key = {os.path.basename(f).split("-")[4]: f for f in evt_files}
+    evt_by_key = {Path(f).name.split("-")[4]: f for f in evt_files}
     hists = {
         flag: binning.empty_distribution_2d(SPE_BINS, SPE_RANGE)
         for flag in ("IsBsln", "IsPhysics")
     }
     channels = None
     for path in hit_files:
-        key = os.path.basename(path).split("-")[4]
+        key = Path(path).name.split("-")[4]
         evt_path = evt_by_key.get(key)
         if evt_path is None:
             utils.logger.debug("no evt file for %s; skipping SPE fill", key)
@@ -2190,10 +2188,13 @@ def write_spe_spectrum(
         Keys written (``hist/<flag>_EnergyInPe_dist2d``); empty when the run
         has no spms contract file or no pulses.
     """
-    contract = os.path.join(
-        output_folder, period, run, f"l200-{period}-{run}-{data_type}-spms-schema2.hdf"
+    contract = str(
+        Path(output_folder)
+        / period
+        / run
+        / f"l200-{period}-{run}-{data_type}-spms-schema2.hdf"
     )
-    if not os.path.isfile(contract):
+    if not Path(contract).is_file():
         utils.logger.warning("no spms contract at %s; no SPE spectra", contract)
         return []
     written = []
@@ -2436,10 +2437,13 @@ def write_muon_summary(
         )
     )
 
-    contract = os.path.join(
-        output_folder, period, run, f"l200-{period}-{run}-{data_type}-pmts-schema2.hdf"
+    contract = str(
+        Path(output_folder)
+        / period
+        / run
+        / f"l200-{period}-{run}-{data_type}-pmts-schema2.hdf"
     )
-    if os.path.isfile(contract):
+    if Path(contract).is_file():
         if spectrum.sum():
             written.append(
                 contract_writer.write_distribution_2d(

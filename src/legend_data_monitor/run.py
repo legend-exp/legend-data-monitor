@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import argparse
-import os
 import sys
+from pathlib import Path
 
 import yaml
 
@@ -199,13 +199,13 @@ def auto_prod_cli(args):
     plot_config = args.plot_config
 
     # get the production config file
-    prod_config_file = os.path.join(prod_path, "config.yaml")
+    prod_config_file = str(Path(prod_path) / "config.yaml")
     with open(prod_config_file) as f:
         prod_config = yaml.load(f, Loader=yaml.CLoader)
 
     # get the filelist file path
     folder_filelists = prod_config["setups"]["l200"]["paths"]["tmp_filelists"][3:]
-    file_keys = os.path.join(prod_path, folder_filelists, args.filekeylist)
+    file_keys = str(Path(prod_path) / folder_filelists / args.filekeylist)
 
     legend_data_monitor.core.auto_control_plots(
         plot_config, file_keys, prod_path, prod_config
