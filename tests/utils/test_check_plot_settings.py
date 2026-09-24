@@ -1,6 +1,6 @@
 import pytest
 
-from legend_data_monitor import plot_styles, plotting
+from legend_data_monitor import errors, plot_styles, plotting
 from legend_data_monitor.utils import check_plot_settings
 
 
@@ -28,7 +28,7 @@ def test_check_plot_settings_valid_config():
 def test_check_plot_settings_missing_subsystems(caplog):
     # Config with no subsystems
     conf = {}
-    with pytest.raises(SystemExit):
+    with pytest.raises(errors.ConfigError):
         check_plot_settings(conf)
 
 

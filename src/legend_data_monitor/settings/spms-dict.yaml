@@ -1,0 +1,67 @@
+# SiPM (spms) plot configuration used by auto_run alongside geds-dict.yaml.
+# First pass (2026-08-21): channel-health parameters only. The ragged hit
+# fields are reduced to per-event scalars at load (spms-reductions.yaml);
+# FCbsln events are the forced-trigger (random) sample.
+spms:
+  "Baseline mode (dsp/wf_mode) in forced-trigger events":
+    parameters: wf_mode
+    event_type: FCbsln
+    plot_structure: per barrel
+    resampled: only
+    plot_style: vs time
+    variation: true
+    time_window: 10min
+
+  "Current noise FWHM (dsp/curr_fwhm) in forced-trigger events":
+    parameters: curr_fwhm
+    event_type: FCbsln
+    plot_structure: per barrel
+    resampled: only
+    plot_style: vs time
+    variation: false
+    time_window: 10min
+
+  "Waveform lower HWHM (dsp/wf_lower_hwhm) in forced-trigger events":
+    parameters: wf_lower_hwhm
+    event_type: FCbsln
+    plot_structure: per barrel
+    resampled: only
+    plot_style: vs time
+    variation: false
+    time_window: 10min
+
+  "Pulses per window (hit/n_pulses) in forced-trigger events":
+    parameters: n_pulses
+    event_type: FCbsln
+    plot_structure: per barrel
+    resampled: only
+    plot_style: vs time
+    variation: false
+    time_window: 10min
+
+  "Light per event (hit/pe_sum) in physics events":
+    parameters: pe_sum
+    event_type: phy
+    plot_structure: per barrel
+    resampled: only
+    plot_style: vs time
+    variation: false
+    time_window: 10min
+
+  "Largest pulse per event (hit/pe_max) in physics events":
+    parameters: pe_max
+    event_type: phy
+    plot_structure: per barrel
+    resampled: only
+    plot_style: vs time
+    variation: false
+    time_window: 10min
+
+  "Noisy waveform fraction (hit/has_any_noise) in all events":
+    parameters: has_any_noise
+    event_type: all
+    plot_structure: per barrel
+    resampled: only
+    plot_style: vs time
+    variation: false
+    time_window: 10min

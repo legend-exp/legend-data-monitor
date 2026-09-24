@@ -54,8 +54,7 @@ Output files (auto_run)
 
 When running the code via the executable ``auto_run``, the code will automatically produce copies of the original HDF file but resampling the time content by 10 min or 1 hour; these resampled files will speed up the loading step when plots will be uploaded on the Dashboard.
 A YAML file for quick access on plotting info is also automatically produced in output.
-Monitoring shelve (and pdf) period-based files will be stored under ``<path2>/<ref>/generated/plt/hit/phy/<period>/mtg/``.
-Additional monitoring files produced for each run will be stored under ``<path2>/<ref>/generated/plt/hit/phy/<period>/<run>/mtg/``.
+The numbers behind every monitoring figure are published to the period contract file ``l200-<period>-<datatype>-monitoring.hdf`` under ``<path2>/<ref>/generated/plt/hit/phy/<period>/``; the figures themselves are drawn from it (PDFs under ``.../<period>[/<run>]/mtg/pdf/``) and can be regenerated at any time with ``legend-data-monitor plot_run``.
 
 Monitoring plots are stored to reflect the period-based and run-base structure.
 The structure will look like:

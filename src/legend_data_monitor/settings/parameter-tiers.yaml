@@ -96,3 +96,21 @@ is_positive_polarity_candidate: hit
 is_highly_positive_polarity_candidate: hit
 geds/quality/is_bb_like: evt
 geds/quality/is_not_bb_like/is_delayed_discharge: evt
+# spms (SiPM) fields; n_pulses/pe_sum/pe_max/first_trigger_ns are reductions
+# of the ragged hit fields (see spms-reductions.yaml)
+wf_mode: dsp
+curr_fwhm: dsp
+wf_lower_hwhm: dsp
+wf_min_small: dsp
+has_any_noise: hit
+n_pulses: hit
+pe_sum: hit
+pe_max: hit
+first_trigger_ns: hit
+# pmts (muon veto) dsp fields; sparse stream, one row per muon-DAQ trigger
+bl_sig: dsp
+pulseHeight: dsp
+rawPulseHeight: dsp
+max_peak_height: dsp
+mean_peak_height: dsp
+containsPulse: dsp

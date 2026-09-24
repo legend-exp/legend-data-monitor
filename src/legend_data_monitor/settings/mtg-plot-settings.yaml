@@ -6,6 +6,7 @@ TrapemaxCtcCal:
     - b
   percentage: true
   title: "pulser_stab"
+  unit: "keV"
   limits:
     - null
     - null
@@ -18,6 +19,7 @@ Trapemax:
     - b
   percentage: true
   title: "pulser_stab_uncalib"
+  unit: "%"
   limits:
     - null
     - null
@@ -30,6 +32,7 @@ Baseline:
     - firebrick
   percentage: true
   title: "baseln_stab"
+  unit: "%"
   limits:
     - -10
     - 10
@@ -42,6 +45,7 @@ BlStd:
     - saddlebrown
   percentage: false
   title: "baseln_spike"
+  unit: "ADC"
   limits:
     - null
     - 50
@@ -54,24 +58,89 @@ FEP_variation:
     - saddlebrown
   percentage: false
   title: "FEP_gain_stab"
+  unit: "keV"
   limits:
     - null
     - null
 
 tot_discharge_dead_time:
   title: "tot_discharge_dead_time"
+  unit: "%"
   limits:
     - null
     - 0.02
 
 IsDischarge:
   title: "discharge_rate"
+  unit: "mHz"
   limits:
     - null
     - 5
 
 IsSaturated:
   title: "saturated_rate"
+  unit: "mHz"
   limits:
     - null
     - 5
+
+# SiPM channel-health checks, evaluated on the 60min bins of the spms contract
+# (monitoring.check_spms_thresholds). Bands from the first full run
+# (p22/r012, 2026-08-21): hourly wf_mode variation stayed within +-0.02 %,
+# curr_fwhm variation within +-2.6 %, forced-trigger pulses per 100 us window
+# 0.05-0.7 with one SiPM near 0, has_any_noise fraction < 1 % except one SiPM
+# at 6 %.
+IsBsln_WfMode_var:
+  title: "spms_baseln_stab"
+  unit: "%"
+  limits:
+    - -0.05
+    - 0.05
+
+IsBsln_CurrFwhm_var:
+  title: "spms_noise_stab"
+  unit: "%"
+  limits:
+    - -5
+    - 5
+
+IsBsln_NPulses:
+  title: "spms_dark_rate"
+  unit: "per window"
+  rolling: 6  # hours averaged before grading: ~7 pulses/h on the quietest SiPM
+  limits:
+    - 0.002  # below one pulse per hour of forced triggers: a silent SiPM
+    - 1.0
+
+All_HasAnyNoise:
+  title: "spms_noisy_frac"
+  unit: "fraction"
+  limits:
+    - null
+    - 0.05
+
+# LAr veto checks on the period-file keys written by lar_summary (p22/r012:
+# veto fraction 0.73-0.85 hourly, accidental 0.02-0.11, occupancy 0.12-0.22)
+lar_veto/veto_frac:
+  title: "lar_veto_frac"
+  unit: "fraction"
+  rolling: 6
+  limits:
+    - 0.6
+    - 0.95
+
+lar_veto/accidental_frac:
+  title: "lar_accidental_frac"
+  unit: "fraction"
+  rolling: 6
+  limits:
+    - null
+    - 0.2
+
+lar_occupancy:
+  title: "spms_occupancy"
+  unit: "fraction"
+  rolling: 6
+  limits:
+    - 0.02
+    - null

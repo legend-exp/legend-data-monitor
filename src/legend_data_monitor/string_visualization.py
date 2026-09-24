@@ -11,7 +11,7 @@ import seaborn as sns
 from matplotlib.backends.backend_pdf import PdfPages
 from pandas import DataFrame, Timedelta, concat
 
-from . import plotting, utils
+from . import errors, plotting, utils
 
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -57,11 +57,9 @@ def status_plot(subsystem, data_analysis: DataFrame, plot_info: dict, pdf: PdfPa
         utils.logger.debug("... there are no thresholds to check for. We skip this!")
         return
 
-    new_dataframe = DataFrame()
+    summary_rows = []
     # loop over individual channels (otherwise, the problematic timestamps apply to all detectors, even the OK ones) and create a summary dataframe
-    for channel in data_analysis["channel"].unique():
-        # select one block of DataFrame
-        data_per_ch = data_analysis.loc[data_analysis["channel"] == channel]
+    for channel, data_per_ch in data_analysis.groupby("channel", sort=False):
         # let's save some info (they could be lost after resampling, or wrongly averaged - this keeps us safe from similar bugs)
         name = (data_per_ch["name"].unique())[0]
         location = (data_per_ch["location"].unique())[0]
@@ -120,12 +118,8 @@ def status_plot(subsystem, data_analysis: DataFrame, plot_info: dict, pdf: PdfPa
                         ].values,
                     )
 
-            # create a new row in the new dataframe with essential info (ie: channel, name, location, position, status)
-            new_row = [[channel, name, location, position, status]]
-            new_df = DataFrame(
-                new_row, columns=["channel", "name", "location", "position", "status"]
-            )
-            new_dataframe = concat([new_dataframe, new_df], ignore_index=True, axis=0)
+            # collect essential info (ie: channel, name, location, position, status); one dataframe is built after the loop
+            summary_rows.append([channel, name, location, position, status])
 
         # print message with timestamps where the detector is out of threshold
         if len(out_thr_datetimes) != 0:
@@ -140,12 +134,17 @@ def status_plot(subsystem, data_analysis: DataFrame, plot_info: dict, pdf: PdfPa
                 out_thr_datetimes,
             )
 
+    new_dataframe = DataFrame(
+        summary_rows, columns=["channel", "name", "location", "position", "status"]
+    )
+
     # --------------------------------------------------------------------------------------------------------------------------
     # include OFF channels and see what is their status
     off_channels = subsystem.channel_map[subsystem.channel_map["status"] == "off"][
         "channel"
     ].unique()
 
+    off_rows = []
     if len(off_channels) != 0:
         for channel in off_channels:
             # check if the channel is already in the status dataframe; if not, add a new row for it
@@ -167,16 +166,21 @@ def status_plot(subsystem, data_analysis: DataFrame, plot_info: dict, pdf: PdfPa
                     subsystem.channel_map, channel
                 )
 
-                # define new row for not-ON detectors
-                new_row = [[channel, name, location, position, status]]
-                new_df = DataFrame(
-                    new_row,
+                # collect new row for not-ON detectors; concatenated once below
+                off_rows.append([channel, name, location, position, status])
+
+    if off_rows:
+        new_dataframe = concat(
+            [
+                new_dataframe,
+                DataFrame(
+                    off_rows,
                     columns=["channel", "name", "location", "position", "status"],
-                )
-                # add the new row to the dataframe (order?)
-                new_dataframe = concat(
-                    [new_dataframe, new_df], ignore_index=True, axis=0
-                )
+                ),
+            ],
+            ignore_index=True,
+            axis=0,
+        )
 
     # --------------------------------------------------------------------------------------------------------------------------
     # sort the dataframe according to channel ID number
@@ -286,7 +290,7 @@ def exposure_plot(subsystem, data_analysis: DataFrame, plot_info: dict, pdf: Pdf
         utils.logger.error(
             "\033[91mPlotting the summary is not available for the spms.\nTry again!\033[0m"
         )
-        exit()
+        raise errors.MonitoringError("exposure_plot failed (see log for details)")
 
     # cbar unit (either 'kg d', if exposure is less than 0.1 kg yr, or 'kg yr'); note: exposure, at this point, is evaluated as 'kg yr'
     if data_analysis["exposure"].max() < 0.1:
@@ -317,6 +321,7 @@ def exposure_plot(subsystem, data_analysis: DataFrame, plot_info: dict, pdf: Pdf
         "channel"
     ].unique()
 
+    extra_rows = []
     if len(off_channels) != 0:
         for channel in off_channels:
             # check if the channel is already in the exposure dataframe; if not, add a new row for it
@@ -335,22 +340,9 @@ def exposure_plot(subsystem, data_analysis: DataFrame, plot_info: dict, pdf: Pdf
                     subsystem.channel_map, channel
                 )
 
-                # define new row for not-ON detectors
-                new_row = [[channel, name, location, position, exposure, livetime_in_s]]
-                new_df = DataFrame(
-                    new_row,
-                    columns=[
-                        "channel",
-                        "name",
-                        "location",
-                        "position",
-                        "exposure",
-                        "livetime_in_s",
-                    ],
-                )
-                # add the new row to the dataframe
-                data_analysis = concat(
-                    [data_analysis, new_df], ignore_index=True, axis=0
+                # collect new row for not-ON detectors; concatenated once below
+                extra_rows.append(
+                    [channel, name, location, position, exposure, livetime_in_s]
                 )
 
     # -------------------------------------------------------------------------------
@@ -371,21 +363,28 @@ def exposure_plot(subsystem, data_analysis: DataFrame, plot_info: dict, pdf: Pdf
         # get position within the array + other necessary info
         name, location, position = get_info_from_channel(subsystem.channel_map, channel)
 
-        # define new row for not-ON detectors
-        new_row = [[channel, name, location, position, exposure, livetime_in_s]]
-        new_df = DataFrame(
-            new_row,
-            columns=[
-                "channel",
-                "name",
-                "location",
-                "position",
-                "exposure",
-                "livetime_in_s",
+        # collect new row; concatenated once below
+        extra_rows.append([channel, name, location, position, exposure, livetime_in_s])
+
+    if extra_rows:
+        data_analysis = concat(
+            [
+                data_analysis,
+                DataFrame(
+                    extra_rows,
+                    columns=[
+                        "channel",
+                        "name",
+                        "location",
+                        "position",
+                        "exposure",
+                        "livetime_in_s",
+                    ],
+                ),
             ],
+            ignore_index=True,
+            axis=0,
         )
-        # add the new row to the dataframe
-        data_analysis = concat([data_analysis, new_df], ignore_index=True, axis=0)
 
     # values to plot
     result = data_analysis.pivot(

@@ -3,18 +3,20 @@ from unittest.mock import patch
 import numpy as np
 import pytest
 
-from legend_data_monitor.monitoring import get_calib_pars
+from legend_data_monitor.loading.calib_files import get_calib_pars
 
 
 @pytest.fixture
 def mock_helpers():
     with (
-        patch("legend_data_monitor.monitoring.add_calibration_runs") as mock_add_calib,
         patch(
-            "legend_data_monitor.monitoring.utils.get_tiers_pars_folders"
+            "legend_data_monitor.loading.calib_files.add_calibration_runs"
+        ) as mock_add_calib,
+        patch(
+            "legend_data_monitor.loading.calib_files.utils.get_tiers_pars_folders"
         ) as mock_get_tiers,
         patch(
-            "legend_data_monitor.monitoring.get_calib_data_dict"
+            "legend_data_monitor.loading.calib_files.get_calib_data_dict"
         ) as mock_get_calib_data,
     ):
 
@@ -32,6 +34,7 @@ def mock_helpers():
             data_type,
             key_result,
             fit,
+            pulser_rawid=None,
         ):
             calib_data["fep"].append(2614 + run)
             calib_data["fep_err"].append(0.1)

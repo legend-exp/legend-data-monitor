@@ -1,15 +1,13 @@
+import copy
 import glob
 import importlib.resources
 import json
 import logging
-import os
 import re
-import smtplib
-import sys
 from collections import defaultdict
 from datetime import datetime, timedelta
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
+from functools import cache
+from pathlib import Path
 
 import h5py
 import lh5
@@ -19,6 +17,8 @@ import yaml
 from dbetto import TextDB
 from legendmeta import LegendMetadata
 from pandas import DataFrame
+
+from . import errors, issues
 
 # -------------------------------------------------------------------------
 
@@ -37,81 +37,30 @@ stream_handler.setFormatter(formatter)
 logger.addHandler(stream_handler)
 
 # ------------------------------------------------------------------------- SOME DICTIONARIES LOADING/DEFINITION
+# moved to config/settings.py (Phase 4); re-exported here for compatibility
+from .config.settings import (  # noqa: E402,F401
+    CALIB_RUNS,
+    COLUMNS_TO_LOAD,
+    EXPERIMENT,
+    FLAGS_RENAME,
+    HDF_COMPRESSION,
+    IGNORE_KEYS,
+    MTG_PLOT_INFO,
+    NO_DOWNCAST_COLUMNS,
+    NO_PULS_DETS,
+    PARAMETER_TIERS,
+    PERIOD_TO_DB,
+    PLOT_INFO,
+    QC_PARAMETERS,
+    REMOVE_DETS,
+    REMOVE_KEYS,
+    SC_PARAMETERS,
+    SPECIAL_PARAMETERS,
+    SPECIAL_SYSTEMS,
+    SPMS_REDUCTIONS,
+)
 
 pkg = importlib.resources.files("legend_data_monitor")
-
-# load dictionary with plot info (= units, thresholds, label, ...)
-with open(pkg / "settings" / "par-settings.yaml") as f:
-    PLOT_INFO = yaml.load(f, Loader=yaml.CLoader)
-
-# load dictionary with plot info for Dashboard plots
-with open(pkg / "settings" / "mtg-plot-settings.yaml") as f:
-    MTG_PLOT_INFO = yaml.load(f, Loader=yaml.CLoader)
-
-# which parameter belongs to which tier
-with open(pkg / "settings" / "parameter-tiers.yaml") as f:
-    PARAMETER_TIERS = yaml.load(f, Loader=yaml.CLoader)
-
-# which lh5 parameters are needed to be loaded from lh5 to calculate them
-with open(pkg / "settings" / "special-parameters.yaml") as f:
-    SPECIAL_PARAMETERS = yaml.load(f, Loader=yaml.CLoader)
-
-# flag renames for evt type
-with open(pkg / "settings" / "flags.yaml") as f:
-    FLAGS_RENAME = yaml.load(f, Loader=yaml.CLoader)
-
-# list of detectors that have no pulser signal in a given period
-with open(pkg / "settings" / "no-pulser-dets.yaml") as f:
-    NO_PULS_DETS = yaml.load(f, Loader=yaml.CLoader)
-
-# dictionary of keys to ignore
-with open(pkg / "settings" / "ignore-keys.yaml") as f:
-    IGNORE_KEYS = yaml.load(f, Loader=yaml.CLoader)
-
-# convert all to lists for convenience
-for param in SPECIAL_PARAMETERS:
-    if isinstance(SPECIAL_PARAMETERS[param], str):
-        SPECIAL_PARAMETERS[param] = [SPECIAL_PARAMETERS[param]]
-
-# load SC params and corresponding flags to get specific parameters from big dfs that are stored in the database
-with open(pkg / "settings" / "SC-params.yaml") as f:
-    SC_PARAMETERS = yaml.load(f, Loader=yaml.CLoader)
-
-# load final calibration run for each period
-with open(pkg / "settings" / "final-calibrations.yaml") as f:
-    CALIB_RUNS = yaml.load(f, Loader=yaml.CLoader)
-
-# load list of columns to load for a dataframe
-COLUMNS_TO_LOAD = [
-    "name",
-    "location",
-    "channel",
-    "position",
-    "cc4_id",
-    "cc4_channel",
-    "daq_crate",
-    "daq_card",
-    "HV_card",
-    "HV_channel",
-    "det_type",
-]
-
-# map position/location for special systems
-SPECIAL_SYSTEMS = {"pulser": 0, "pulser01ana": -1, "FCbsln": -2, "muon": -3}
-
-# periods division for SC database access
-PERIOD_TO_DB = {
-    "p01": "scdbL60",
-    **{f"p{str(i).zfill(2)}": "scdbL140" for i in range(2, 14)},
-}
-
-# dictionary with timestamps to remove for specific channels
-with open(pkg / "settings" / "remove-keys.yaml") as f:
-    REMOVE_KEYS = yaml.load(f, Loader=yaml.CLoader)["remove-keys"]
-
-# dictionary with detectors to remove
-with open(pkg / "settings" / "remove-dets.yaml") as f:
-    REMOVE_DETS = yaml.load(f, Loader=yaml.CLoader)["remove-dets"]
 
 # -------------------------------------------------------------------------
 # Subsystem related functions (for getting channel map & status)
@@ -119,20 +68,20 @@ with open(pkg / "settings" / "remove-dets.yaml") as f:
 
 
 def get_valid_path(base_path):
-    if os.path.exists(base_path):
+    if Path(base_path).exists():
         return base_path
 
     fallback_subdirs = ["psp", "hit", "pht", "pet", "evt", "skm"]
     for fallback_subdir in fallback_subdirs:
         fallback_path = base_path.replace("dsp", fallback_subdir)
 
-        if os.path.exists(fallback_path):
+        if Path(fallback_path).exists():
             return fallback_path
 
     logger.warning(
         "\033[93mThe path of dsp/hit/evt/psp/pht/pet/skm files is not valid, check config['dataset'] and try again.\033[0m",
     )
-    sys.exit()
+    raise errors.ConfigError("get_valid_path failed (see log for details)")
 
 
 def get_query_times(**kwargs):
@@ -200,20 +149,14 @@ def get_query_times(**kwargs):
         # --- get dsp filelist of this run
         # if setup= keyword was used, get dict; otherwise kwargs is already the dict we need
         path_info = kwargs["dataset"] if "dataset" in kwargs else kwargs
-        path = os.path.join(path_info["path"], path_info["version"])
+        path = str(Path(path_info["path"]) / path_info["version"])
         tiers, _ = get_tiers_pars_folders(path)
 
-        first_glob_path = os.path.join(
-            tiers[0],
-            path_info["type"],
-            path_info["period"],
-            first_run,
+        first_glob_path = str(
+            Path(tiers[0]) / path_info["type"] / path_info["period"] / first_run
         )
-        last_glob_path = os.path.join(
-            tiers[0],
-            path_info["type"],
-            path_info["period"],
-            last_run,
+        last_glob_path = str(
+            Path(tiers[0]) / path_info["type"] / path_info["period"] / last_run
         )
 
         first_glob_path = get_valid_path(first_glob_path)
@@ -222,14 +165,8 @@ def get_query_times(**kwargs):
         # format to search /path_to_prod-ref[/vXX.XX]/generated/tier/dsp/phy/pXX/rXXX (version 'vXX.XX' might not be there).
         # NOTICE that we fixed the tier, otherwise it picks the last one it finds (eg tcm).
         # NOTICE that this is PERIOD SPECIFIC (unlikely we're gonna inspect two periods together, so we fix it)
-        first_glob_path = os.path.join(
-            first_glob_path,
-            "*.lh5",
-        )
-        last_glob_path = os.path.join(
-            last_glob_path,
-            "*.lh5",
-        )
+        first_glob_path = str(Path(first_glob_path) / "*.lh5")
+        last_glob_path = str(Path(last_glob_path) / "*.lh5")
         first_dsp_files = glob.glob(first_glob_path)
         last_dsp_files = glob.glob(last_glob_path)
         # find earliest
@@ -341,7 +278,9 @@ def get_query_timerange(**kwargs):
         for run in runs:
             if not isinstance(run, int):
                 logger.error("\033[91mInvalid run format!\033[0m")
-                sys.exit()
+                raise errors.ConfigError(
+                    "get_query_timerange failed (see log for details)"
+                )
 
         # format rXXX for DataLoader
         time_range = {"run": []}
@@ -427,14 +366,14 @@ def dataset_validity_check(data_info: dict):
         "tst",
         "xtc",
     ]
-    if not data_info["type"] in data_types:
+    if data_info["type"] not in data_types:
         logger.error("\033[91mInvalid data type provided!\033[0m")
         return
 
     if "path" not in data_info:
         logger.error("\033[91mProvide path to data!\033[0m")
         return
-    if not os.path.exists(data_info["path"]):
+    if not Path(data_info["path"]).exists():
         logger.error("\033[91mThe data path you provided does not exist!\033[0m")
         return
 
@@ -444,7 +383,7 @@ def dataset_validity_check(data_info: dict):
         )
         return
 
-    if not os.path.exists(os.path.join(data_info["path"], data_info["version"])):
+    if not Path(str(Path(data_info["path"]) / data_info["version"])).exists():
         logger.error("\033[91mProvide valid processing version!\033[0m")
         return
 
@@ -478,7 +417,7 @@ def check_scdb_settings(conf: dict) -> bool:
         logger.warning(
             "\033[93mThere is no 'slow_control' key in the config file. Try again if you want to retrieve slow control data.\033[0m"
         )
-        sys.exit()
+        raise errors.ConfigError("check_scdb_settings failed (see log for details)")
     # there is "slow_control" key, but ...
     else:
         # ... there is no "parameters" key
@@ -486,7 +425,7 @@ def check_scdb_settings(conf: dict) -> bool:
             logger.warning(
                 "\033[93mThere is no 'parameters' key in config 'slow_control' entry. Try again if you want to retrieve slow control data.\033[0m"
             )
-            sys.exit()
+            raise errors.ConfigError("check_scdb_settings failed (see log for details)")
         # ... there is "parameters" key, but ...
         else:
             # ... it is not a string or a list (of strings)
@@ -496,7 +435,9 @@ def check_scdb_settings(conf: dict) -> bool:
                 logger.error(
                     "\033[91mSlow control parameters must be a string or a list of strings. Try again if you want to retrieve slow control data.\033[0m"
                 )
-                sys.exit()
+                raise errors.ConfigError(
+                    "check_scdb_settings failed (see log for details)"
+                )
 
 
 def check_plot_settings(conf: dict) -> bool:
@@ -511,7 +452,7 @@ def check_plot_settings(conf: dict) -> bool:
         logger.error(
             "\033[91mThere is no 'subsystems' key in the config file. Try again if you want to plot data.\033[0m"
         )
-        sys.exit()
+        raise errors.ConfigError("check_plot_settings failed (see log for details)")
 
     for subsys in conf["subsystems"]:
         for plot in conf["subsystems"][subsys]:
@@ -524,12 +465,7 @@ def check_plot_settings(conf: dict) -> bool:
             # check if all necessary fields for param settings were provided
             for field in options:
                 # when plot_structure is summary or you simply want to load QCs, plot_style is not needed...
-                if plot_settings["parameters"] in (
-                    "exposure",
-                    "quality_cuts",
-                    "geds/quality/is_not_bb_like/is_delayed_discharge",
-                    "geds/quality/is_bb_like",
-                ):
+                if plot_settings["parameters"] in {"exposure"} | QC_PARAMETERS:
                     continue
 
                 # ...otherwise, it is required
@@ -575,15 +511,23 @@ def check_plot_settings(conf: dict) -> bool:
                 return False
 
             # ToDo: neater way to skip the whole loop but still do special checks; break? ugly...
-            if plot_settings["parameters"] in (
-                "exposure",
-                "quality_cuts",
-                "geds/quality/is_not_bb_like/is_delayed_discharge",
-                "geds/quality/is_bb_like",
-            ):
+            if plot_settings["parameters"] in {"exposure"} | QC_PARAMETERS:
                 continue
 
             # other non-exposure checks
+
+            # plot structures are subsystem-specific
+            structure = plot_settings["plot_structure"]
+            spms_only = structure in ("per barrel", "per fiber")
+            geds_only = structure in ("per cc4", "array")
+            if (subsys == "spms") != spms_only and (spms_only or geds_only):
+                logger.error(
+                    "\033[91mPlot structure '%s' is not available for %s (plot '%s')\033[0m",
+                    structure,
+                    subsys,
+                    plot,
+                )
+                return False
 
             # if vs time was provided, need time window
             if (
@@ -624,17 +568,17 @@ def make_output_paths(config: dict, user_time_range: dict) -> str:
         return
 
     # create subfolders for the fixed path
-    version_dir = os.path.join(config["output"], config["dataset"]["version"])
-    generated_dir = os.path.join(version_dir, "generated")
-    plt_dir = os.path.join(generated_dir, "plt")
-    hit_dir = os.path.join(plt_dir, "hit")
+    version_dir = str(Path(config["output"]) / config["dataset"]["version"])
+    generated_dir = str(Path(version_dir) / "generated")
+    plt_dir = str(Path(generated_dir) / "plt")
+    hit_dir = str(Path(plt_dir) / "hit")
     # 'phy' or 'cal' if one of the two is specified; if both are specified, store data in 'cal_phy/'
     if isinstance(config["dataset"]["type"], list):
-        type_dir = os.path.join(hit_dir, "cal_phy")
+        type_dir = str(Path(hit_dir) / "cal_phy")
     else:
-        type_dir = os.path.join(hit_dir, config["dataset"]["type"])
+        type_dir = str(Path(hit_dir) / config["dataset"]["type"])
     # period info
-    period_dir = os.path.join(type_dir, config["dataset"]["period"]) + "/"
+    period_dir = str(Path(type_dir) / config["dataset"]["period"]) + "/"
 
     # output subfolders
     make_dir(version_dir)
@@ -650,8 +594,8 @@ def make_output_paths(config: dict, user_time_range: dict) -> str:
 def make_dir(dir_path):
     """Check if directory exists, and if not, make it."""
     message = "Output directory " + dir_path
-    if not os.path.isdir(dir_path):
-        os.mkdir(dir_path)
+    if not Path(dir_path).is_dir():
+        Path(dir_path).mkdir()
         message += " (created)"
     logger.info(message)
 
@@ -725,8 +669,10 @@ def get_timestamp(filename: str):
 def get_run_name(config: dict, user_time_range: dict) -> str:
     """Get the run ID given start/end timestamps. If the timestamps run over multiple run IDs, a list of runs is retrieved, out of which only the first element is returned."""
     # this is the root directory to search in the timestamps
-    main_folder = os.path.join(
-        config["dataset"]["path"], config["dataset"]["version"], "generated/tier"
+    main_folder = str(
+        Path(config["dataset"]["path"])
+        / config["dataset"]["version"]
+        / "generated/tier"
     )
 
     # start/end timestamps of the selected time range of interest
@@ -744,10 +690,10 @@ def get_run_name(config: dict, user_time_range: dict) -> str:
     # start to look for timestamps inside subfolders
     def search_for_timestamp(folder):
         run_id = ""
-        for idx, subfolder in enumerate(os.listdir(folder)):
-            subfolder_path = os.path.join(folder, subfolder)
-            if os.path.isdir(subfolder_path):
-                files = sorted(glob.glob(os.path.join(subfolder_path, "*")))
+        for idx, subfolder in enumerate([p.name for p in Path(folder).iterdir()]):
+            subfolder_path = str(Path(folder) / subfolder)
+            if Path(subfolder_path).is_dir():
+                files = sorted(glob.glob(str(Path(subfolder_path) / "*")))
                 for i, file in enumerate(files):
                     if (
                         get_timestamp(files[i - 1])
@@ -765,7 +711,10 @@ def get_run_name(config: dict, user_time_range: dict) -> str:
 
                 if len(run_list) == 0:
                     search_for_timestamp(subfolder_path)
-                if len(run_list) > 0 and idx == len(os.listdir(folder)) - 1:
+                if (
+                    len(run_list) > 0
+                    and idx == len([p.name for p in Path(folder).iterdir()]) - 1
+                ):
                     break
         return
 
@@ -775,7 +724,7 @@ def get_run_name(config: dict, user_time_range: dict) -> str:
         logger.error(
             "\033[91mThe selected timestamps were not find anywhere. Try again with another time range!\033[0m"
         )
-        sys.exit()
+        raise errors.ConfigError("get_run_name failed (see log for details)")
     if len(run_list) > 1:
         return get_multiple_run_id(user_time_range)
 
@@ -804,8 +753,8 @@ def load_tier_config(path: str, version: str, tier_name: str):
     config_data = None
     for subdir in possible_dirs:
         for pattern in file_patterns:
-            filepath_pattern = os.path.join(
-                path, version, "inputs/dataprod/config", subdir, pattern
+            filepath_pattern = str(
+                Path(path) / version / "inputs/dataprod/config" / subdir / pattern
             )
             files = glob.glob(filepath_pattern)
             if files:
@@ -824,7 +773,7 @@ def load_tier_config(path: str, version: str, tier_name: str):
             f"No matching config files found for '{tier_name}' "
             f"in either 'tier/{tier_name}' or 'tier_{tier_name}'."
         )
-        sys.exit()
+        raise errors.ConfigError("load_tier_config failed (see log for details)")
 
     return config_data
 
@@ -847,20 +796,13 @@ def get_all_plot_parameters(subsystem: str, config: dict):
     ]
 
     # only QC present in evt tier; no classifiers
-    is_entries_evt = [
-        "geds/quality/is_not_bb_like/is_delayed_discharge",
-        "geds/quality/is_bb_like",
-    ]
+    is_entries_evt = list(EXPERIMENT["qc_parameters_evt"])
 
     all_parameters = []
     if subsystem in config["subsystems"]:
         for plot in config["subsystems"][subsystem]:
             parameters = config["subsystems"][subsystem][plot]["parameters"]
-            if parameters not in (
-                "quality_cuts",
-                "geds/quality/is_not_bb_like/is_delayed_discharge",
-                "geds/quality/is_bb_like",
-            ):
+            if parameters not in QC_PARAMETERS:
                 if isinstance(parameters, str):
                     all_parameters.append(parameters)
                 else:
@@ -883,7 +825,9 @@ def get_all_plot_parameters(subsystem: str, config: dict):
                             "\033[91mThe cut %s is not available at the moment. Exit here.\033[0m",
                             cut,
                         )
-                        sys.exit()
+                        raise errors.ConfigError(
+                            "get_all_plot_parameters failed (see log for details)"
+                        )
                     all_parameters.append(cut)
 
             # check if we have to load individual QC and classifiers
@@ -891,10 +835,7 @@ def get_all_plot_parameters(subsystem: str, config: dict):
                 all_parameters.extend(is_entries)
             if config["subsystems"][subsystem][plot].get("qc_classifiers") is True:
                 all_parameters.extend(is_classifiers)
-            if parameters in (
-                "geds/quality/is_not_bb_like/is_delayed_discharge",
-                "geds/quality/is_bb_like",
-            ):
+            if parameters in is_entries_evt:
                 all_parameters.extend(is_entries_evt)
 
     return all_parameters
@@ -930,7 +871,7 @@ def get_last_timestamp(fname: str) -> str:
             pass
     if timestamp is None:
         logger.error("\033[91mNo timestamps were found. Exit here.\033[0m")
-        sys.exit()
+        raise errors.ConfigError("get_last_timestamp failed (see log for details)")
     # get the last entry
     last_timestamp = timestamp[-1]
     # convert from UNIX tstamp to string tstmp of format YYYYMMDDTHHMMSSZ
@@ -955,14 +896,14 @@ def bunch_dataset(config: dict, n_files=None):
     # format to search /path_to_prod-ref[/vXX.XX]/generated/tier/dsp/phy/pXX/rXXX (version 'vXX.XX' might not be there).
     # NOTICE that we fixed the tier, otherwise it picks the last one it finds (eg tcm).
     # NOTICE that this is PERIOD SPECIFIC (unlikely we're gonna inspect two periods together, so we fix it)
-    path = os.path.join(path_info["path"], path_info["version"])
+    path = str(Path(path_info["path"]) / path_info["version"])
     tiers, _ = get_tiers_pars_folders(path)
-    path_to_files = os.path.join(
-        tiers[0],  # path to dsp folder
-        path_info["type"],
-        path_info["period"],
-        run,
-        "*.lh5",
+    path_to_files = str(
+        Path(tiers[0])  # path to dsp folder
+        / path_info["type"]
+        / path_info["period"]
+        / run
+        / "*.lh5"
     )
     # get all dsp files
     dsp_files = glob.glob(path_to_files)
@@ -1047,13 +988,13 @@ def add_config_entries(
         logger.error(
             "\033[91mThe config file is missing the 'output' key. Add it and try again!\033[0m"
         )
-        sys.exit()
+        raise errors.ConfigError("add_config_entries failed (see log for details)")
     # check if there is the saving option specified in the config file
     if "saving" not in config.keys():
         logger.error(
             "\033[91mThe config file is missing the 'saving' key. Add it and try again!\033[0m"
         )
-        sys.exit()
+        raise errors.ConfigError("add_config_entries failed (see log for details)")
 
     # Get the keys
     with open(file_keys) as f:
@@ -1083,41 +1024,41 @@ def add_config_entries(
             # prod-ref version where the version is specified
             else:
                 clean_path = prod_path.rstrip("/")
-                version = os.path.basename(clean_path)
+                version = Path(clean_path).name
         if "type" in config["dataset"].keys():
             type = config["dataset"]["type"]
         else:
             logger.error("\033[91mYou need to provide data type! Try again.\033[0m")
-            sys.exit()
+            raise errors.ConfigError("add_config_entries failed (see log for details)")
         if "path" in config["dataset"].keys():
             path = config["dataset"]["path"]
         else:
             logger.error(
                 "\033[91mYou need to provide path to lh5 files! Try again.\033[0m"
             )
-            sys.exit()
+            raise errors.ConfigError("add_config_entries failed (see log for details)")
     else:
         # get phy/cal lists
         phy_keys = [key for key in keys if "phy" in key]
         cal_keys = [key for key in keys if "cal" in key]
         if len(phy_keys) == 0 and len(cal_keys) == 0:
             logger.error("\033[91mNo keys to load. Try again.\033[0m")
-            sys.exit()
+            raise errors.ConfigError("add_config_entries failed (see log for details)")
         if len(phy_keys) != 0 and len(cal_keys) == 0:
             type = "phy"
         if len(phy_keys) == 0 and len(cal_keys) != 0:
             type = "cal"
             logger.error("\033[91mcal is still under development! Try again.\033[0m")
-            sys.exit()
+            raise errors.ConfigError("add_config_entries failed (see log for details)")
         if len(phy_keys) != 0 and len(cal_keys) != 0:
             type = ["cal", "phy"]
             logger.error(
                 "\033[91mBoth cal and phy are still under development! Try again.\033[0m"
             )
-            sys.exit()
+            raise errors.ConfigError("add_config_entries failed (see log for details)")
         # get the production path
         base_path = prod_path.split("prod-ref")[0]
-        path = os.path.join(base_path, "prod-ref")
+        path = str(Path(base_path) / "prod-ref")
 
     # create the dataset dictionary
     dataset_dict = {
@@ -1141,7 +1082,7 @@ def add_config_entries(
             '\033[91mThere are missing entries among ["output", "dataset", "saving", "subsystems"] in the config file (found keys: %s). Try again and check you start with "output" and "dataset" info!\033[0m',
             config.keys(),
         )
-        sys.exit()
+        raise errors.ConfigError("add_config_entries failed (see log for details)")
 
     return config
 
@@ -1157,10 +1098,10 @@ def get_output_plot_path(plt_path: str, extension: str) -> str:
         extension : str
             Extension of the file to save (e.g. 'pdf' or 'log').
     """
-    filename = os.path.basename(plt_path)
+    filename = Path(plt_path).name
     save_path = plt_path.replace("plt/hit/phy/", "tmp/mtg/").rsplit("/", 1)[0] + "/"
-    os.makedirs(save_path, exist_ok=True)
-    plt_file = os.path.join(save_path, f"{filename}.{extension}")
+    Path(save_path).mkdir(parents=True, exist_ok=True)
+    plt_file = str(Path(save_path) / f"{filename}.{extension}")
 
     return plt_file
 
@@ -1190,7 +1131,7 @@ def load_config(config_file: dict | str):
 
     if isinstance(config_file, str):
         # Looks like a file path and exists
-        if os.path.isfile(config_file) and config_file.endswith((".yaml", ".yml")):
+        if Path(config_file).is_file() and config_file.endswith((".yaml", ".yml")):
             with open(config_file) as f:
                 return yaml.load(f, Loader=yaml.CLoader)
         else:
@@ -1278,7 +1219,7 @@ def get_output_path(config: dict):
         logger.error(
             "\033[91mSomething is missing or wrong in your 'dataset' field of the config.\033[0m"
         )
-        sys.exit()
+        raise errors.ConfigError("get_output_path failed (see log for details)")
 
     user_time_range = get_query_timerange(dataset=config["dataset"])
     # will be returned as None if something is wrong, and print an error message
@@ -1307,44 +1248,88 @@ def get_output_path(config: dict):
     return out_path
 
 
-def send_email_alert(app_password: str, recipients: list, text_file_path: str):
-    """Send automatic emails with alert messages.
+# metric -> contract-v2 histogram key, so an issue points at the binned data a
+# triage agent can actually re-measure (not just the pass/fail summary)
+ISSUE_METRIC_HIST_KEYS = {
+    "baseln_stab": "hist/IsPulser_Baseline",
+    "baseln_spike": "hist/IsPulser_BlStd",
+    "pulser_stab": "hist/IsPulser_TrapemaxCtcCal",
+    "const_stab": "hist/IsPulser_TrapemaxCtcCal",
+    "escale_FEP_pos": "hist/IsPhysics_TrapemaxCtcCal",
+    "escale_fwhm_FEP": "hist/IsPhysics_TrapemaxCtcCal",
+    "escale_fwhm_583": "hist/IsPhysics_TrapemaxCtcCal",
+    "spms_baseln_stab": "hist/IsBsln_WfMode_var",
+    "spms_noise_stab": "hist/IsBsln_CurrFwhm_var",
+    "spms_dark_rate": "hist/IsBsln_NPulses",
+    "spms_noisy_frac": "hist/All_HasAnyNoise",
+}
 
-    Parameters
-    ----------
-    app_password: str
-        String password to send mails from legend.data.monitoring@gmail.com
-    recipients: list
-        List of email addresses to send the alert emails
-    text_file_path: str
-        String path to the .txt file containing the message to send via email
-    """
-    sender = "legend.data.monitoring@gmail.com"
-    subject = "Automatic message - DATA MONITORING ALARM!"
-    try:
-        with open(text_file_path) as f:
-            text = f.read()
-    except FileNotFoundError:
-        logger.info("Error: File not found: %s", text_file_path)
-        return
+#: qcp metrics evaluated on the spms contract (their data_ref points there)
+SPMS_METRICS = {m for m in ISSUE_METRIC_HIST_KEYS if m.startswith("spms_")}
 
-    # Create email message
-    msg = MIMEMultipart()
-    msg["Subject"] = subject
-    msg["From"] = sender
-    msg["To"] = ", ".join(recipients)
 
-    body = MIMEText(text, "plain")
-    msg.attach(body)
+#: subsystem each metric belongs to, naming the array-level pseudo-detector a
+#: correlated failure collapses onto (see issues.collapse_correlated)
+def _metric_subsystem(metric: str) -> str:
+    return "spms" if metric.startswith("spms_") else "geds"
 
-    try:
-        with smtplib.SMTP("smtp.gmail.com", 587) as smtp:
-            smtp.starttls()
-            smtp.login(sender, app_password)
-            smtp.sendmail(sender, recipients, msg.as_string())
-            logger.info("Successfully sent emails from %s", sender)
-    except smtplib.SMTPException as e:
-        logger.info("Error: unable to send email: %s", e)
+
+# metrics whose numbers live in the period contract file; {run}/{det} filled in
+ISSUE_METRIC_PERIOD_KEYS = {
+    "FEP_gain_stab": ("cal", "fep_gain_stab/{run}"),
+    "escale_SEP_residual": ("cal", "escale/{run}"),
+    "AoE_stab": ("cal", "psd_stability/{run}/{det}"),
+    "discharge_rate": ("phy", "qc_rate_series/IsDischarge/{run}"),
+    "saturated_rate": ("phy", "qc_rate_series/IsSaturated/{run}"),
+    "tot_discharge_dead_time": ("phy", "dead_time/{run}"),
+    "lar_veto_frac": ("phy", "lar_veto/{run}"),
+    "lar_accidental_frac": ("phy", "lar_veto/{run}"),
+    "spms_occupancy": ("phy", "lar_occupancy/{run}"),
+}
+
+
+def _first_seen_runs(output_folder: str, period: str, run: str, key: str) -> dict:
+    """Map (detector, metric) -> earliest run in this period that already raised it."""
+    issues_root = output_folder.split("/generated/")[0]
+    first: dict = {}
+    period_dir = str(Path(issues_root) / "generated/mon/issues" / period)
+    if not Path(period_dir).is_dir():
+        return first
+    for past_run in sorted([p.name for p in Path(period_dir).iterdir()]):
+        if past_run >= run:
+            continue
+        path = issues.issues_file_path(issues_root, period, past_run, key)
+        if not Path(path).is_file():
+            continue
+        with open(path) as f:
+            for line in f:
+                try:
+                    record = json.loads(line)
+                except ValueError:
+                    continue
+                first.setdefault(
+                    (record.get("detector"), record.get("metric")),
+                    record.get("first_seen_run") or past_run,
+                )
+    return first
+
+
+def _issue_plots(run_dir: str, meta: dict) -> list:
+    """Diagnostic PNGs to attach to an issue: the detector's string (geds) or barrel side (spms), if rendered."""
+    figs = str(Path(run_dir) / "figs")
+    if not Path(figs).is_dir():
+        return []
+    if meta.get("string") is not None:
+        suffix = f"_st{int(meta['string']):02d}.png"
+    elif meta.get("barrel") is not None:
+        suffix = f"_{meta['barrel']}_{meta['position']}.png"
+    else:
+        return []
+    return [
+        str(Path(figs) / name)
+        for name in sorted([p.name for p in Path(figs).iterdir()])
+        if name.endswith(suffix)
+    ]
 
 
 def check_cal_phy_thresholds(
@@ -1353,15 +1338,20 @@ def check_cal_phy_thresholds(
     run: str,
     key: str,
     detectors: list,
-    pswd_email: str | None,
+    detector_info: dict | None = None,
+    data_type: str = "phy",
 ):
     """
-    Check detector calibration/physics thresholds for a given run and optionally send an alert mail.
+    Check detector calibration/physics thresholds for a given run and raise detector issues.
+
+    Failed entries in the run's qcp summary become machine-readable issues
+    (JSONL under ``generated/mon/issues/`` + a parseable ``ISSUE`` block in
+    the log) for unattended triage; see the ``issues`` module.
 
     Parameters
     ----------
     output_folder : str
-        Path to output folder where the output summary YAML and plots will be stored.
+        Path to output folder where the output summary YAML and plots are stored.
     period : str
         Period to inspect.
     run : str
@@ -1370,36 +1360,118 @@ def check_cal_phy_thresholds(
         Data type key to inspect, either 'cal' or 'phy'.
     detectors : list
         List of detector names.
-    pswd_email : str or None
-        Password for the email account used to send alerts; if None, no email is sent.
+    detector_info : dict, optional
+        ``det_info["detectors"]`` mapping, used to stamp rawid/string/position
+        on the issue records.
+    data_type : str
+        Data type of the run being inspected; selects the contract-v2 file the
+        records point at.
     """
-    usability_map_file = os.path.join(
-        output_folder, period, run, f"l200-{period}-{run}-qcp_summary.yaml"
+    usability_map_file = str(
+        Path(output_folder) / period / run / f"l200-{period}-{run}-qcp_summary.yaml"
     )
     output = load_yaml_or_default(usability_map_file, detectors)
-    email_message = []
 
+    run_dir = str(Path(output_folder) / period / run)
+    contract_file = str(
+        Path(run_dir) / f"l200-{period}-{run}-{data_type}-geds-schema2.hdf"
+    )
+    first_seen = _first_seen_runs(output_folder, period, run, key)
+
+    found = []
     for ged, det_data in output.items():
         data_dict = det_data.get(key, {})
-        failed = [
-            k for k, v in data_dict.items() if v is False
-        ]  # collect failed parameters
-
-        if failed:
-            if not email_message:
-                email_message.append(
-                    f"ALERT: Data monitoring thresholds exceeded in {period}-{run}-{key}.\n"
+        for metric, ok in data_dict.items():
+            if ok is False:
+                detail = issues.pop_detail(period, run, key, ged, metric)
+                # the qcp summary is only the verdict; point triage at the
+                # binned contract data (falling back to the summary itself)
+                hist_key = ISSUE_METRIC_HIST_KEYS.get(metric)
+                period_ref = ISSUE_METRIC_PERIOD_KEYS.get(metric)
+                ref_file = (
+                    contract_file.replace("-geds-schema2", "-spms-schema2")
+                    if metric in SPMS_METRICS
+                    else contract_file
                 )
-            email_message.append(
-                f"- {ged} has {len(failed)}/{len(data_dict)} failed entries: {', '.join(failed)}"
-            )
+                if hist_key and Path(ref_file).is_file():
+                    data_ref = {"file": ref_file, "key": hist_key}
+                elif period_ref:
+                    period_file = str(
+                        Path(output_folder)
+                        / period
+                        / f"l200-{period}-{period_ref[0]}-monitoring.hdf"
+                    )
+                    data_ref = {
+                        "file": period_file,
+                        "key": period_ref[1].format(run=run, det=ged),
+                    }
+                else:
+                    data_ref = {"file": usability_map_file, "key": metric}
+                meta = (detector_info or {}).get(ged, {})
+                found.append(
+                    issues.Issue(
+                        detector=ged,
+                        metric=metric,
+                        severity=issues.classify_severity(
+                            detail.get("observed"),
+                            detail.get("threshold"),
+                            detail.get("excursion"),
+                            reference=detail.get("reference"),
+                        ),
+                        period=period,
+                        run=run,
+                        datatype=key,
+                        observed=detail.get("observed"),
+                        threshold=detail.get("threshold"),
+                        unit=detail.get("unit"),
+                        reference=detail.get("reference"),
+                        window=detail.get("window"),
+                        excursion=detail.get("excursion"),
+                        first_seen_run=first_seen.get((ged, metric), run),
+                        rawid=meta.get("daq_rawid"),
+                        string=meta.get("string"),
+                        position=meta.get("position") if "string" in meta else None,
+                        data_ref=data_ref,
+                        plots=_issue_plots(run_dir, meta),
+                        suggested_action=(
+                            "if persistent and not spurious: review usability of "
+                            f"{ged} in legend-datasets statuses "
+                            "(valid_from this run's timestamp)"
+                        ),
+                    )
+                )
 
-    if len(email_message) > 1 and pswd_email not in [None, "None"]:
-        with open("message.txt", "w") as f:
-            for line in email_message:
-                f.write(line + "\n")
-        send_email_alert(pswd_email, ["sofia.calgaro@physik.uzh.ch"], "message.txt")
-        os.remove("message.txt")
+    # an array-wide event trips one metric on most of the array at once; emit it
+    # as a single record instead of one per channel (evaluated counts come from
+    # the summary, so the fraction is against what was actually checked)
+    evaluated: dict = {}
+    for det_data in output.values():
+        for metric, verdict in det_data.get(key, {}).items():
+            if verdict is not None:
+                evaluated[metric] = evaluated.get(metric, 0) + 1
+    found = issues.collapse_correlated(
+        found,
+        evaluated,
+        {issue.metric: _metric_subsystem(issue.metric) for issue in found},
+    )
+
+    if found:
+        # the issues tree sits beside generated/plt under the output root
+        issues_root = output_folder.split("/generated/")[0]
+        path = issues.write_issues(
+            issues.issues_file_path(issues_root, period, run, key), found
+        )
+        for issue in found:
+            logger.warning("\n%s", issues.format_issue_block(issue, path))
+        logger.info("ISSUES %s count=%d", str(Path(path).absolute()), len(found))
+        # the ISSUES line is the auto-giorgio discovery contract and must land in
+        # orchestrator.log, not only on stdout (outside auto_run the orchestrator
+        # logger has no handlers and the line would bubble to stdout twice)
+        orch = logging.getLogger("legend_data_monitor.orchestrator")
+        if orch.handlers:
+            orch.info("ISSUES %s count=%d", str(Path(path).absolute()), len(found))
+
+    return found
 
 
 def update_evaluation_in_memory(
@@ -1422,6 +1494,40 @@ def update_evaluation_in_memory(
         Value to assign: False/True/null.
     """
     data.setdefault(det_name, {}).setdefault(data_type, {})[key] = value
+
+
+def select_window(
+    data_series: pd.Series,
+    last_checked: float | None | str,
+    t0: list,
+) -> pd.Series | None:
+    """Return the slice of ``data_series`` a threshold check looks at.
+
+    Shared by :func:`find_over_threshold` (pass/fail) and
+    :func:`check_threshold` (which needs the same slice to quantify the
+    excursion), so the two can never disagree about the window.
+    """
+    if data_series is None:
+        return None
+
+    # filter by last_checked
+    if last_checked not in ["None", None]:
+        cutoff = pd.to_datetime(float(last_checked), unit="s", utc=True)
+        data_series = data_series[data_series.index > cutoff]
+
+    if data_series.empty:
+        return None
+
+    # define time window
+    start = (
+        pd.Timestamp(t0[0]).tz_localize("UTC")
+        if t0[0].tzinfo is None
+        else t0[0].tz_convert("UTC")
+    )
+    end = start + pd.Timedelta(days=7)
+    data_series = data_series[(data_series.index >= start) & (data_series.index < end)]
+
+    return None if data_series.empty else data_series
 
 
 def find_over_threshold(
@@ -1447,25 +1553,8 @@ def find_over_threshold(
     if data_series is None or all(v is None for v in threshold):
         return False
 
-    # filter by last_checked
-    if last_checked not in ["None", None]:
-        cutoff = pd.to_datetime(float(last_checked), unit="s", utc=True)
-        data_series = data_series[data_series.index > cutoff]
-
-    if data_series.empty:
-        return False
-
-    # define time window
-    start = (
-        pd.Timestamp(t0[0]).tz_localize("UTC")
-        if t0[0].tzinfo is None
-        else t0[0].tz_convert("UTC")
-    )
-    end = start + pd.Timedelta(days=7)
-    mask_time = (data_series.index >= start) & (data_series.index < end)
-    data_series = data_series[mask_time]
-
-    if data_series.empty:
+    data_series = select_window(data_series, last_checked, t0)
+    if data_series is None:
         return False
 
     low, high = threshold
@@ -1480,6 +1569,23 @@ def find_over_threshold(
     return over_threshold
 
 
+def metric_unit(title: str) -> str | None:
+    """Return the unit of the series a qcp metric is checked on (MTG settings are keyed by parameter, metrics by title)."""
+    for info in MTG_PLOT_INFO.values():
+        if isinstance(info, dict) and info.get("title") == title:
+            return info.get("unit")
+    return None
+
+
+def worst_sample(window: pd.Series, low, high) -> float:
+    """Return the sample furthest past either bound (a two-sided band can fail low)."""
+    values = window.to_numpy(dtype=float)
+    over = values - high if high is not None else np.full_like(values, -np.inf)
+    under = low - values if low is not None else np.full_like(values, -np.inf)
+    worst = np.nanargmax(np.maximum(over, under))
+    return float(values[worst])
+
+
 def check_threshold(
     data_series: pd.Series,
     channel_name: str,
@@ -1488,6 +1594,8 @@ def check_threshold(
     threshold: list,
     parameter: str,
     output: dict,
+    period: str | None = None,
+    run: str | None = None,
 ):
     """Check if a given parameter is over threshold and update the email message list.
 
@@ -1507,6 +1615,9 @@ def check_threshold(
         Parameter name under inspection.
     output: dict
         Dictionary containing summary cal and phy info.
+    period, run : str, optional
+        Identify the evaluation so its magnitudes can be attached to the issue
+        record; when omitted only the pass/fail verdict is recorded.
     """
     # no available FWHM to compare gain variations with
     if parameter == "pulser_stab" and not output[channel_name]["cal"]["fwhm_ok"]:
@@ -1518,6 +1629,25 @@ def check_threshold(
     # condition = true -> some values over threshold, mark it as 'false' in the YAML
     # condition = false -> no values over threshold, mark it as 'true' in the YAML
     update_evaluation_in_memory(output, channel_name, "phy", parameter, not condition)
+
+    # stash the magnitudes behind the verdict for the issue records
+    if condition and period is not None:
+        window = select_window(data_series, last_checked, t0)
+        if window is not None:
+            low, high = threshold
+            excursion = issues.evaluate_excursion(window, low, high)
+            issues.record_detail(
+                period,
+                run,
+                "phy",
+                channel_name,
+                parameter,
+                observed=worst_sample(window, low, high),
+                threshold=list(threshold),
+                unit=metric_unit(parameter),
+                window=[str(window.index[0]), str(window.index[-1])],
+                excursion=excursion,
+            )
 
     return
 
@@ -1557,7 +1687,7 @@ def build_file_map(base_path: str, tier: str = "hit") -> dict:
     tier : str
         Data tier ('hit' or 'dsp').
     """
-    cal_path = os.path.join(base_path, "generated/par", tier, "cal")
+    cal_path = str(Path(base_path) / "generated/par" / tier / "cal")
 
     files = glob.glob(f"{cal_path}/*/*/*.yaml")
     if not files:
@@ -1566,7 +1696,7 @@ def build_file_map(base_path: str, tier: str = "hit") -> dict:
     file_map = {}
 
     for f in files:
-        parts = f.split(os.sep)
+        parts = Path(f).parts
 
         period = parts[-3]
         run = parts[-2]
@@ -1580,21 +1710,30 @@ def get_tiers_pars_folders(path: str):
     """
     Get the absolute path to different tier and par folders.
 
+    The parsed dataflow config is cached per path; fresh lists are returned on
+    every call so callers may mutate them safely.
+
     Parameters
     ----------
     path : str
         Absolute path to the processed data for a specific version, eg path='/global/cfs/cdirs/m2676/data/lngs/l200/public/prodenv/prod-blind/ref-v2.1.5/'.
     """
+    tiers, pars = _get_tiers_pars_folders_cached(path)
+    return list(tiers), list(pars)
+
+
+@cache
+def _get_tiers_pars_folders_cached(path: str):
     # config file with info on all tier folder
     try:
-        with open(os.path.join(path, "config.json")) as f:
+        with open(str(Path(path) / "config.json")) as f:
             config_proc = yaml.load(f, Loader=yaml.CLoader)
     except FileNotFoundError:
-        with open(os.path.join(path, "dataflow-config.yaml")) as f:
+        with open(str(Path(path) / "dataflow-config.yaml")) as f:
             config_proc = yaml.load(f, Loader=yaml.CLoader)
 
     def clean_path(key, path, setup_paths):
-        return os.path.join(path, setup_paths[key].replace("$_/", ""))
+        return str(Path(path) / setup_paths[key].replace("$_/", ""))
 
     try:
         setup_paths = config_proc["setups"]["l200"]["paths"]
@@ -1615,21 +1754,22 @@ def get_tiers_pars_folders(path: str):
 
     # parameter paths
     par_keys = ["par_dsp", "par_psp", "par_hit", "par_pht"]
-    pars = [clean_path(key, path, setup_paths) for key in par_keys]
+    pars = tuple(clean_path(key, path, setup_paths) for key in par_keys)
 
-    return tiers, pars
+    return tuple(tiers), pars
 
 
+@cache
 def get_status_map(path: str, version: str, first_timestamp: str, datatype: str):
-    """Return the correct status map, either reading a .json or .yaml file."""
+    """Return the correct status map, either reading a .json or .yaml file. Cached per arguments; treat the result as read-only."""
     try:
-        map_file = os.path.join(path, version, "inputs/dataprod/config")
+        map_file = str(Path(path) / version / "inputs/dataprod/config")
         full_status_map = TextDB(map_file).on(
             timestamp=first_timestamp, system=datatype
         )["analysis"]
     except (KeyError, TypeError):
         # fallback if "analysis" key doesn't exist and structure has changed
-        map_file = os.path.join(path, version, "inputs/datasets/statuses")
+        map_file = str(Path(path) / version / "inputs/datasets/statuses")
         full_status_map = TextDB(map_file).on(
             timestamp=first_timestamp, system=datatype
         )
@@ -1659,13 +1799,12 @@ def update_runinfo(
     mtg_files_path : str
         Path where the monitoring HDF5 files were stored for a specific period and run.
     """
-    files = os.listdir(mtg_files_path)
+    files = [p.name for p in Path(mtg_files_path).iterdir()]
     files = [
-        os.path.join(mtg_files_path, f) for f in files if f"{data_type}-geds.hdf" in f
+        str(Path(mtg_files_path) / f) for f in files if f"{data_type}-geds.hdf" in f
     ]
 
-    with open("settings/ignore-keys.yaml") as f:
-        timestamps_file = yaml.load(f, Loader=yaml.CLoader)[period]
+    timestamps_file = IGNORE_KEYS[period]
     start_timestamps = timestamps_file["start_keys"]
     end_timestamps = timestamps_file["stop_keys"]
 
@@ -1680,7 +1819,7 @@ def update_runinfo(
     ]
 
     tot_livetime = None
-    if my_key is not []:
+    if my_key != []:
         my_hdf_file = pd.read_hdf(files, key=my_key[0])
 
         # filter the hdf file
@@ -1704,12 +1843,12 @@ def update_runinfo(
 
 def pulser_from_evt_or_mtg(my_dir, period, run, output, run_info):
     """Try to load EVT tier; if not found, attempt to update run info from monitoring path."""
-    pattern = os.path.join(my_dir, f"l200-{period}-{run}-phy-tier_*.lh5")
+    pattern = str(Path(my_dir) / f"l200-{period}-{run}-phy-tier_*.lh5")
     evt_files = glob.glob(pattern)
-    if not os.path.isfile(evt_files):
+    if not Path(evt_files).is_file():
         logger.info("...loading pulser info from monitoring files")
-        mtg_path = os.path.join(output, f"generated/plt/phy/{period}/{run}/")
-        if not os.path.isdir(mtg_path):
+        mtg_path = str(Path(output) / f"generated/plt/phy/{period}/{run}/")
+        if not Path(mtg_path).is_dir():
             return run_info
         run_info = update_runinfo(run_info, period, run, "phy", mtg_path)
     return run_info
@@ -1721,7 +1860,7 @@ def is_bad(t, intervals):
 
 def get_timestamp_from_path(path):
     pattern = re.compile(r"(\d{8}T\d{6}Z)")
-    match = pattern.search(os.path.basename(path))
+    match = pattern.search(Path(path).name)
     if not match:
         return None
     return datetime.strptime(match.group(1), "%Y%m%dT%H%M%SZ")
@@ -1737,7 +1876,7 @@ def build_runinfo(path: str, version: str, proc_folder: str, output: str | None)
     run_info = None
     for subdir in possible_dirs:
         for pattern in file_patterns:
-            filepath_pattern = os.path.join(proc_folder, version, subdir, pattern)
+            filepath_pattern = str(Path(proc_folder) / version / subdir / pattern)
             files = glob.glob(filepath_pattern)
             if files:
                 filepath = files[0]
@@ -1752,40 +1891,42 @@ def build_runinfo(path: str, version: str, proc_folder: str, output: str | None)
 
     if run_info is None:
         logger.error(
-            f"Found no runninfo file at {os.path.join(proc_folder, version, subdir, pattern)}, retry. Exit here"
+            f"Found no runninfo file at {Path(proc_folder) / version / subdir / pattern!s}, retry. Exit here"
         )
-        exit()
+        raise errors.ConfigError("build_runinfo failed (see log for details)")
 
     raw_paths = [
-        os.path.join(proc_folder, "ref/raw/ref-raw/generated/tier/raw"),
-        os.path.join(proc_folder, "tmp-p14-raw/generated/tier/raw"),
-        os.path.join(proc_folder, "ref-raw-new/generated/tier/raw"),
-        os.path.join(proc_folder, "ref/v0.1.0/generated/tier/raw"),
-        os.path.join(proc_folder, "ref/v3.0.0/generated/tier/raw"),
-        os.path.join(proc_folder, "ref/v3.0.1/generated/tier/raw"),
+        str(Path(proc_folder) / "ref/raw/ref-raw/generated/tier/raw"),
+        str(Path(proc_folder) / "tmp-p14-raw/generated/tier/raw"),
+        str(Path(proc_folder) / "ref-raw-new/generated/tier/raw"),
+        str(Path(proc_folder) / "ref/v0.1.0/generated/tier/raw"),
+        str(Path(proc_folder) / "ref/v3.0.0/generated/tier/raw"),
+        str(Path(proc_folder) / "ref/v3.0.1/generated/tier/raw"),
     ]
 
     # collect starting and ending timestamps
     for raw_path in raw_paths:
-        if not os.path.isdir(raw_path):
+        if not Path(raw_path).is_dir():
             logger.debug(f"...folder {raw_path} does not exist, skip it")
             continue
 
-        data_types = sorted(os.listdir(raw_path))
+        data_types = sorted([p.name for p in Path(raw_path).iterdir()])
         data_types = sorted(data_types, key=lambda x: (x != "phy", x))
         for data_type in data_types:  # cal | fft | bkg | phy | pul | pzc | ...
-            data_type_path = os.path.join(raw_path, data_type)
-            if not os.listdir(data_type_path):
+            data_type_path = str(Path(raw_path) / data_type)
+            if not [p.name for p in Path(data_type_path).iterdir()]:
                 continue
 
-            for period in sorted(os.listdir(data_type_path)):  # p03 | p04 | ...
+            for period in sorted(
+                [p.name for p in Path(data_type_path).iterdir()]
+            ):  # p03 | p04 | ...
                 if "old" in period:
                     continue
                 if period in ["p01", "p02"]:
                     continue
 
-                period_path = os.path.join(raw_path, data_type_path, period)
-                if not os.listdir(period_path):
+                period_path = str(Path(raw_path) / data_type_path / period)
+                if not [p.name for p in Path(period_path).iterdir()]:
                     logger.warning(
                         "\033[93mThere are no files under the path %s\033[0m",
                         period_path,
@@ -1793,25 +1934,27 @@ def build_runinfo(path: str, version: str, proc_folder: str, output: str | None)
                     continue
 
                 period_runs = []
-                for run in sorted(os.listdir(period_path)):  # r000 | r001 | ...
+                for run in sorted(
+                    [p.name for p in Path(period_path).iterdir()]
+                ):  # r000 | r001 | ...
                     if "old" in run:
                         continue
 
                     period_runs.append(run)
 
-                    global_path = os.path.join(
-                        raw_path, data_type_path, period_path, run
+                    global_path = str(
+                        Path(raw_path) / data_type_path / period_path / run
                     )
-                    if not os.listdir(global_path):
+                    if not [p.name for p in Path(global_path).iterdir()]:
                         logger.warning(
                             "\033[93mThere are no files under the path %s\033[0m",
                             global_path,
                         )
                         continue
 
-                    files = sorted(os.listdir(global_path))
+                    files = sorted([p.name for p in Path(global_path).iterdir()])
                     files_global_path = sorted(
-                        [os.path.join(global_path, f) for f in files]
+                        [str(Path(global_path) / f) for f in files]
                     )
                     filtered = [
                         f for f in files_global_path if f.endswith((".orca", ".lh5"))
@@ -1871,9 +2014,9 @@ def build_runinfo(path: str, version: str, proc_folder: str, output: str | None)
             )
 
             for v in versions:
-                tiers, _ = get_tiers_pars_folders(os.path.join(proc_folder, v))
-                my_dir = tiers[5] if os.path.isdir(tiers[5]) else tiers[6]
-                my_dir = os.path.join(my_dir, "phy")
+                tiers, _ = get_tiers_pars_folders(str(Path(proc_folder) / v))
+                my_dir = tiers[5] if Path(tiers[5]).is_dir() else tiers[6]
+                my_dir = str(Path(my_dir) / "phy")
 
                 if v != "auto/latest":
                     run_info = pulser_from_evt_or_mtg(
@@ -1881,12 +2024,12 @@ def build_runinfo(path: str, version: str, proc_folder: str, output: str | None)
                     )
 
                 if v == "auto/latest":
-                    evt_path = os.path.join(my_dir, period, run)
-                    if not os.path.isdir(evt_path):
+                    evt_path = str(Path(my_dir) / period / run)
+                    if not Path(evt_path).is_dir():
                         continue
-                    evt_files = os.listdir(evt_path)
+                    evt_files = [p.name for p in Path(evt_path).iterdir()]
                     evt_files = [
-                        os.path.join(my_dir, period, run, f) for f in evt_files
+                        str(Path(my_dir) / period / run / f) for f in evt_files
                     ]
                     if intervals:
                         evt_files = [
@@ -1919,25 +2062,25 @@ def build_runinfo(path: str, version: str, proc_folder: str, output: str | None)
 
     logger.info(f"Inspected periods: {list(run_info.keys())}")
     save_location = (
-        os.path.join(proc_folder, version, "inputs/datasets/runinfo.yaml")
+        str(Path(proc_folder) / version / "inputs/datasets/runinfo.yaml")
         if output is None
-        else os.path.join(output, "runinfo.yaml")
+        else str(Path(output) / "runinfo.yaml")
     )
     with open(save_location, "w") as fp:
         yaml.dump(run_info, fp, default_flow_style=False, sort_keys=False)
 
 
 def get_start_key(auto_dir_path: str, data_type: str, period: str, current_run: str):
-    primary_path = os.path.join(
-        auto_dir_path, "generated/tier/dsp", data_type, period, current_run
+    primary_path = str(
+        Path(auto_dir_path) / "generated/tier/dsp" / data_type / period / current_run
     )
-    fallback_path = os.path.join(
-        auto_dir_path, "generated/tier/dsp/cal", period, current_run
+    fallback_path = str(
+        Path(auto_dir_path) / "generated/tier/dsp/cal" / period / current_run
     )
 
-    if os.path.exists(primary_path):
+    if Path(primary_path).exists():
         run_path = primary_path
-    elif os.path.exists(fallback_path):
+    elif Path(fallback_path).exists():
         run_path = fallback_path
     else:
         raise FileNotFoundError(
@@ -1945,7 +2088,7 @@ def get_start_key(auto_dir_path: str, data_type: str, period: str, current_run: 
         )
 
     # get files and validate
-    files = os.listdir(run_path)
+    files = [p.name for p in Path(run_path).iterdir()]
     if not files:
         raise ValueError(f"No files found in {run_path}")
 
@@ -1969,14 +2112,54 @@ def get_vals(df, ch):
 
 
 def load_and_filter(store, key: str, mask=None):
-    """Load a given key from a HDF file and applies a mask."""
+    """
+    Load a given key from a HDF file and apply a mask.
+
+    The mask and its target come from the same v1 file and describe the same
+    events, so they line up by construction. When they do not -- a mask whose
+    index carries labels the target lacks makes the alignment ambiguous and
+    pandas raises ``putmask: mask and data must be the same size`` -- the cut
+    is applied by position if the shapes still match, and otherwise the key is
+    dropped with a warning: one malformed frame must not take down the whole
+    summary task (it did, on the p18 backfill).
+
+    Parameters
+    ----------
+    store : pandas.HDFStore
+        Open v1 monitoring file.
+    key : str
+        Key to load.
+    mask : pandas.DataFrame, optional
+        Boolean frame selecting the entries to keep.
+
+    Returns
+    -------
+    pandas.DataFrame
+        The masked frame, empty when the key is absent or the mask cannot be
+        applied.
+    """
     if key not in store.keys():
         logger.debug(f"...key {key} not available. Skip it!")
         return pd.DataFrame()
     df = store[key]
-    if mask is not None:
-        df = df.where(mask)
-    return df
+    if mask is None:
+        return df
+    if df.index.equals(mask.index) and df.columns.equals(mask.columns):
+        return df.where(mask)
+    if df.shape == mask.shape:
+        logger.warning(
+            "...mask for %s does not share its target's index; applying by position",
+            key,
+        )
+        return df.where(mask.to_numpy())
+    logger.warning(
+        "...mask for %s does not fit the frame (%s vs %s); dropping the key rather "
+        "than reporting uncut values",
+        key,
+        mask.shape,
+        df.shape,
+    )
+    return pd.DataFrame()
 
 
 def load_yaml_or_default(path: str, detectors: dict) -> dict:
@@ -2007,7 +2190,7 @@ def load_yaml_or_default(path: str, detectors: dict) -> dict:
             for ged in detectors
         }
 
-    if os.path.exists(path):
+    if Path(path).exists():
         with open(path) as f:
             return yaml.load(f, Loader=yaml.CLoader) or default_output(detectors)
 
@@ -2032,25 +2215,25 @@ def read_json_or_yaml(file_path: str):
             logger.error(
                 "\033[91mUnsupported file format: expected .json or .yaml/.yml. Exit here\033[0m"
             )
-            sys.exit()
+            raise errors.ConfigError("read_json_or_yaml failed (see log for details)")
 
     return data_dict
 
 
 def retrieve_json_or_yaml(base_path: str, filename: str):
     """Return either a yaml or a json file for the specified file looking at the existing available extension."""
-    yaml_path = os.path.join(base_path, f"{filename}.yaml")
-    json_path = os.path.join(base_path, f"{filename}.json")
+    yaml_path = str(Path(base_path) / f"{filename}.yaml")
+    json_path = str(Path(base_path) / f"{filename}.json")
 
-    if os.path.isfile(yaml_path):
+    if Path(yaml_path).is_file():
         path = yaml_path
-    elif os.path.isfile(json_path):
+    elif Path(json_path).is_file():
         path = json_path
     else:
         logger.error(
             "\033[91mNo file found for %s in YAML or JSON format\033[0m", filename
         )
-        sys.exit()
+        raise errors.ConfigError("retrieve_json_or_yaml failed (see log for details)")
 
     return path
 
@@ -2087,6 +2270,9 @@ def build_detector_info(metadata_path, start_key=None):
     """
     Build detector information from LEGEND metadata.
 
+    The metadata/channelmap lookup is cached per (metadata_path, start_key);
+    a deep copy is returned so callers may mutate the result freely.
+
     Parameters
     ----------
     metadata_path : str
@@ -2108,6 +2294,11 @@ def build_detector_info(metadata_path, start_key=None):
             - mass_in_kg : int
         - "str_chns": mapping from string to a list of detector names
     """
+    return copy.deepcopy(_build_detector_info_cached(metadata_path, start_key))
+
+
+@cache
+def _build_detector_info_cached(metadata_path, start_key=None):
     lmeta = LegendMetadata(metadata_path)
     chmap = lmeta.channelmap(start_key) if start_key else lmeta.channelmap()
     germanium = lmeta.hardware.detectors.germanium
@@ -2146,15 +2337,159 @@ def build_detector_info(metadata_path, start_key=None):
     return {"detectors": detectors, "str_chns": dict(str_chns)}
 
 
+def build_spms_info(metadata_path, start_key=None):
+    """
+    Build SiPM channel information from LEGEND metadata, keyed by channel name.
+
+    Parameters
+    ----------
+    metadata_path : str
+        LEGEND metadata root (``<prod>/inputs``).
+    start_key : str, optional
+        Timestamp key selecting the channel map; latest when omitted.
+
+    Returns
+    -------
+    dict
+        name -> {daq_rawid, barrel, fiber, position, processable, usability}.
+    """
+    return copy.deepcopy(_build_spms_info_cached(metadata_path, start_key))
+
+
+@cache
+def _build_spms_info_cached(metadata_path, start_key=None):
+    lmeta = LegendMetadata(metadata_path)
+    chmap = lmeta.channelmap(start_key) if start_key else lmeta.channelmap()
+    detectors = {}
+    for det, info in chmap.items():
+        if info["system"] != "spms" or info["name"] != det:
+            continue
+        analysis = info.get("analysis", {})
+        detectors[det] = {
+            "name": det,
+            "daq_rawid": info["daq"]["rawid"],
+            "barrel": info["location"]["barrel"],
+            "fiber": info["location"]["fiber"],
+            "position": info["location"]["position"],
+            "processable": analysis.get("processable", False),
+            "usability": analysis.get("usability", None),
+        }
+    return detectors
+
+
+def aux_channels(metadata_path, start_key=None) -> dict:
+    """
+    Resolve the auxiliary channels from the channel map.
+
+    These are not configured anywhere: the map identifies them by system and
+    name, so they follow the production cycle instead of a hardcoded rawid.
+    ``puls`` holds both the pulser and its analogue reference (the latter
+    named ``...ANA``); the muon and FC-baseline systems hold one real entry
+    each, alongside disconnected ``BF``/``DUMMY`` placeholders.
+
+    Parameters
+    ----------
+    metadata_path : str
+        LEGEND metadata root (``<prod>/inputs``).
+    start_key : str, optional
+        Timestamp key selecting the channel map; latest when omitted.
+
+    Returns
+    -------
+    dict
+        Any of ``pulser``, ``pulser01ana``, ``muon``, ``FCbsln`` that the map
+        defines, mapped to their rawid.
+    """
+    return dict(_aux_channels_cached(metadata_path, start_key))
+
+
+@cache
+def _aux_channels_cached(metadata_path, start_key=None):
+    lmeta = LegendMetadata(metadata_path)
+    chmap = lmeta.channelmap(start_key) if start_key else lmeta.channelmap()
+    found = {}
+    for name, info in chmap.items():
+        if not isinstance(info, dict) or "BF" in str(name) or "DUMMY" in str(name):
+            continue
+        rawid = info.get("daq", {}).get("rawid")
+        if rawid is None:
+            continue
+        system = info.get("system")
+        if system == "puls":
+            key = "pulser01ana" if str(name).upper().endswith("ANA") else "pulser"
+        elif system == "auxs":
+            key = "muon"
+        elif system == "bsln":
+            key = "FCbsln"
+        else:
+            continue
+        found[key] = int(rawid)
+    return tuple(sorted(found.items()))
+
+
+def build_pmts_info(metadata_path, start_key=None):
+    """
+    Build muon-veto PMT information from LEGEND metadata, keyed by channel name.
+
+    Parameters
+    ----------
+    metadata_path : str
+        LEGEND metadata root (``<prod>/inputs``).
+    start_key : str, optional
+        Timestamp key selecting the channel map; latest when omitted.
+
+    Returns
+    -------
+    dict
+        name -> {daq_rawid, location, processable, usability}; ``location``
+        is ``pillbox``/``floor``/``wall`` (a plain string in the channel map,
+        unlike the geds/spms location dicts).
+    """
+    return copy.deepcopy(_build_pmts_info_cached(metadata_path, start_key))
+
+
+@cache
+def _build_pmts_info_cached(metadata_path, start_key=None):
+    lmeta = LegendMetadata(metadata_path)
+    chmap = lmeta.channelmap(start_key) if start_key else lmeta.channelmap()
+    key = start_key or datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+    try:
+        statuses = TextDB(str(Path(metadata_path) / "datasets/statuses")).on(
+            timestamp=key
+        )
+    except Exception:
+        statuses = {}
+    detectors = {}
+    for det, info in chmap.items():
+        if info["system"] != "pmts" or info["name"] != det:
+            continue
+        status = statuses.get(det, {}) if hasattr(statuses, "get") else {}
+        detectors[det] = {
+            "name": det,
+            "daq_rawid": info["daq"]["rawid"],
+            "location": info["location"],
+            "processable": status.get("processable", None),
+            "usability": status.get("usability", None),
+        }
+    return detectors
+
+
 def build_detector_info_per_period(auto_dir_path: str, run_dict: dict, period: str):
-    metadata_path = os.path.join(auto_dir_path, "inputs")
+    metadata_path = str(Path(auto_dir_path) / "inputs")
     lmeta = LegendMetadata(metadata_path)
 
     detector_status = {}
 
     for run in run_dict[period]:
         key = f"{period}-{run}"
-        start_key = get_start_key(auto_dir_path, "phy", period, run)
+        try:
+            start_key = get_start_key(auto_dir_path, "phy", period, run)
+        except (FileNotFoundError, ValueError) as exc:
+            # the run list comes from the cal par directory, which legitimately
+            # holds runs that never took physics data: they have no phy start
+            # key and simply contribute no channel map (downstream skips them)
+            logger.debug("...no start key for %s-%s: %s", period, run, exc)
+            continue
         chmap = lmeta.channelmap(start_key)
 
         for det, info in chmap.items():
@@ -2172,3 +2507,26 @@ def build_detector_info_per_period(auto_dir_path: str, run_dict: dict, period: s
             )
 
     return detector_status
+
+
+def narrow_to_native_dtypes(df: DataFrame, native: dict) -> DataFrame:
+    """Undo the widening that assembling a frame causes, in place.
+
+    A channel that simply does not carry a field contributes no column, so
+    concatenating channels NaN-fills it -- and pandas widens the result to
+    float64 even when every tier that *does* have the field stores float32.
+    On p22 that alone doubles six classifier columns, and it follows the data
+    all the way to disk. ``native`` maps a column to the dtype the tier
+    actually used, as read before any concatenation.
+
+    Only float64->float32 is undone: a column the tier really stores as
+    float64 keeps its precision, because ``timestamp`` needs it and because
+    the parameters that feed a % variation would otherwise lose most of the
+    significant digits of ``value/mean - 1``.
+    """
+    for column, dtype in native.items():
+        if column not in df.columns:
+            continue
+        if df[column].dtype == "float64" and np.dtype(dtype) == np.float32:
+            df[column] = df[column].astype("float32")
+    return df

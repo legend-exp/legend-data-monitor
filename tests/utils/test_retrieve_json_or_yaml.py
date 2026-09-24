@@ -1,5 +1,6 @@
 import pytest
 
+from legend_data_monitor import errors
 from legend_data_monitor.utils import retrieve_json_or_yaml
 
 
@@ -24,5 +25,5 @@ def test_retrieve_json_or_yaml(tmp_path):
     json_path.unlink()
 
     # no yaml/json
-    with pytest.raises(SystemExit):
+    with pytest.raises(errors.ConfigError):
         retrieve_json_or_yaml(str(base_path), filename)

@@ -49,18 +49,17 @@ def test_missing_path_key():
         mock_logger.error.assert_called_with("\033[91mProvide path to data!\033[0m")
 
 
-def test_nonexistent_path():
+def test_nonexistent_path(tmp_path):
+    # a path under tmp_path that was never created: "/nonexistent" is not a
+    # safe stand-in, it exists on some machines
     data_info = {
         "experiment": "l200",
         "type": "phy",
         "period": "p01",
-        "path": "/nonexistent",
+        "path": str(tmp_path / "missing"),
         "version": "v1",
     }
-    with (
-        patch("legend_data_monitor.utils.logger") as mock_logger,
-        patch("os.path.exists", return_value=False),
-    ):
+    with patch("legend_data_monitor.utils.logger") as mock_logger:
         dataset_validity_check(data_info)
         mock_logger.error.assert_called_with(
             "\033[91mThe data path you provided does not exist!\033[0m"
@@ -93,10 +92,7 @@ def test_invalid_version(tmp_path):
         "path": str(path),
         "version": "v1",
     }
-    with (
-        patch("legend_data_monitor.utils.logger") as mock_logger,
-        patch("os.path.exists", side_effect=lambda p: p != str(path / "v1")),
-    ):
+    with patch("legend_data_monitor.utils.logger") as mock_logger:
         dataset_validity_check(data_info)
         mock_logger.error.assert_called_with(
             "\033[91mProvide valid processing version!\033[0m"

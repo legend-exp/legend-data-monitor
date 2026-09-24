@@ -5,6 +5,7 @@ import tempfile
 import pytest
 import yaml
 
+from legend_data_monitor import errors
 from legend_data_monitor.utils import read_json_or_yaml
 
 
@@ -40,7 +41,7 @@ def test_read_json_or_yaml():
         txt_file.write("some text")
         txt_file_path = txt_file.name
 
-    with pytest.raises(SystemExit):
+    with pytest.raises(errors.ConfigError):
         read_json_or_yaml(txt_file_path)
 
     os.remove(txt_file_path)

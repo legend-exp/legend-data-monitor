@@ -2,6 +2,7 @@ from unittest.mock import patch
 
 import pytest
 
+from legend_data_monitor import errors
 from legend_data_monitor.utils import check_scdb_settings
 
 
@@ -9,7 +10,7 @@ from legend_data_monitor.utils import check_scdb_settings
 def test_missing_slow_control_key():
     conf = {}
     with patch("legend_data_monitor.utils.logger") as mock_logger:
-        with pytest.raises(SystemExit):
+        with pytest.raises(errors.ConfigError):
             check_scdb_settings(conf)
         mock_logger.warning.assert_called_with(
             "\033[93mThere is no 'slow_control' key in the config file. Try again if you want to retrieve slow control data.\033[0m"
@@ -20,7 +21,7 @@ def test_missing_slow_control_key():
 def test_missing_parameters_key():
     conf = {"slow_control": {}}
     with patch("legend_data_monitor.utils.logger") as mock_logger:
-        with pytest.raises(SystemExit):
+        with pytest.raises(errors.ConfigError):
             check_scdb_settings(conf)
         mock_logger.warning.assert_called_with(
             "\033[93mThere is no 'parameters' key in config 'slow_control' entry. Try again if you want to retrieve slow control data.\033[0m"
@@ -31,7 +32,7 @@ def test_missing_parameters_key():
 def test_invalid_parameters_type():
     conf = {"slow_control": {"parameters": 123}}  # not str or list
     with patch("legend_data_monitor.utils.logger") as mock_logger:
-        with pytest.raises(SystemExit):
+        with pytest.raises(errors.ConfigError):
             check_scdb_settings(conf)
         mock_logger.error.assert_called_with(
             "\033[91mSlow control parameters must be a string or a list of strings. Try again if you want to retrieve slow control data.\033[0m"

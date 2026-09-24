@@ -34,3 +34,31 @@ def test_no_keys():
 )
 def test_parametrized(ecal_results, expected):
     assert get_energy_key(ecal_results) == expected
+
+
+def test_estimator_order_comes_from_settings(monkeypatch):
+    """The candidates are configured, and the first present one wins."""
+    from legend_data_monitor import utils
+    from legend_data_monitor.monitoring import find_energy_key
+
+    both = {"cuspEmax_ctc_runcal": {"a": 1}, "cuspEmax_ctc_cal": {"a": 2}}
+    assert find_energy_key(both) == ("cuspEmax_ctc_runcal", {"a": 1})
+
+    flipped = dict(utils.EXPERIMENT["energy"], estimators=["cuspEmax_ctc_cal"])
+    monkeypatch.setitem(utils.EXPERIMENT, "energy", flipped)
+    assert find_energy_key(both) == ("cuspEmax_ctc_cal", {"a": 2})
+
+
+def test_missing_estimator_is_not_an_error():
+    from legend_data_monitor.monitoring import find_energy_key, get_energy_key
+
+    assert find_energy_key({"zacEmax_ctc_cal": {}}) == (None, {})
+    assert get_energy_key({}) == {}
+
+
+def test_uncalibrated_variable_strips_the_suffix():
+    from legend_data_monitor.monitoring import uncalibrated_variable
+
+    assert uncalibrated_variable("cuspEmax_ctc_cal") == "cuspEmax_ctc"
+    assert uncalibrated_variable("cuspEmax_ctc_runcal") == "cuspEmax_ctc"
+    assert uncalibrated_variable("zacEmax") == "zacEmax"

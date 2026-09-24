@@ -2,6 +2,7 @@ from unittest.mock import patch
 
 import pytest
 
+from legend_data_monitor import errors
 from legend_data_monitor.utils import get_output_path
 
 
@@ -40,7 +41,7 @@ def test_get_output_path_success():
 def test_get_output_path_missing_dataset():
     config = {}  # dataset missing
     with patch("legend_data_monitor.utils.logger") as mock_logger:
-        with pytest.raises(SystemExit):
+        with pytest.raises(errors.ConfigError):
             get_output_path(config)
         mock_logger.error.assert_called_once_with(
             "\033[91mSomething is missing or wrong in your 'dataset' field of the config.\033[0m"

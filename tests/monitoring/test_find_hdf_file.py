@@ -32,3 +32,12 @@ def test_find_hdf_file_empty_dir(tmp_path):
     # no files
     result = find_hdf_file(str(tmp_path), include=["geds"])
     assert result is None
+
+
+def test_find_hdf_file_skips_the_contract_file(tmp_path):
+    """'-schema2.hdf' sorts before '.hdf', so without this the contract wins."""
+    (tmp_path / "l200-p22-r010-phy-geds.hdf").write_text("v1")
+    (tmp_path / "l200-p22-r010-phy-geds-schema2.hdf").write_text("contract")
+    (tmp_path / "l200-p22-r010-phy-geds-res_10min.hdf").write_text("res")
+    result = find_hdf_file(str(tmp_path), include=["geds"], exclude=["res", "min"])
+    assert result.endswith("l200-p22-r010-phy-geds.hdf")

@@ -1,7 +1,7 @@
 import glob
-import os
 import re
-import sys
+from functools import cache
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -10,9 +10,15 @@ from dbetto import TextDB
 
 # needed to know which parameters are not in DataLoader
 # but need to be calculated, such as event rate
-from . import save_data, subsystem, utils
+from . import errors, save_data, subsystem, utils
 
 # -------------------------------------------------------------------------
+
+
+# Parameters whose whole point is the QC columns -- the only entries that need
+# every ``is_*`` / ``*_classifier`` column the subsystem happens to carry.
+# Defined in settings/experiment.yaml; re-exported here for the local uses.
+QC_PARAMETERS = utils.QC_PARAMETERS
 
 
 class AnalysisData:
@@ -81,7 +87,7 @@ class AnalysisData:
             utils.logger.error(
                 f"\033[91mThe event type '{event_type}' does not exist and cannot be flagged! Try again with one among {list(event_type_flags.keys())}.\033[0m"
             )
-            sys.exit()
+            raise errors.DataError("__init__ failed (see log for details)")
 
         if (
             event_type not in ["all", "phy", "K_lines"]
@@ -94,7 +100,7 @@ class AnalysisData:
                     + f"\033[91mRun the function <subsystem>.flag_{subsystem_name}_events(<{subsystem_name}>) first, where <subsystem> is your Subsystem object, \033[0m"
                     + f"\033[91mand <{subsystem_name}> is a Subsystem object of type '{subsystem_name}', which already has its data loaded with <{subsystem_name}>.get_data(); then create an AnalysisData object.\033[0m"
                 )
-                sys.exit()
+                raise errors.DataError("__init__ failed (see log for details)")
 
         # cannot do event rate and another parameter at the same time
         # since event rate is calculated in windows
@@ -138,13 +144,26 @@ class AnalysisData:
         # always get basic parameters
         params_to_get = ["datetime"] + utils.COLUMNS_TO_LOAD + ["status"]
 
+        # The subsystem frame carries every QC flag and classifier as soon as
+        # *any* configured entry asks for them -- some 40 columns. Only the
+        # entries that plot them, or cut on them, have any use for them; for
+        # the rest they are ~85% of the frame this entry is about to copy.
+        requested = (
+            self.parameters if isinstance(self.parameters, list) else [self.parameters]
+        )
+        wants_qc = bool(QC_PARAMETERS.intersection(requested))
+        cut_columns = set(
+            self.cuts if isinstance(self.cuts, list) else [self.cuts or ""]
+        )
+
         for col in sub_data.columns:
             # pulser flag is present only if subsystem.flag_pulser_events() was called -> needed to subselect phy/pulser events
             if "flag_pulser" in col or "flag_fc_bsln" in col or "flag_muon" in col:
                 params_to_get.append(col)
             # QC flag is present only if inserted as a cut in the config file -> this part is needed to apply
             if col.startswith("is_") or col.endswith("_classifier"):
-                params_to_get.append(col)
+                if wants_qc or col in cut_columns:
+                    params_to_get.append(col)
 
         # if special parameter, get columns needed to calculate it
         for param in self.parameters:
@@ -161,11 +180,7 @@ class AnalysisData:
                 else:
                     # otherwise just load it
                     params_to_get.append(param)
-            elif param in [
-                "quality_cuts",
-                "geds/quality/is_not_bb_like/is_delayed_discharge",
-                "geds/quality/is_bb_like",
-            ]:
+            elif param in QC_PARAMETERS:
                 utils.logger.info(
                     "... you are loading individual QC flags and/or classifiers"
                 )
@@ -179,29 +194,37 @@ class AnalysisData:
                     + "Check also that you are not trying to plot a flag (ie a quality cut), which is not a parameter by definition.\033[0m",
                     param,
                 )
-                sys.exit()
+                raise errors.DataError("__init__ failed (see log for details)")
 
         # avoid repetition
         params_to_get = list(np.unique(params_to_get))
 
         # check if there are the corresponding columns in the dataframe; otherwise, exit
-        if set(params_to_get).issubset(sub_data.columns):
-            self.data = sub_data[params_to_get].copy()
-        else:
+        if not set(params_to_get).issubset(sub_data.columns):
             utils.logger.error(
                 "\033[91mOne/more entry/entries among %s is/are not present in the dataframe. TRY AGAIN.\033[0m",
                 params_to_get,
             )
-            sys.exit()
+            raise errors.DataError("__init__ failed (see log for details)")
 
         # -------------------------------------------------------------------------
         # select phy/puls/all/Klines events
-        bad = self.select_events()
-        if bad:
+        #
+        # rows first, then columns: params_to_get carries every QC flag and
+        # classifier in the frame (any of them may appear in a cut), so
+        # copying the whole subsystem before throwing most of its rows away
+        # costs ~15x the memory a pulser entry actually needs.
+        mask = self.event_mask(sub_data)
+        if mask is None:
             utils.logger.error(
                 "\033[91mThe selection of desired events went wrong. Exit here!\033[0m"
             )
             return
+        self.data = (
+            sub_data[params_to_get].copy()
+            if mask is True
+            else sub_data.loc[mask, params_to_get].copy()
+        )
 
         # convert cuts to boolean + apply cuts, if any
         self.path = analysis_info["path"]
@@ -212,126 +235,73 @@ class AnalysisData:
         # calculate if special parameter
         self.special_parameter()
 
-        # calculate channel mean
-        self.channel_mean()
-
-        # calculate variation if needed - only works after channel mean
-        self.calculate_variation()
+        # calculate channel mean and, from it, the % variation.
+        #
+        # Skipped for the QC entries: save_data.save_hdf writes "absolute
+        # values ONLY" for quality_cuts, so for ~30 flags/classifiers this
+        # would add 60 full-length columns and copy the whole frame twice in
+        # the channel-mean join, then throw all of it away.
+        if not wants_qc:
+            self.channel_mean()
+            self.calculate_variation()
 
         # little sorting, before closing the function
         self.data = self.data.sort_values(["channel", "datetime"])
 
-    def select_events(self):
-        # do we want to keep all, phy or pulser events?
+    def event_mask(self, data):
+        """Row mask selecting this entry's event type from ``data``.
+
+        Returns a boolean Series, ``True`` when every row is kept, or ``None``
+        for an unrecognised event type.
+        """
         if self.evt_type == "pulser":
             utils.logger.info("... keeping only pulser events")
-            self.data = self.data[self.data["flag_pulser"]]
-        elif self.evt_type == "FCbsln":
+            return data["flag_pulser"]
+        if self.evt_type == "FCbsln":
             utils.logger.info("... keeping only FC baseline events")
-            self.data = self.data[self.data["flag_fc_bsln"]]
-        elif self.evt_type == "muon":
+            return data["flag_fc_bsln"]
+        if self.evt_type == "muon":
             utils.logger.info("... keeping only muon events")
-            self.data = self.data[self.data["flag_muon"]]
-        elif self.evt_type == "phy":
+            return data["flag_muon"]
+        if self.evt_type == "phy":
             utils.logger.info(
                 "... keeping only physical (non-pulser & non-FCbsln & non-muon) events"
             )
-            self.data = self.data[
-                (~self.data["flag_pulser"])
-                & (~self.data["flag_fc_bsln"])
-                & (~self.data["flag_muon"])
-            ]
-        elif self.evt_type == "K_events":
+            return (
+                (~data["flag_pulser"]) & (~data["flag_fc_bsln"]) & (~data["flag_muon"])
+            )
+        if self.evt_type == "K_events":
             utils.logger.info("... selecting K lines in physical (non-pulser) events")
-            self.data = self.data[~self.data["flag_pulser"]]
             energy = utils.SPECIAL_PARAMETERS["K_events"][0]
-            self.data = self.data[
-                (self.data[energy] > 1430) & (self.data[energy] < 1575)
-            ]
-        elif self.evt_type == "all":
+            return (
+                (~data["flag_pulser"]) & (data[energy] > 1430) & (data[energy] < 1575)
+            )
+        if self.evt_type == "all":
             utils.logger.info("... keeping all (pulser + non-pulser) events")
-        else:
-            utils.logger.error("\033[91mInvalid event type!\033[0m")
-            utils.logger.error("\033[91m%s\033[0m", self.__doc__)
-            return "bad"
+            return True
+        utils.logger.error("\033[91mInvalid event type!\033[0m")
+        utils.logger.error("\033[91m%s\033[0m", self.__doc__)
+        return None
 
     def convert_bitmasks(self):
         """Convert float64 bitmask columns into boolean columns based on the conditions saved in metadata."""
-        path = self.path
-        version = self.version
-        possible_dirs = ["tier_evt", "tier/evt"]
-        file_pattern = "*-all-evt_config.yaml"
-        evt_config = None
+        expr_dict = _get_bitmask_expr_dict(self.path, self.version)
 
-        for subdir in possible_dirs:
-            filepath_pattern = os.path.join(
-                path, version, "inputs/dataprod/config", subdir, file_pattern
-            )
-            files = glob.glob(filepath_pattern)
-            if files:
-                filepath = files[0]
-                with open(filepath) as file:
-                    evt_config = yaml.load(file, Loader=yaml.CLoader)
-                break
-
-        if evt_config is None:
+        if expr_dict is None:
             utils.logger.warning(
                 "\033[93mNo config files for converting bitmasks into boolean entries were found. Skip it.\033[0m"
             )
-        else:
+            return
 
-            try:
-                expression = evt_config["operations"]["_geds___quality___is_bb_like"][
-                    "expression"
-                ]
-            except KeyError:
-                filepath_pattern = os.path.join(
-                    path,
-                    version,
-                    "inputs/dataprod/config",
-                    subdir,
-                    "*-geds_qc-evt_config.yaml",
-                )
-                filepath = glob.glob(filepath_pattern)[0]
-                with open(filepath) as file:
-                    evt_config = yaml.load(file, Loader=yaml.CLoader)
-                expression = evt_config["operations"]["geds___quality___is_bb_like"][
-                    "expression"
-                ]
-
-            try:
-                expression = evt_config["operations"][
-                    "geds___quality___is_not_bb_like___is_delayed_discharge"
-                ]["expression"]
-            except KeyError:
-                filepath_pattern = os.path.join(
-                    path,
-                    version,
-                    "inputs/dataprod/config",
-                    subdir,
-                    "*-geds_qc-evt_config.yaml",
-                )
-                filepath = glob.glob(filepath_pattern)[0]
-                with open(filepath) as file:
-                    evt_config = yaml.load(file, Loader=yaml.CLoader)
-                expression = evt_config["operations"][
-                    "geds___quality___is_not_bb_like___is_delayed_discharge"
-                ]["expression"]
-
-            # extract key-value pairs like: hit.is_something == number
-            pattern = r"hit\.(\w+)\s*==\s*(\d+)"
-            matches = re.findall(pattern, expression)
-            expr_dict = {key: int(value) for key, value in matches}
-
-            for col in self.data.columns:
-                if col.startswith("is_") or col.endswith("_classifier"):
-                    if self.data[col].dtype != bool:
-                        if col in expr_dict:
-                            target_value = expr_dict[col]
-                            self.data[col] = self.data[col] == target_value
-                            utils.logger.info(
-                                f"Column '{col}' converted to boolean using value {target_value}."
-                            )
+        for col in self.data.columns:
+            if col.startswith("is_") or col.endswith("_classifier"):
+                if self.data[col].dtype != bool:
+                    if col in expr_dict:
+                        target_value = expr_dict[col]
+                        self.data[col] = self.data[col] == target_value
+                        utils.logger.info(
+                            f"Column '{col}' converted to boolean using value {target_value}."
+                        )
 
     def apply_cut(self, cut: str):
         """
@@ -356,7 +326,7 @@ class AnalysisData:
                         "\033[91mThe cut %s is not available at the moment. Exit here.\033[0m",
                         cut,
                     )
-                    sys.exit()
+                    raise errors.DataError("apply_cut failed (see log for details)")
 
                 self.data = self.data[self.data[cut] == cut_value]
 
@@ -373,14 +343,15 @@ class AnalysisData:
                 # ! sorry need to jump through a lot of hoops here ! bare with me....
 
                 # --- count number of events in given time windows
-                # - count() returns count of rows for each column - redundant, same value in each (unless we have NaN)
-                # just want one column 'event_rate' -> pick 'channel' since it's never NaN, so correct count; rename to event rate
-                # - this is now a resampled dataframe with column event rate, and multiindex channel, datetime -> put them back as columns with reset index
+                # - size() counts rows per (channel, window) group; the group key
+                #   itself is not selectable from count() results on pandas>=3
+                # - this is a resampled series with multiindex channel, datetime ->
+                #   name it event_rate and put them back as columns with reset index
                 event_rate = (
                     self.data.set_index("datetime")
                     .groupby("channel")
                     .resample(self.time_window, origin="start")
-                    .count()["channel"]
+                    .size()
                     .to_frame(name="event_rate")
                     .reset_index()
                 )
@@ -409,7 +380,6 @@ class AnalysisData:
                 # - group original table by channel and pick first occurrence to get the channel map (ignore other columns)
                 # - reindex to match event rate table index
                 # - put the columns in with concat
-                event_rate = event_rate.set_index("channel")
                 # need to copy, otherwise next line removes "channel" from original, and crashes next time over not finding channel
                 columns = utils.COLUMNS_TO_LOAD[:]
                 columns.remove("channel")
@@ -444,8 +414,10 @@ class AnalysisData:
                 # ToDo: already loaded before in Subsystem => 1) load mass already then, 2) inherit channel map from Subsystem ?
                 # get channel map at this timestamp
 
-                map_file = os.path.join(
-                    self.path, self.version, "inputs/hardware/configuration/channelmaps"
+                map_file = str(
+                    Path(self.path)
+                    / self.version
+                    / "inputs/hardware/configuration/channelmaps"
                 )
                 full_channel_map = TextDB(map_file).on(timestamp=first_timestamp)
 
@@ -480,10 +452,10 @@ class AnalysisData:
 
                 # --- calculate exposure for each detector
                 # get diodes map
-                dets_file = os.path.join(
-                    self.path,
-                    self.version,
-                    "inputs/hardware/detectors/germanium/diodes",
+                dets_file = str(
+                    Path(self.path)
+                    / self.version
+                    / "inputs/hardware/detectors/germanium/diodes"
                 )
                 dets_map = TextDB(dets_file)
 
@@ -530,90 +502,68 @@ class AnalysisData:
         """
         Get mean value of each parameter of interest in each channel in the first 10% of the dataset.
 
-        Ignore in case of SiPMs, as each entry is a list of values, not a single value.
+        SiPM parameters are per-event scalars too (ragged fields are reduced at
+        load, see processing/spms.py), so every subsystem takes the same path.
         """
         utils.logger.info("... getting channel mean")
-        # series with index channel, columns of parameters containing mean of each channel;
-        # the mean is performed over the first 10% interval of the full time range specified in the config file
 
-        # get mean (only for non-list parameters; in that case, add a new column with None values):
-        # check if we are looking at SiPMs -> do not get mean because entries are usually lists
-        # ToDo: need to iterate over the parameters (some of them could be lists, others not)
-
-        # congratulations, it's a sipm!
-        if self.is_spms():
-            channels = (self.data["channel"]).unique()
-            # !! need to update for multiple parameter case!
-            channel_mean = pd.DataFrame(
-                {"channel": channels, self.parameters[0]: [None] * len(channels)}
-            )
-            channel_mean = channel_mean.set_index("channel")
-            # !! need to update for multiple parameter case!
+        if self.saving is None or self.saving == "overwrite":
+            # get the dataframe for timestamps below 10% of data present in the selected time window
+            self_data_time_cut = cut_dataframe(self.data)
+            # create a column with the mean of the cut dataframe (cut in the time window of interest)
+            channel_mean = self_data_time_cut.groupby("channel").mean(
+                numeric_only=True
+            )[self.parameters]
+            del self_data_time_cut
+            # concatenate column with mean values
             self.data = concat_channel_mean(self, channel_mean)
 
-        # otherwise, it's either an aux or geds
-        else:
-            if self.saving is None or self.saving == "overwrite":
-                # get the dataframe for timestamps below 10% of data present in the selected time window
-                self_data_time_cut = cut_dataframe(self.data)
-                # create a column with the mean of the cut dataframe (cut in the time window of interest)
-                channel_mean = self_data_time_cut.groupby("channel").mean(
-                    numeric_only=True
-                )[self.parameters]
-                del self_data_time_cut
-                # concatenate column with mean values
-                self.data = concat_channel_mean(self, channel_mean)
+        elif self.saving == "append":
+            subsys = self.get_subsys() if self.aux_info is None else self.aux_info
+            # the file does not exist, so we get the mean as usual
+            if not Path(self.plt_path + "-" + subsys + ".hdf").exists():
+                self.data = self.add_channel_mean_column()
 
-            elif self.saving == "append":
-                subsys = self.get_subsys() if self.aux_info is None else self.aux_info
-                # the file does not exist, so we get the mean as usual
-                if not os.path.exists(self.plt_path + "-" + subsys + ".hdf"):
-                    self.data = self.add_channel_mean_column()
+            # the file exist: we have to combine previous data with new data, and re-compute the mean over the first 10% of data (that now, are more than before)
+            else:
+                if len(self.parameters) == 1:
+                    param = self.parameters[0]
+                    saved_type = utils.FLAGS_RENAME[self.evt_type]
+                    param_camel = utils.convert_to_camel_case(param, "_")
+                    key_to_load = f"{saved_type}_{param_camel}"
+                    is_key = utils.check_key_existence(
+                        self.plt_path + "-" + subsys + ".hdf", key_to_load
+                    )
+                    if is_key:
+                        old_data = pd.read_hdf(
+                            self.plt_path + "-" + subsys + ".hdf", key=key_to_load
+                        )
+                        channel_mean = get_saved_df_hdf(self, subsys, param, old_data)
+                        self.data = concat_channel_mean(self, channel_mean)
+                    else:
+                        self.data = self.add_channel_mean_column()
 
-                # the file exist: we have to combine previous data with new data, and re-compute the mean over the first 10% of data (that now, are more than before)
-                else:
-                    if len(self.parameters) == 1:
-                        param = self.parameters[0]
+                if len(self.parameters) > 1:
+                    for param in self.parameters:
+                        parameter = param.split("_var")[0] if "_var" in param else param
                         saved_type = utils.FLAGS_RENAME[self.evt_type]
-                        param_camel = utils.convert_to_camel_case(param, "_")
+                        param_camel = utils.convert_to_camel_case(parameter, "_")
                         key_to_load = f"{saved_type}_{param_camel}"
                         is_key = utils.check_key_existence(
                             self.plt_path + "-" + subsys + ".hdf", key_to_load
                         )
                         if is_key:
                             old_data = pd.read_hdf(
-                                self.plt_path + "-" + subsys + ".hdf", key=key_to_load
+                                self.plt_path + "-" + subsys + ".hdf",
+                                key=key_to_load,
                             )
                             channel_mean = get_saved_df_hdf(
-                                self, subsys, param, old_data
+                                self, subsys, parameter, old_data
                             )
+                            # we need to repeat this operation for each param, otherwise only the mean of the last one survives
                             self.data = concat_channel_mean(self, channel_mean)
                         else:
                             self.data = self.add_channel_mean_column()
-
-                    if len(self.parameters) > 1:
-                        for param in self.parameters:
-                            parameter = (
-                                param.split("_var")[0] if "_var" in param else param
-                            )
-                            saved_type = utils.FLAGS_RENAME[self.evt_type]
-                            param_camel = utils.convert_to_camel_case(parameter, "_")
-                            key_to_load = f"{saved_type}_{param_camel}"
-                            is_key = utils.check_key_existence(
-                                self.plt_path + "-" + subsys + ".hdf", key_to_load
-                            )
-                            if is_key:
-                                old_data = pd.read_hdf(
-                                    self.plt_path + "-" + subsys + ".hdf",
-                                    key=key_to_load,
-                                )
-                                channel_mean = get_saved_df_hdf(
-                                    self, subsys, parameter, old_data
-                                )
-                                # we need to repeat this operation for each param, otherwise only the mean of the last one survives
-                                self.data = concat_channel_mean(self, channel_mean)
-                            else:
-                                self.data = self.add_channel_mean_column()
 
         if self.data.empty:
             utils.logger.error(
@@ -637,20 +587,20 @@ class AnalysisData:
                 ) * 100
 
     def is_spms(self) -> bool:
-        """Return True if 'location' (=fiber) and 'position' (=top, bottom) are strings."""
-        if self.data.empty:
+        """Return True for SiPM data (the channel map carries a barrel only for spms)."""
+        if self.data.empty or "barrel" not in self.data.columns:
             return False
+        return self.data["barrel"].notna().any()
 
-        if isinstance(self.data.iloc[0]["location"], str) and isinstance(
-            self.data.iloc[0]["position"], str
-        ):
-            return True
-        else:
+    def is_pmts(self) -> bool:
+        """Return True for muon-veto PMT data (its locations are the tank groups)."""
+        if self.data.empty or self.is_spms():
             return False
+        return str(self.data.iloc[0]["location"]) in ("pillbox", "floor", "wall")
 
     def is_geds(self) -> bool:
-        """Return True if 'location' (=string) and 'position' are NOT strings."""
-        return not self.is_spms()
+        """Return True if the data is neither SiPM nor PMT flavoured."""
+        return not self.is_spms() and not self.is_pmts()
 
     def is_pulser(self) -> bool:
         """Return True if the system is the pulser channel."""
@@ -705,6 +655,8 @@ class AnalysisData:
             return "muon"
         if self.is_spms():
             return "spms"
+        if self.is_pmts():
+            return "pmts"
         if self.is_geds():
             return "geds"
 
@@ -712,6 +664,75 @@ class AnalysisData:
 # -------------------------------------------------------------------------
 # helper function
 # -------------------------------------------------------------------------
+
+
+@cache
+def _get_bitmask_expr_dict(path: str, version: str) -> dict | None:
+    """Parse the evt config and return the ``hit.<flag> == <value>`` mapping used to convert bitmask columns to booleans.
+
+    Cached per (path, version): AnalysisData can be constructed several times
+    per plot entry and the glob+YAML lookup is identical every time. Returns
+    None when no evt config files are found.
+    """
+    possible_dirs = ["tier_evt", "tier/evt"]
+    file_pattern = "*-all-evt_config.yaml"
+    evt_config = None
+    subdir = possible_dirs[-1]
+
+    for subdir in possible_dirs:
+        filepath_pattern = str(
+            Path(path) / version / "inputs/dataprod/config" / subdir / file_pattern
+        )
+        files = glob.glob(filepath_pattern)
+        if files:
+            with open(files[0]) as file:
+                evt_config = yaml.load(file, Loader=yaml.CLoader)
+            break
+
+    if evt_config is None:
+        return None
+
+    try:
+        expression = evt_config["operations"]["_geds___quality___is_bb_like"][
+            "expression"
+        ]
+    except KeyError:
+        filepath_pattern = str(
+            Path(path)
+            / version
+            / "inputs/dataprod/config"
+            / subdir
+            / "*-geds_qc-evt_config.yaml"
+        )
+        filepath = glob.glob(filepath_pattern)[0]
+        with open(filepath) as file:
+            evt_config = yaml.load(file, Loader=yaml.CLoader)
+        expression = evt_config["operations"]["geds___quality___is_bb_like"][
+            "expression"
+        ]
+
+    try:
+        expression = evt_config["operations"][
+            "geds___quality___is_not_bb_like___is_delayed_discharge"
+        ]["expression"]
+    except KeyError:
+        filepath_pattern = str(
+            Path(path)
+            / version
+            / "inputs/dataprod/config"
+            / subdir
+            / "*-geds_qc-evt_config.yaml"
+        )
+        filepath = glob.glob(filepath_pattern)[0]
+        with open(filepath) as file:
+            evt_config = yaml.load(file, Loader=yaml.CLoader)
+        expression = evt_config["operations"][
+            "geds___quality___is_not_bb_like___is_delayed_discharge"
+        ]["expression"]
+
+    # extract key-value pairs like: hit.is_something == number
+    matches = re.findall(r"hit\.(\w+)\s*==\s*(\d+)", expression)
+    return {key: int(value) for key, value in matches}
 
 
 def get_seconds(time_window: str):
@@ -723,12 +744,22 @@ def get_seconds(time_window: str):
     >>> get_seconds('30T')
     1800
     """
-    # correspondence of symbol to seconds, T = minutes
-    str_to_seconds = {"S": 1, "s": 1, "T": 60, "min": 60, "h": 60 * 60, "H": 60 * 60, "D": 24 * 60 * 60, "d": 24 * 60 * 60}
-    # unit of this time window
-    time_unit = time_window[-1]
+    # correspondence of symbol to seconds; both the legacy pandas aliases
+    # (S/T/H) and the pandas>=3 ones (s/min/h) are accepted
+    str_to_seconds = {
+        "S": 1,
+        "s": 1,
+        "T": 60,
+        "min": 60,
+        "H": 60 * 60,
+        "h": 60 * 60,
+        "D": 24 * 60 * 60,
+        "d": 24 * 60 * 60,
+    }
+    number = time_window.rstrip("".join(set("".join(str_to_seconds))))
+    time_unit = time_window[len(number) :]
 
-    return int(time_window.rstrip(time_unit)) * str_to_seconds[time_unit]
+    return int(number) * str_to_seconds[time_unit]
 
 
 def cut_dataframe(df: pd.DataFrame, fraction: float = 0.1) -> pd.DataFrame:
@@ -794,17 +825,27 @@ def get_aux_df(
         ) or param in utils.SPECIAL_PARAMETERS.keys():
             return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
+        # the aux merge is skipped when the aux channel does not provide the
+        # parameter in this production (see Subsystem.include_aux)
+        if f"{param}_{aux_ch}" not in df.columns:
+            utils.logger.warning(
+                "\033[93mNo %s aux columns for '%s' in the loaded data; "
+                "skipping the aux abs/ratio/diff objects.\033[0m",
+                aux_ch,
+                param,
+            )
+            return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+
         # get abs/mean/% variation for data of aux channel --> objects to save
         utils.logger.debug(f"Getting {aux_ch} data for {param}")
-        aux_data = df.copy()
-        aux_data[param] = aux_data[f"{param}_{aux_ch}"]
-        aux_data = aux_data.drop(
+        aux_data = df.drop(
             columns=[
                 f"{param}_{aux_ch}Ratio",
                 f"{param}_{aux_ch}",
                 f"{param}_{aux_ch}Diff",
             ]
         )
+        aux_data[param] = df[f"{param}_{aux_ch}"]
         # right now, we have the same values repeated for each ged channel
         # -> keep one and substytute with AUX channel ID
         # (only for this aux df, the others still maintain a relation with geds values)
@@ -812,13 +853,13 @@ def get_aux_df(
         first_ch = aux_data.iloc[0]["channel"]
         aux_data = aux_data[aux_data["channel"] == first_ch]
         first_timestamp = utils.unix_timestamp_to_string(
-            aux_data["datetime"].dt.to_pydatetime()[0].timestamp()
+            aux_data["datetime"].iloc[0].timestamp()
         )
         if aux_ch == "pulser01ana":
-            map_file = os.path.join(
-                plot_settings["path"],
-                plot_settings["version"],
-                "inputs/hardware/configuration/channelmaps",
+            map_file = str(
+                Path(plot_settings["path"])
+                / plot_settings["version"]
+                / "inputs/hardware/configuration/channelmaps"
             )
             chmap = TextDB(map_file).on(timestamp=first_timestamp)
 
@@ -835,15 +876,14 @@ def get_aux_df(
 
         # get abs/mean/% variation for ratio values with aux channel data --> objects to save
         utils.logger.debug(f"Getting ratio wrt {aux_ch} data for {param}")
-        aux_ratio_data = df.copy()
-        aux_ratio_data[param] = aux_ratio_data[f"{param}_{aux_ch}Ratio"]
-        aux_ratio_data = aux_ratio_data.drop(
+        aux_ratio_data = df.drop(
             columns=[
                 f"{param}_{aux_ch}Ratio",
                 f"{param}_{aux_ch}",
                 f"{param}_{aux_ch}Diff",
             ]
         )
+        aux_ratio_data[param] = df[f"{param}_{aux_ch}Ratio"]
 
         aux_ratio_analysis = AnalysisData(
             aux_ratio_data, selection=plot_settings, aux_info="pulser01anaRatio"
@@ -852,15 +892,14 @@ def get_aux_df(
 
         # get abs/mean/% variation for difference values with aux channel data --> objects to save
         utils.logger.debug(f"Getting difference wrt {aux_ch} data for {param}")
-        aux_diff_data = df.copy()
-        aux_diff_data[param] = aux_diff_data[f"{param}_{aux_ch}Diff"]
-        aux_diff_data = aux_diff_data.drop(
+        aux_diff_data = df.drop(
             columns=[
                 f"{param}_{aux_ch}Ratio",
                 f"{param}_{aux_ch}",
                 f"{param}_{aux_ch}Diff",
             ]
         )
+        aux_diff_data[param] = df[f"{param}_{aux_ch}Diff"]
         aux_diff_analysis = AnalysisData(
             aux_diff_data, selection=plot_settings, aux_info="pulser01anaDiff"
         )
@@ -882,13 +921,8 @@ def get_aux_df(
 def get_aux_info(df: pd.DataFrame, chmap: dict, aux_ch: str) -> pd.DataFrame:
     """Return a DataFrame with correct pulser AUX info."""
     df["channel"] = chmap.PULS01ANA.daq.rawid
-    df["HV_card"] = None
-    df["HV_channel"] = None
     df["cc4_channel"] = None
     df["cc4_id"] = None
-    df["daq_card"] = chmap.PULS01ANA.daq.card.id
-    df["daq_crate"] = chmap.PULS01ANA.daq.crate
-    df["det_type"] = None
     df["location"] = (
         utils.SPECIAL_SYSTEMS["pulser01ana"]
         if aux_ch == "PULS01ANA"
@@ -958,6 +992,7 @@ def load_subsystem_data(
             "locname": {
                 "geds": "string",
                 "spms": "fiber",
+                "pmts": "location",
                 "pulser": "puls",
                 "pulser01ana": "pulser01ana",
                 "FCbsln": "FC bsln",
@@ -986,7 +1021,7 @@ def load_subsystem_data(
         for param in plot_info["parameters"]:
             # plot info should contain final parameter to plot i.e. _var if var is asked
             # unit, label and limits are connected to original parameter name
-            param_orig = param.rstrip("_var")
+            param_orig = param.removesuffix("_var")
             plot_info["unit"][param] = None
             plot_info["label"][param] = param
             plot_info["limits"][param] = [None, None]
@@ -1025,3 +1060,9 @@ def load_subsystem_data(
             pd.DataFrame(),
             plot_info,
         )
+
+        # Drop this entry's frame before building the next one. Rebinding
+        # alone is too late: the new AnalysisData is fully constructed while
+        # the old name still points at the previous frame, so the two largest
+        # objects in the run (~1 GB each for the QC entries) coexist.
+        del data_analysis
