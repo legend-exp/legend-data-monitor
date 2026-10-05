@@ -868,7 +868,10 @@ def plot_per_barrel_and_position(
     labels["channel"] = labels.index
     labels["label"] = labels[
         ["position", "location", "fiber", "channel", "name"]
-    ].apply(lambda x: f"{x.iloc[0]}-{x.iloc[1]}-{x.iloc[2]}-ch{str(x.iloc[3]).zfill(3)}-{x.iloc[4]}", axis=1)
+    ].apply(
+        lambda x: f"{x.iloc[0]}-{x.iloc[1]}-{x.iloc[2]}-ch{str(x.iloc[3]).zfill(3)}-{x.iloc[4]}",
+        axis=1,
+    )
     # put it in the table
     data_analysis = data_analysis.set_index("channel")
     data_analysis["label"] = labels["label"]
