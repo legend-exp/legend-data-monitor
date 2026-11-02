@@ -221,8 +221,7 @@ def status_plot(subsystem, data_analysis: DataFrame, plot_info: dict, pdf: PdfPa
     x_axis_labels = [f"S{no}" for no in sorted(new_dataframe["location"].unique())]
     # POSITION:
     y_axis_labels = [
-        no
-        for no in range(
+        *range(
             min(new_dataframe["position"].unique()),
             max(new_dataframe["position"].unique() + 1),
         )
@@ -424,8 +423,7 @@ def exposure_plot(subsystem, data_analysis: DataFrame, plot_info: dict, pdf: Pdf
     x_axis_labels = [f"S{no}" for no in sorted(data_analysis["location"].unique())]
     # POSITION:
     y_axis_labels = [
-        no
-        for no in range(
+        *range(
             min(data_analysis["position"].unique()),
             max(data_analysis["position"].unique() + 1),
         )
