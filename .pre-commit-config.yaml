@@ -23,35 +23,35 @@ repos:
   - id: trailing-whitespace
 
 - repo: https://github.com/asottile/setup-cfg-fmt
-  rev: "v3.2.0"
+  rev: "v3.3.0"
   hooks:
   - id: setup-cfg-fmt
 
 - repo: https://github.com/PyCQA/isort
-  rev: "9.0.0b1"
+  rev: "10.0.0b2"
   hooks:
   - id: isort
 
 - repo: https://github.com/asottile/pyupgrade
-  rev: "v3.21.2"
+  rev: "v3.22.0"
   hooks:
   - id: pyupgrade
     args: ["--py38-plus"]
 
 - repo: https://github.com/psf/black-pre-commit-mirror
-  rev: "26.5.1"
+  rev: "26.10.1"
   hooks:
   - id: black-jupyter
 
 - repo: https://github.com/pre-commit/mirrors-mypy
-  rev: "v2.3.0"
+  rev: "v2.4.1"
   hooks:
     - id: mypy
       files: src
       stages: [manual]
 
 - repo: https://github.com/PyCQA/flake8
-  rev: "7.3.0"
+  rev: "7.5.0"
   hooks:
   - id: flake8
     additional_dependencies: [
@@ -84,7 +84,7 @@ repos:
     args: ["--ignore-words-list=livetimes"]
 
 - repo: https://github.com/shellcheck-py/shellcheck-py
-  rev: "v0.11.0.1"
+  rev: "v0.11.0.1-1"
   hooks:
   - id: shellcheck
 
