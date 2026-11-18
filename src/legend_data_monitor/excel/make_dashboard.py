@@ -709,9 +709,9 @@ def make_qcp_sheet(
                         fill_hex, display = WHITE, None
                         failed = []
                     else:
-                        det_qcp = (
-                            qcp_data.get(period, {}).get(run) or {}
-                        ).get(ged_name) or {}
+                        det_qcp = (qcp_data.get(period, {}).get(run) or {}).get(
+                            ged_name
+                        ) or {}
 
                         result, failed = _qcp_result(det_qcp, run_type)
 
@@ -950,9 +950,9 @@ def _make_qcp_detail_sheet(
                         if is_off:
                             fill_hex, display = WHITE, None
                         else:
-                            det_qcp = (
-                                qcp_data.get(period, {}).get(run) or {}
-                            ).get(ged_name) or {}                            
+                            det_qcp = (qcp_data.get(period, {}).get(run) or {}).get(
+                                ged_name
+                            ) or {}
 
                             value = det_qcp.get(run_type_filter, {}).get(yaml_key)
 
