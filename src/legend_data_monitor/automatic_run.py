@@ -447,6 +447,35 @@ def summary_plots(
         zoom,
     )
 
+    # muon-veto PMT rate summary plot
+    if data_type == "phy":
+        monitoring.pmt_rate_summary(
+            auto_dir_path,
+            output_folder,
+            period,
+            current_run,
+            last_cycle,
+            data_type=data_type,
+            partition=partition,
+            save_pdf=save_pdf,
+        )
+        monitoring.pmt_rate_history(
+            output_folder, period, current_run, data_type=data_type, save_pdf=save_pdf
+        )
+        monitoring.pmt_cycle_history(
+            output_folder, period, current_run, data_type=data_type, save_pdf=save_pdf
+        )
+        monitoring.pmt_light_vs_multiplicity(
+            auto_dir_path,
+            output_folder,
+            period,
+            current_run,
+            last_cycle,
+            data_type=data_type,
+            partition=partition,
+            save_pdf=save_pdf,
+        )
+
     # load proper calibration (eg for lac/ssc/rdc data or back-dated calibs)
     tier = "pht" if partition is True else "hit"
     validity_file = os.path.join(auto_dir_path, "generated/par", tier, "validity.yaml")

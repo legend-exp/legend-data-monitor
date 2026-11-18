@@ -46,6 +46,44 @@ BlStd:
     - null
     - 50
 
+PmtRate:
+  plot_title: "PMT rate stability"
+  ylabel: "PMT rate [pulses/h]"
+  colors:
+    - dodgerblue
+    - b
+  percentage: false
+  title: "pmt_rate_stab"
+  limits:
+    - null
+    - null
+  # shifter thresholds: location median (median over the healthy PMTs of their
+  # median cycle rate in the last cycle_history_cycles cycles) ± threshold_sigma
+  # Poisson standard deviations of the rate in one cycle, sqrt(median / T),
+  # T = median cycle duration (~1 h: ~±47 % for floor / wall). Applied to the
+  # run means and to min / max of the cycles (red side). p14-p22: healthy PMTs
+  # outside only in 18 of 62 runs (flashers, disturbed cycles), none in
+  # p22-r012..r023
+  threshold_sigma: 5
+  # 'Flasher!' (red, next to the location name in the rate plots) if one cycle
+  # of a location exceeds this multiple of the run median of that location
+  burst_factor: 5
+  # number of runs shown in the PMT rate history plots
+  history_runs: 10
+  # number of cycles (~1 h, one week) shown in the PMT cycle history plot; the
+  # location reference of the thresholds is computed over the same cycles
+  cycle_history_cycles: 168
+
+PmtLightVsMultiplicity:
+  plot_title: "Muon veto light vs PMT multiplicity"
+  title: "pmt_light_vs_mult"
+  # x axis up to multiplicity 51, as in the muon-veto analysis plots
+  max_multiplicity: 51
+  # the cut lines are read from the 'is_muon' expression of the production muon
+  # evt config valid for the run; the is_muon line turns red if the flag and
+  # these cuts differ by more than this fraction of events
+  is_muon_tolerance: 0.01
+
 FEP_variation:
   plot_title: "Calibration gain stability at FEP (2615 keV)"
   ylabel: "FEP gain variation [keV]"

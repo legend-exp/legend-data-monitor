@@ -18,7 +18,10 @@ import numpy as np
 import pandas as pd
 import pytz
 import yaml
+from dbetto import TextDB
 from lgdo.lh5 import read_as
+from matplotlib.lines import Line2D
+from matplotlib.offsetbox import AnchoredOffsetbox, HPacker, TextArea, VPacker
 from matplotlib.patches import Patch
 
 from . import utils
@@ -364,7 +367,7 @@ def qc_and_evt_summary_plots(
             glob.glob(f"{auto_dir_path}/generated/tier/pet/phy/{period}/{run}/*.lh5")
         )
 
-    if not evt_files_phy: 
+    if not evt_files_phy:
         utils.logger.info("...no evt/pet data available, skip!")
         return
 
@@ -653,6 +656,18 @@ def box_summary_plot(
     data_type: str,
     save_pdf: bool,
     run_to_apply=None,
+    group_label: str = "String",
+    group_means: dict = None,
+    group_mean_label: str = "Mean rate",
+    group_limits: dict = None,
+    group_limits_label: str = None,
+    faded: set = None,
+    flagged: set = None,
+    red_points: set = None,
+    minmax_flags: dict = None,
+    group_alerts: dict = None,
+    missing: set = None,
+    notes: list = None,
 ):
     """
     Box plot summary for FEP gain variations for multiple detectors.
@@ -681,6 +696,35 @@ def box_summary_plot(
         If True, save the summary plot as a PDF.
     run_to_apply :
         Run to apply (eg see ssc data).
+    group_label : str
+        Prefix of the labels marking each group of channels (the 'string' entry
+        of det_info); default: 'String'. Use '' to show the group name only.
+    group_means : dict
+        Group ('string' entry of det_info) -> mean value, drawn as a line over
+        the channels of that group; default: None (no lines).
+    group_mean_label : str
+        Legend label of the group lines; default: 'Mean rate'.
+    group_limits : dict
+        Group -> (low, high) thresholds, drawn as dashed lines over each group
+        with the range outside shaded grey; default: None.
+    group_limits_label : str
+        Legend label of the threshold lines.
+    faded : set
+        Channels drawn transparent, names in grey (eg not in use); replaces
+        the red 'Usability: off' names.
+    flagged : set
+        Channels outside the thresholds: mean marker and name in red.
+    red_points : set
+        Further channels whose mean marker is red (name colour unchanged).
+    minmax_flags : dict
+        Channel name -> (low, high) booleans; the min (max) line is drawn red
+        if low (high) is True. Default: None (standard error bars).
+    group_alerts : dict
+        Group -> text written in red next to the group label (eg 'Flasher!').
+    missing : set
+        Channels without data that should have data, marked with a red cross.
+    notes : list
+        Extra lines for the legend title (eg bursts).
     """
     utils.logger.debug("...making summary box plots for %s", info["title"])
     detectors = det_info["detectors"]
@@ -716,6 +760,7 @@ def box_summary_plot(
                 "max": max_val,
                 "fwhm": fwhm,
                 "usability": meta_info.get("usability", None),
+                "died_in_run": meta_info.get("died_in_run", False),
             }
         )
 
@@ -745,46 +790,160 @@ def box_summary_plot(
             label=fwhm_label,
         )
 
-    ax.bar(
-        x,
-        2 * df["std"],  # total height = twice 1 std
-        bottom=df["mean"] - df["std"],  # center bar on mean
-        width=0.6,
-        color="skyblue",
-        alpha=0.7,
-        label="±1σ",
-    )
-
-    ax.scatter(x, df["mean"], color="black", zorder=3, label="Mean")
-
-    ax.errorbar(
-        x,
-        df["mean"],
-        yerr=[df["mean"] - df["min"], df["max"] - df["mean"]],
-        fmt="none",
-        ecolor="#0266c9" if info["title"] != "FEP_gain_stab" else "red",
-        capsize=4,
-        label="Min/Max",
-    )
+    is_faded = df["ged"].isin(faded or set()).to_numpy()
+    for sel, alpha in [(~is_faded, 1.0), (is_faded, 0.35)]:
+        if not sel.any():
+            continue
+        first = alpha == 1.0 or not (~is_faded).any()
+        ax.bar(
+            x[sel],
+            2 * df["std"][sel],  # total height = twice 1 std
+            bottom=(df["mean"] - df["std"])[sel],  # center bar on mean
+            width=0.6 if minmax_flags is None else 0.3,
+            color="skyblue",
+            alpha=0.7 * alpha,
+            zorder=2,
+            label="±1σ" if first else None,
+        )
+        red = (flagged or set()) | (red_points or set())
+        ax.scatter(
+            x[sel],
+            df["mean"][sel],
+            color=np.where(df["ged"].isin(red), "red", "black")[sel],
+            alpha=alpha,
+            zorder=4,
+            label="Mean" if first else None,
+        )
+        if minmax_flags is None:
+            ax.errorbar(
+                x[sel],
+                df["mean"][sel],
+                yerr=[(df["mean"] - df["min"])[sel], (df["max"] - df["mean"])[sel]],
+                fmt="none",
+                ecolor="#0266c9" if info["title"] != "FEP_gain_stab" else "red",
+                alpha=alpha,
+                capsize=4,
+                zorder=3,
+                label="Min/Max" if first else None,
+            )
+            continue
+        # min and max drawn separately, red on the side that is out
+        for k, end in enumerate([df["min"][sel], df["max"][sel]]):
+            colors = [
+                "red" if minmax_flags.get(n, (False, False))[k] else "#0266c9"
+                for n in df["ged"][sel]
+            ]
+            ax.vlines(
+                x[sel], df["mean"][sel], end, colors=colors, alpha=alpha, zorder=3
+            )
+            # caps as wide as the sigma bar
+            ax.hlines(
+                end, x[sel] - 0.15, x[sel] + 0.15, colors=colors, alpha=alpha, zorder=3
+            )
 
     ax.set_xticks(x)
     xtick_labels = ax.set_xticklabels(df["ged"], rotation=90)
     for i, label in enumerate(xtick_labels):
-        if df.iloc[i]["usability"] in ["off", "false", False]:
+        if faded is not None and df.iloc[i]["ged"] in faded:
+            label.set_color("gray")
+            label.set_alpha(0.6)
+        elif df.iloc[i]["usability"] in ["off", "false", False]:
             label.set_color("red")
+        if flagged and df.iloc[i]["ged"] in flagged:
+            label.set_color("red")
+        if any((minmax_flags or {}).get(df.iloc[i]["ged"], ())):
+            label.set_bbox(
+                dict(boxstyle="round,pad=0.2", fc="red", ec="none", alpha=0.3)
+            )
         if df.iloc[i]["usability"] in ["ac"]:
             label.set_color("darkorange")
+        if df.iloc[i]["died_in_run"]:
+            label.set_color("purple")
 
     ax.axvline(-0.5, color="gray", ls="--", alpha=0.5)
     ymin, ymax = ax.get_ylim()
     label_y = ymin * (ymax / ymin) ** 0.05 if ymin > 0 else -4
     label_y = label_y if info["title"] != "baseln_spike" else 1
+    label_va = "baseline"
+    is_pmt_rate = info["title"].startswith("pmt_rate_stab")
+    if is_pmt_rate:
+        # leave room above the data for the group labels
+        # scale to the means and thresholds, not to burst maxima
+        top = np.nanmax(list(df["mean"]) + [0])
+        if group_limits:
+            top = max(top, np.nanmax([v[1] for v in group_limits.values()] + [0]))
+        # full y range (bursts / flashers stay visible)
+        ymin, ymax = 0, 1.05 * max(ymax, top)
+        ax.set_ylim(ymin, ymax)
+        label_y, label_va = 0.98 * ymax, "top"
     unique_strings = df["string"].unique()
     for s in unique_strings:
         idx = df.index[df["string"] == s]
         left, right = idx.min(), idx.max()
         ax.axvline(right + 0.5, color="gray", ls="--", alpha=0.5)
-        ax.text(left, label_y, f"String {s}", rotation=90)
+        ax.text(
+            left - 0.45,
+            label_y,
+            f"{group_label} {s}".strip(),
+            rotation=90,
+            va=label_va,
+            ha="left",
+        )
+        if group_alerts and s in group_alerts:
+            ax.text(
+                left + 0.1,
+                label_y,
+                group_alerts[s],
+                color="red",
+                fontweight="bold",
+                ha="left",
+                va=label_va,
+                bbox=dict(boxstyle="round,pad=0.2", fc="white", ec="red", alpha=0.9),
+                zorder=10,
+            )
+        if group_means and np.isfinite(group_means.get(s, np.nan)):
+            mean = group_means[s]
+            ax.hlines(
+                mean,
+                left - 0.5,
+                right + 0.5,
+                colors="darkgreen",
+                linewidths=1,
+                label=group_mean_label if s == unique_strings[0] else None,
+            )
+            ax.text(
+                right + 0.45,
+                mean + 0.015 * (ax.get_ylim()[1] - ax.get_ylim()[0]),
+                f"{mean:.0f} /h",
+                rotation=90,
+                ha="right",
+                va="bottom",
+                color="darkgreen",
+            )
+            if group_limits and np.isfinite(group_limits.get(s, (np.nan,))[0]):
+                low, high = group_limits[s]
+                ax.hlines(
+                    [low, high],
+                    left - 0.5,
+                    right + 0.5,
+                    colors="black",
+                    linestyles="--",
+                    label=(group_limits_label if s == unique_strings[0] else None),
+                )
+                span = [left - 0.5, right + 0.5]
+                ax.fill_between(span, 0, low, color="gray", alpha=0.25, lw=0)
+                ax.fill_between(span, high, ymax, color="gray", alpha=0.25, lw=0)
+    for i, name in enumerate(df["ged"]):
+        if missing and name in missing:
+            ax.plot(
+                i,
+                0.02 * ax.get_ylim()[1],
+                "x",
+                color="red",
+                ms=10,
+                mew=2,
+                label="No data" if name == sorted(missing)[0] else None,
+            )
 
     ax.set_ylabel(info["ylabel"])
     ax.set_title(f"{info['plot_title']} - {period} - {run}")
@@ -821,10 +980,21 @@ def box_summary_plot(
     # Create custom legend entries for usability colors
     legend_patches = []
     handles, labels = ax.get_legend_handles_labels()
-    legend_patches.append(Patch(color="red", label="Usability: off"))
-    legend_patches.append(Patch(color="darkorange", label="Usability: ac"))
+    if faded is None:
+        legend_patches.append(Patch(color="red", label="Usability: off"))
+    # red marks (outside the thresholds) are self-explanatory: no legend entry
+    if minmax_flags is not None:
+        legend_patches.append(
+            Line2D([], [], color="#0266c9", marker="_", ms=8, label="Min/Max")
+        )
+    if not is_pmt_rate:
+        legend_patches.append(Patch(color="darkorange", label="Usability: ac"))
+        if df["died_in_run"].any():
+            legend_patches.append(Patch(color="purple", label="Dropped out during run"))
     all_handles = handles + legend_patches
     plot_title = f"Last cycle: {last_cycle}" if last_cycle is not None else None
+    if notes:
+        plot_title = "\n".join(([plot_title] if plot_title else []) + list(notes))
     ax.legend(handles=all_handles, loc="upper right", title=plot_title)
     ax.grid(False)
     plt.tight_layout()
@@ -855,6 +1025,1421 @@ def box_summary_plot(
         shelf[f"{period}_{run}_{info['title']}"] = serialized_plot
 
     plt.close()
+
+
+def get_pmt_counts(files: list, pmts: dict):
+    """
+    Count, for each PMT, the muon-DAQ events with a pulse in each cycle file.
+
+    Parameters
+    ----------
+    files : list
+        Sorted list of hit-tier LH5 files (one per DAQ cycle).
+    pmts : dict
+        PMT infos as returned by utils.build_pmt_info()["detectors"].
+
+    Returns
+    -------
+    counts : dict
+        PMT name -> array (one entry per file) with the number of events with
+        containsPulse == 1; NaN where the PMT is missing from a file.
+    durations : np.ndarray
+        Duration of each file in seconds (first to last muon-DAQ event); NaN if
+        it cannot be determined.
+    """
+    counts = {name: np.full(len(files), np.nan) for name in pmts}
+    durations = np.full(len(files), np.nan)
+
+    for idx, file in enumerate(files):
+        available = set(lh5.ls(file))
+        for name, info in pmts.items():
+            ch = info["channel_str"]
+            if ch not in available:
+                continue
+            group = lh5.ls(file, f"{ch}/")[0]
+            tbl = lh5.read(group, file, field_mask=["containsPulse", "timestamp"])
+            counts[name][idx] = np.count_nonzero(tbl["containsPulse"].nda == 1)
+            if np.isnan(durations[idx]) and len(tbl["timestamp"].nda) > 1:
+                timestamps = tbl["timestamp"].nda
+                durations[idx] = timestamps.max() - timestamps.min()
+
+    return counts, durations
+
+
+def is_pmt_dead_in_run(
+    counts,
+    durations,
+    min_cycles: int = 3,
+    max_fraction: float = 0.1,
+    min_expected_counts: float = 10,
+) -> bool:
+    """
+    Check whether a PMT stopped working during the run.
+
+    A PMT is flagged if, from some cycle until the end of the run (at least
+    ``min_cycles`` cycles), it sees at most ``max_fraction`` of the pulses
+    expected from its earlier rate. The earlier rate is the median of the
+    per-cycle rates over at least ``min_cycles`` cycles, so that single bursts
+    do not bias it. A dead PMT does not need to go to zero (dark counts).
+
+    Parameters
+    ----------
+    counts : array_like
+        Number of events with a pulse per cycle; NaN entries are ignored.
+    durations : array_like
+        Duration of each cycle in seconds.
+    min_cycles : int
+        Minimum number of cycles before and after the drop; default: 3.
+    max_fraction : float
+        Maximum fraction of the earlier rate after the drop; default: 0.1.
+    min_expected_counts : float
+        Minimum number of pulses expected after the drop from the earlier rate,
+        to avoid flagging low-rate PMTs by chance; default: 10.
+    """
+    counts = np.asarray(counts, dtype=float)
+    durations = np.asarray(durations, dtype=float)
+    ok = np.isfinite(counts) & np.isfinite(durations) & (durations > 0)
+    counts, durations = counts[ok], durations[ok]
+    rates = counts / durations
+
+    for k in range(min_cycles, len(counts) - min_cycles + 1):
+        rate_before = np.median(rates[:k])
+        expected = rate_before * durations[k:].sum()
+        if expected >= min_expected_counts and counts[k:].sum() <= (
+            max_fraction * expected
+        ):
+            return True
+
+    return False
+
+
+def compute_pmt_rates(counts: dict, durations, usable: list, min_fraction: float = 0.0):
+    """
+    Compute the per-cycle rate of each PMT and the reference rate of a set of PMTs.
+
+    Parameters
+    ----------
+    counts : dict
+        PMT name -> number of events with a pulse per cycle.
+    durations : array_like
+        Duration of each cycle in seconds.
+    usable : list
+        PMTs entering the reference rate.
+    min_fraction : float
+        Cycles shorter than this fraction of the median cycle duration are
+        left out of the per-cycle rates (their rate fluctuates strongly);
+        default: 0 (all cycles).
+
+    Returns
+    -------
+    rates : dict
+        PMT name -> array of rates in pulses per hour (valid cycles only), or
+        None if the PMT has no data.
+    reference_rate : float
+        Median over the ``usable`` PMTs of their median cycle rate, in pulses
+        per hour (NaN if no usable PMT has data). The median over the cycles is
+        robust against bursts (eg flashers), the median over the PMTs against a
+        single broken PMT that is not yet marked 'off'.
+    """
+    durations = np.asarray(durations, dtype=float)
+    valid = np.isfinite(durations) & (durations > 0)
+    shortest = min_fraction * np.median(durations[valid]) if valid.any() else 0
+
+    rates, medians = {}, []
+    for name, c in counts.items():
+        c = np.asarray(c, dtype=float)
+        ok = np.isfinite(c) & valid
+        if not ok.any():
+            rates[name] = None
+            continue
+        use = ok & (durations >= shortest)
+        rates[name] = c[use] / durations[use] * 3600
+        if name in usable and use.any():
+            medians.append(np.median(rates[name]))
+
+    reference_rate = float(np.median(medians)) if medians else np.nan
+
+    return rates, reference_rate
+
+
+def pmt_run_mean_rates(counts: dict, durations) -> dict:
+    """Run-mean rate of each PMT in pulses per hour (NaN without data)."""
+    durations = np.asarray(durations, dtype=float)
+    out = {}
+    for name, c in counts.items():
+        c = np.asarray(c, dtype=float)
+        ok = np.isfinite(c) & np.isfinite(durations) & (durations > 0)
+        out[name] = (
+            float(c[ok].sum() / durations[ok].sum() * 3600) if ok.any() else np.nan
+        )
+    return out
+
+
+def pmt_rate_limits(references: dict, durations, n_sigma: float) -> dict:
+    """
+    Thresholds of the PMT rates per location, in pulses per hour.
+
+    The range is the location median ± ``n_sigma`` Poisson standard deviations
+    of the rate in one cycle, sqrt(median / T) with T the median cycle
+    duration of the run (in hours).
+
+    Returns
+    -------
+    dict
+        Location -> (low, high); (NaN, NaN) if there is no reference.
+    """
+    durations = np.asarray(durations, dtype=float)
+    ok = np.isfinite(durations) & (durations > 0)
+    hours = np.median(durations[ok]) / 3600 if ok.any() else np.nan
+    limits = {}
+    for location, ref in references.items():
+        if ref > 0 and hours > 0:
+            half = n_sigma * np.sqrt(ref / hours)
+            limits[location] = (float(max(ref - half, 0.0)), float(ref + half))
+        else:
+            limits[location] = (np.nan, np.nan)
+    return limits
+
+
+def classify_pmt_rates(run_means: dict, pmts: dict, limits: dict) -> dict:
+    """
+    Shifter status of each PMT from its run-mean rate.
+
+    Parameters
+    ----------
+    run_means : dict
+        PMT name -> run-mean rate (pulses per hour, NaN without data).
+    pmts : dict
+        PMT infos with 'string' (location), 'usability' and 'died_in_run'.
+    limits : dict
+        Location -> (low, high) thresholds in pulses per hour (see
+        :func:`pmt_rate_limits`).
+
+    Returns
+    -------
+    dict
+        PMT name -> 'off' (usability not 'on'), 'no data', 'dropped out'
+        (during the run, see :func:`is_pmt_dead_in_run`), 'warning' (outside
+        the thresholds) or 'ok'.
+    """
+    status = {}
+    for name, info in pmts.items():
+        rate = run_means.get(name, np.nan)
+        low, high = limits.get(info["string"], (np.nan, np.nan))
+        if info.get("usability") != "on":
+            status[name] = "off"
+        elif not np.isfinite(rate):
+            status[name] = "no data"
+        elif info.get("died_in_run"):
+            status[name] = "dropped out"
+        elif rate < low or rate > high:
+            status[name] = "warning"
+        else:
+            status[name] = "ok"
+    return status
+
+
+def limits_label(n_sigma: float) -> str:
+    """Legend label of the PMT rate thresholds, eg '±5σ threshold'."""
+    return rf"$\pm${n_sigma:g}$\sigma$ threshold"
+
+
+def find_threshold_crossings(values, low, high) -> list:
+    """
+    Return the indices at which a series enters the range outside [low, high].
+
+    ``low`` and ``high`` are arrays (or scalars) of the same length as
+    ``values``; each index is the first point of a stretch outside the range
+    (also at the start of the series). NaN counts as inside.
+    """
+    values = np.asarray(values, dtype=float)
+    with np.errstate(invalid="ignore"):
+        out = (values < low) | (values > high)
+    return [j for j in range(len(values)) if out[j] and (j == 0 or not out[j - 1])]
+
+
+def find_cycle_outliers(
+    counts, durations, low: float, high: float, min_fraction: float = 0.5
+) -> tuple:
+    """
+    Check whether the rate of single cycles of a PMT is outside [low, high].
+
+    Only cycles of at least ``min_fraction`` of the median cycle duration are
+    checked, since the thresholds are computed for a cycle of median length.
+
+    Returns
+    -------
+    tuple
+        (low, high): True if a cycle is below / above the range.
+    """
+    counts = np.asarray(counts, dtype=float)
+    durations = np.asarray(durations, dtype=float)
+    ok = np.isfinite(counts) & np.isfinite(durations) & (durations > 0)
+    if not ok.any():
+        return False, False
+    ok &= durations >= min_fraction * np.median(durations[ok])
+    rates = counts[ok] / durations[ok] * 3600
+    return bool((rates < low).any()), bool((rates > high).any())
+
+
+def find_pmt_bursts(counts: dict, durations, pmts: dict, usable: list) -> dict:
+    """
+    Burst indicator per location: highest cycle / median cycle of the location.
+
+    The cycle rate of a location is the median over its ``usable`` PMTs.
+    Returns location -> ratio (NaN if not available).
+    """
+    durations = np.asarray(durations, dtype=float)
+    ok = np.isfinite(durations) & (durations > 0)
+    out = {}
+    for loc in sorted({info["string"] for info in pmts.values()}):
+        names = [n for n in usable if pmts[n]["string"] == loc]
+        if not names or not ok.any():
+            out[loc] = np.nan
+            continue
+        cyc = np.array([np.asarray(counts[n], dtype=float)[ok] for n in names])
+        cyc = np.nanmedian(cyc, axis=0) / durations[ok] * 3600
+        med = np.nanmedian(cyc)
+        out[loc] = float(np.nanmax(cyc) / med) if med > 0 else np.nan
+    return out
+
+
+def pmt_rates_file(output_folder: str, period: str, run: str, data_type: str) -> str:
+    """Path of the per-run YAML summary of the PMT rates."""
+    return os.path.join(
+        output_folder,
+        period,
+        run,
+        "mtg",
+        f"l200-{period}-{run}-{data_type}-pmt-rates.yaml",
+    )
+
+
+def pmt_window_references(
+    output_folder: str,
+    period: str,
+    run: str,
+    data_type: str,
+    rates: dict,
+    durations,
+    pmts: dict,
+    usable: list,
+) -> tuple:
+    """
+    Location reference rates over the last week of cycles.
+
+    The window is made of the cycles of the current run (``rates``, without
+    short cycles, and ``durations`` of all cycles) and, going back, of the
+    cycle rates stored in the summaries of the previous runs (see
+    :func:`pmt_rate_summary`), up to 'cycle_history_cycles' cycles. The
+    reference of a location is the median over its ``usable`` PMTs of their
+    median cycle rate in the window.
+
+    Returns
+    -------
+    references : dict
+        Location -> reference rate in pulses per hour (NaN if not available).
+    window_durations : np.ndarray
+        Durations of the cycles in the window, in seconds.
+    """
+    n_cycles = utils.MTG_PLOT_INFO["PmtRate"]["cycle_history_cycles"]
+    durations = np.asarray(durations, dtype=float)
+    valid = np.isfinite(durations) & (durations > 0)
+    if not valid.any():
+        return {pmt["string"]: np.nan for pmt in pmts.values()}, durations
+    window_durations = list(
+        durations[valid & (durations >= 0.5 * np.median(durations[valid]))]
+    )
+    window = {n: list(rates[n]) for n in usable if rates.get(n) is not None}
+    for f in reversed(pmt_rates_files(output_folder, period, run, data_type)):
+        need = n_cycles - len(window_durations)
+        if need <= 0:
+            break
+        with open(f) as fh:
+            summary = yaml.safe_load(fh)
+        if (summary["period"], summary["run"]) == (period, run):
+            continue  # an earlier update of the current run
+        if "cycles" not in summary:
+            break
+        m = len(summary["cycles"]["keys"])
+        take = min(need, m)
+        if take == 0:
+            continue
+        for n in window:
+            prev = summary["pmts"].get(n, {}).get("cycle_rates", [])
+            prev = prev if len(prev) == m else [np.nan] * m
+            window[n] = list(prev[m - take :]) + window[n]
+        window_durations = list(summary["cycles"]["durations"][m - take :]) + (
+            window_durations
+        )
+
+    references = {}
+    for location in sorted({pmt["string"] for pmt in pmts.values()}):
+        medians = [
+            np.nanmedian(window[n])
+            for n in window
+            if pmts[n]["string"] == location and np.isfinite(window[n]).any()
+        ]
+        references[location] = float(np.median(medians)) if medians else np.nan
+    return references, np.asarray(window_durations, dtype=float)
+
+
+def pmt_rate_summary(
+    auto_dir_path: str,
+    output_folder: str,
+    period: str,
+    run: str,
+    last_cycle: str,
+    data_type: str = "phy",
+    partition: bool = False,
+    save_pdf: bool = False,
+):
+    """
+    Summary box plot of the muon-veto PMT rates for a given run.
+
+    For each DAQ cycle, the rate of each PMT is the number of muon-DAQ events
+    with ``containsPulse == 1`` per hour. The plot shows, per PMT, mean, ±1σ and
+    min/max of this rate over the cycles, and for each PMT location (floor,
+    wall, pillbox) the median run-mean rate of its healthy PMTs (PMTs 'on' in
+    the metadata that do not drop out during the run, see
+    :func:`is_pmt_dead_in_run`) with the thresholds (see
+    :func:`pmt_rate_limits`), the range outside shaded grey. Run means outside
+    are red; min / max lines outside are red on that side, with the PMT name
+    on red. Only PMTs 'on' are shown (their number in the legend); PMTs
+    without data are marked with a red cross. Run means, cycle flags, bursts
+    (highest cycle / median cycle per location) and the thresholds are stored
+    in a YAML file
+    (see :func:`pmt_rates_file`) for :func:`pmt_rate_history`.
+
+    Parameters
+    ----------
+    auto_dir_path : str
+        Path to tmp-auto public data files (eg /data2/public/prodenv/prod-blind/tmp-auto).
+    output_folder : str
+        Path to output folder.
+    period : str
+        Period to inspect.
+    run : str
+        Run to inspect.
+    last_cycle : str
+        Last cycle of the inspect list; format: YYYYMMDDThhmmssZ.
+    data_type : str
+        Data type to load; default: 'phy'.
+    partition : bool
+        False if not partition data; default: False.
+    save_pdf : bool
+        True if you want to save pdf files too; default: False.
+
+    Returns
+    -------
+    dict or None
+        'rates' (PMT name -> array of rates per cycle, pulses per hour),
+        'status' (PMT name -> shifter status), 'references' (location ->
+        median rate) and 'bursts' (location -> burst indicator); None if no
+        data is found.
+    """
+    utils.logger.debug("...inspecting PMT rates")
+    tier = "pht" if partition is True else "hit"
+    files = sorted(
+        glob.glob(
+            os.path.join(
+                auto_dir_path, "generated/tier", tier, data_type, period, run, "*.lh5"
+            )
+        )
+    )
+    if not files:
+        utils.logger.debug(f"...no {tier} files for {period}-{run}, skip PMT rates")
+        return None
+
+    start_key = utils.get_start_key(auto_dir_path, data_type, period, run)
+    pmt_info = utils.build_pmt_info(
+        os.path.join(auto_dir_path, "inputs"), start_key=start_key
+    )
+    pmts = pmt_info["detectors"]
+    if not pmts:
+        utils.logger.debug("...no PMTs in the channel map, skip PMT rates")
+        return None
+
+    info = utils.MTG_PLOT_INFO["PmtRate"]
+    counts, durations = get_pmt_counts(files, pmts)
+    for name, pmt in pmts.items():
+        pmt["died_in_run"] = is_pmt_dead_in_run(counts[name], durations)
+    usable = [
+        name
+        for name, pmt in pmts.items()
+        if pmt["usability"] == "on" and not pmt["died_in_run"]
+    ]
+
+    # per-cycle rates without short cycles, as in the threshold check
+    results, _ = compute_pmt_rates(counts, durations, usable, min_fraction=0.5)
+    run_means = pmt_run_mean_rates(counts, durations)
+    # reference over the last week of cycles (this run and the stored ones
+    # before), so that it is stable at the start of a run and the same as in
+    # the cycle history
+    references, window_durations = pmt_window_references(
+        output_folder, period, run, data_type, results, durations, pmts, usable
+    )
+    for location, ref in references.items():
+        utils.logger.debug(f"...PMT median rate ({location}): {ref:.1f} /h")
+    n_sigma = info["threshold_sigma"]
+    limits = pmt_rate_limits(references, window_durations, n_sigma)
+    status = classify_pmt_rates(run_means, pmts, limits)
+    bursts = find_pmt_bursts(counts, durations, pmts, usable)
+    cycle_flags = {
+        n: find_cycle_outliers(counts[n], durations, *limits[pmt["string"]])
+        for n, pmt in pmts.items()
+        if pmt["usability"] == "on"
+    }
+    # run means outside, also of PMTs that dropped out
+    outside = {
+        n
+        for n, pmt in pmts.items()
+        if pmt["usability"] == "on"
+        and not limits[pmt["string"]][0] <= run_means[n] <= limits[pmt["string"]][1]
+        and np.isfinite(run_means[n])
+    }
+    # only PMTs in use are shown
+    active = {n for n, pmt in pmts.items() if pmt["usability"] == "on"}
+    notes = [f"Active PMTs: {len(active)}"]
+    # 'Flasher!' where one cycle exceeds burst_factor x the run median
+    alerts = {
+        loc: "Flasher!"
+        for loc, b in bursts.items()
+        if np.isfinite(b) and b > info["burst_factor"]
+    }
+    plot_options = dict(
+        group_label="",
+        group_means=references,
+        group_mean_label="Location median",
+        group_limits=limits,
+        group_limits_label=limits_label(n_sigma),
+        faded=set(),
+        flagged={n for n, s in status.items() if s == "warning"},
+        red_points=outside,
+        minmax_flags=cycle_flags,
+        group_alerts=alerts,
+        missing={n for n, s in status.items() if s == "no data"},
+        notes=notes,
+    )
+    shown = {n: r for n, r in results.items() if n in active}
+    args = (period, run, None, pmt_info, shown, last_cycle)
+    box_summary_plot(*args, info, output_folder, data_type, save_pdf, **plot_options)
+
+    # store the run means for the history plots, and the rates of the cycles
+    # (without short ones, as in the plot) for the cycle history
+    cycle_rates = {n: r for n, r in results.items() if r is not None}
+    valid = np.isfinite(durations) & (durations > 0)
+    long_cycles = valid & (durations >= 0.5 * np.median(durations[valid]))
+    keys = [os.path.basename(f).split("-")[4] for f in files]
+    if len(keys) != len(durations):
+        keys = [f"cycle{i:03d}" for i in range(len(durations))]
+    summary = {
+        "period": period,
+        "run": run,
+        "last_cycle": last_cycle,
+        "references": {k: float(v) for k, v in references.items()},
+        "threshold_sigma": n_sigma,
+        "limits": {k: [float(v[0]), float(v[1])] for k, v in limits.items()},
+        "cycles": {
+            "keys": [k for k, use in zip(keys, long_cycles) if use],
+            "durations": [float(d) for d in durations[long_cycles]],
+        },
+        "bursts": {k: float(v) for k, v in bursts.items()},
+        "pmts": {
+            n: {
+                "location": pmts[n]["string"],
+                "usability": pmts[n]["usability"],
+                "died_in_run": bool(pmts[n]["died_in_run"]),
+                "status": status[n],
+                "run_mean": float(run_means[n]),
+                "min": (
+                    float(np.min(cycle_rates[n])) if n in cycle_rates else float("nan")
+                ),
+                "max": (
+                    float(np.max(cycle_rates[n])) if n in cycle_rates else float("nan")
+                ),
+                "cycle_low": cycle_flags.get(n, (False, False))[0],
+                "cycle_high": cycle_flags.get(n, (False, False))[1],
+                "cycle_rates": (
+                    [
+                        float(c / d * 3600)
+                        for c, d in zip(
+                            np.asarray(counts[n], dtype=float)[long_cycles],
+                            durations[long_cycles],
+                        )
+                    ]
+                    if pmts[n]["usability"] == "on"
+                    else []
+                ),
+            }
+            for n in sorted(pmts)
+        },
+    }
+    out_file = pmt_rates_file(output_folder, period, run, data_type)
+    os.makedirs(os.path.dirname(out_file), exist_ok=True)
+    with open(out_file, "w") as f:
+        yaml.safe_dump(summary, f, sort_keys=False)
+
+    return {
+        "rates": results,
+        "status": status,
+        "references": references,
+        "bursts": bursts,
+    }
+
+
+def location_box(location: str) -> dict:
+    """Title box of a PMT location (muted colour, black text) in the per-PMT plots."""
+    colors = {"Floor": "#4a7c59", "Pillbox": "#8c6d46", "Wall": "#6a5a8c"}
+    return dict(
+        boxstyle="round,pad=0.2",
+        fc=colors.get(location, "#5f7f8c"),
+        ec="none",
+        alpha=0.3,
+    )
+
+
+def pmt_rates_files(output_folder: str, period: str, run: str, data_type: str):
+    """Per-run PMT rate summaries up to and including ``period``-``run``, sorted."""
+
+    def run_key(path):
+        p, r = os.path.basename(path).split("-")[1:3]
+        return int(p.lstrip("p")), int(r.lstrip("r"))
+
+    pattern = os.path.join(
+        output_folder, "p*", "r*", "mtg", f"l200-p*-r*-{data_type}-pmt-rates.yaml"
+    )
+    current = (int(period.lstrip("p")), int(run.lstrip("r")))
+    return sorted((f for f in glob.glob(pattern) if run_key(f) <= current), key=run_key)
+
+
+def load_pmt_rate_history(
+    output_folder: str, period: str, run: str, data_type: str, n_runs: int
+) -> list:
+    """
+    Per-run PMT rate summaries (see :func:`pmt_rate_summary`) of the last runs.
+
+    Returns the summaries of the ``n_runs`` runs up to and including
+    ``period``-``run``, in chronological order.
+    """
+    out = []
+    for f in pmt_rates_files(output_folder, period, run, data_type)[-n_runs:]:
+        with open(f) as fh:
+            out.append(yaml.safe_load(fh))
+    return out
+
+
+def pmt_rate_history(
+    output_folder: str,
+    period: str,
+    run: str,
+    data_type: str = "phy",
+    save_pdf: bool = False,
+):
+    """
+    Expert plots of the PMT run-mean rates over the last runs.
+
+    Two figures from the stored per-run summaries (see :func:`pmt_rate_summary`):
+    one panel per location with the run-mean rate of each PMT, the location
+    median and the thresholds (range outside shaded grey); and one panel per
+    PMT ('on' in the current run, common y axis per location) with run mean,
+    min / max over the cycles, the median of its own run means over the shown
+    runs and the thresholds around it (see :func:`pmt_rate_limits`). Run
+    means and min / max sides outside are marked red, in the first figure
+    with the PMT name where it leaves the range. PMTs are left out in runs in
+    which they are not 'on'.
+
+    Returns
+    -------
+    list or None
+        Names of the runs shown; None if there is no stored summary.
+    """
+    info = utils.MTG_PLOT_INFO["PmtRate"]
+    history = load_pmt_rate_history(
+        output_folder, period, run, data_type, info["history_runs"]
+    )
+    if not history:
+        utils.logger.debug("...no PMT rate summaries, skip PMT rate history")
+        return None
+    labels = [f"{h['period']}-{h['run']}" for h in history]
+    x = np.arange(len(history))
+    locations = sorted({p["location"] for h in history for p in h["pmts"].values()})
+    names = sorted(
+        {n for h in history for n, p in h["pmts"].items() if p["usability"] == "on"}
+    )
+
+    def series(name, field):
+        return np.array(
+            [
+                (
+                    h["pmts"][name].get(field, np.nan)
+                    if name in h["pmts"] and h["pmts"][name]["usability"] == "on"
+                    else np.nan
+                )
+                for h in history
+            ],
+            dtype=float,
+        )
+
+    def ref(location):
+        return np.array(
+            [h["references"].get(location, np.nan) for h in history], dtype=float
+        )
+
+    def label_runs(ax):
+        ax.set_xticks(x)
+        ax.set_xticklabels(labels, rotation=90)
+        ax.tick_params(labelbottom=True)
+
+    def limit(location, k):
+        # stored per run: location median ± threshold_sigma Poisson sigma
+        return np.array(
+            [h.get("limits", {}).get(location, [np.nan, np.nan])[k] for h in history],
+            dtype=float,
+        )
+
+    threshold_label = limits_label(history[-1].get("threshold_sigma", np.nan))
+
+    # red is reserved for runs outside the thresholds
+    red_box = dict(boxstyle="round,pad=0.2", fc="red", ec="none", alpha=0.3)
+    palette = [c for k, c in enumerate(plt.get_cmap("tab20").colors) if k not in (6, 7)]
+
+    def nanmax(arrays, default=1.0):
+        values = np.concatenate([np.ravel(v) for v in arrays] + [[np.nan]])
+        return np.nanmax(values) if np.isfinite(values).any() else default
+
+    def shade(ax, low, high, top):
+        # extend to the plot edges
+        xe = np.r_[x[0] - 0.5, x, x[-1] + 0.5]
+        lo, hi = np.r_[low[:1], low, low[-1:]], np.r_[high[:1], high, high[-1:]]
+        ax.fill_between(xe, 0, lo, color="gray", alpha=0.25, lw=0)
+        ax.fill_between(xe, hi, top, color="gray", alpha=0.25, lw=0)
+        ax.plot(xe, lo, "k--", lw=1, label=threshold_label)
+        ax.plot(xe, hi, "k--", lw=1)
+
+    def mark_outside(ax, values, low, high, ms):
+        with np.errstate(invalid="ignore"):
+            out = (values < low) | (values > high)
+        ax.plot(x[out], values[out], "o", ms=ms, color="red", zorder=5)
+        return out
+
+    figs = {}
+    fig, axs = plt.subplots(
+        len(locations), 1, figsize=(12, 4.5 * len(locations)), squeeze=False
+    )
+    for ax, location in zip(axs[:, 0], locations):
+        members = [
+            n
+            for n in names
+            if any(h["pmts"].get(n, {}).get("location") == location for h in history)
+        ]
+        median = ref(location)
+        low, high = limit(location, 0), limit(location, 1)
+        means = {n: series(n, "run_mean") for n in members}
+        top = 1.15 * max(nanmax(means.values()), nanmax([high]))
+        shade(ax, low, high, top)
+        n_at = {}
+        for k, name in enumerate(members):
+            ax.plot(
+                x,
+                means[name],
+                "o-",
+                ms=3,
+                lw=1,
+                color=palette[k % len(palette)],
+                label=name,
+            )
+            mark_outside(ax, means[name], low, high, ms=5)
+            for j in find_threshold_crossings(means[name], low, high):
+                # name next to the point; several in the same run alternate
+                # right / left of it
+                k_at = n_at.get(j, 0)
+                n_at[j] = k_at + 1
+                side = 1 if k_at % 2 == 0 else -1
+                ax.annotate(
+                    name,
+                    (x[j], means[name][j]),
+                    xytext=(6 * side, 10 * (k_at // 2)),
+                    textcoords="offset points",
+                    ha="left" if side > 0 else "right",
+                    va="center",
+                    fontsize=plt.rcParams["legend.fontsize"],
+                    bbox=red_box,
+                    zorder=5,
+                )
+        ax.plot(x, median, "k-", lw=1.5, label="Location median")
+        ax.set_ylim(0, top)
+        ax.set_xlim(x[0] - 0.5, x[-1] + 0.5)
+        ax.set_ylabel(info["ylabel"])
+        ax.set_title(
+            f"{location} - PMT rate history - last {len(history)} runs up to {period} - {run}"
+        )
+        handles, _ = ax.get_legend_handles_labels()
+        ax.legend(handles=handles, ncol=6, loc="lower left")
+        label_runs(ax)
+    fig.tight_layout()
+    figs["pmt_rate_history"] = fig
+
+    # one panel per PMT 'on' in the current run, common y axis per location;
+    # reference = median of the PMT's own run means over the shown runs,
+    # thresholds ± threshold_sigma Poisson sigma of one cycle around it
+    current = history[-1]["pmts"]
+    alive = sorted(
+        (n for n, p in current.items() if p["usability"] == "on"),
+        key=lambda n: (current[n]["location"], n),
+    )
+    cycle_hours = [
+        np.median(h["cycles"]["durations"]) / 3600
+        for h in history
+        if h.get("cycles", {}).get("durations")
+    ]
+    hours = float(np.median(cycle_hours)) if cycle_hours else 1.0
+    own = {}
+    for name in alive:
+        m = np.nanmedian(series(name, "run_mean"))
+        own[name] = (m,) + pmt_rate_limits(
+            {0: m}, [hours * 3600], info["threshold_sigma"]
+        )[0]
+    tops = {}
+    for location in locations:
+        members = [n for n in alive if current[n]["location"] == location]
+        tops[location] = 1.15 * max(
+            nanmax([series(n, "run_mean") for n in members]),
+            nanmax([[own[n][2] for n in members]]),
+        )
+    ncol = 5
+    nrow = max(1, int(np.ceil(len(alive) / ncol)))
+    fig, axs = plt.subplots(nrow, ncol, figsize=(18, 3.6 * nrow), squeeze=False)
+    for ax, name in zip(axs.flat, alive):
+        location = current[name]["location"]
+        median, low, high = own[name]
+        mean = series(name, "run_mean")
+        shade(ax, np.full(len(x), low), np.full(len(x), high), tops[location])
+        # min / max of the cycles as in the rate plot, red on the side that is
+        # outside the thresholds
+        ends = [series(name, "min"), series(name, "max")]
+        with np.errstate(invalid="ignore"):
+            reds = [ends[0] < low, ends[1] > high]
+        for end, red in zip(ends, reds):
+            colors = np.where(red, "red", "#0266c9")
+            ax.vlines(x, mean, end, colors=colors, lw=1, zorder=3)
+            ax.scatter(x, end, marker="_", s=30, c=colors, zorder=3)
+        clipped = ends[1] > tops[location]
+        ax.scatter(
+            x[clipped],
+            np.full(clipped.sum(), 0.97 * tops[location]),
+            marker="^",
+            s=16,
+            c=np.where(reds[1][clipped], "red", "#0266c9"),
+            zorder=5,
+        )
+        ax.plot(x, mean, "o-", ms=3, color="k", lw=1, label="Run mean", zorder=4)
+        ax.axhline(median, color="dimgray", lw=1, label="PMT median")
+        out = mark_outside(ax, mean, low, high, ms=4)
+        # title marked if the PMT is outside the thresholds in the last run
+        last = out[-1] or reds[0][-1] or reds[1][-1]
+        ax.set_title(name, loc="left", bbox=red_box if last else None)
+        ax.set_title(location, loc="right", bbox=location_box(location))
+        ax.set_ylim(0, tops[location])
+        ax.set_xlim(x[0] - 0.5, x[-1] + 0.5)
+        ax.set_ylabel(info["ylabel"])
+        handles, _ = ax.get_legend_handles_labels()
+        handles.append(
+            Line2D([], [], color="#0266c9", marker="_", ms=6, label="Min/Max")
+        )
+        ax.legend(handles=handles, ncol=2, loc="lower left", fontsize=6)
+        label_runs(ax)
+    for ax in list(axs.flat)[len(alive) :]:
+        ax.axis("off")
+    fig.suptitle(
+        f"PMT rate history per PMT - last {len(history)} runs up to {period} - {run}"
+    )
+    fig.tight_layout(rect=(0, 0, 1, 1 - 0.4 / fig.get_figheight()))
+    figs["pmt_rate_history_per_pmt"] = fig
+
+    for title, fig in figs.items():
+        if save_pdf:
+            pdf_folder = os.path.join(output_folder, f"{period}/{run}/mtg/pdf")
+            os.makedirs(pdf_folder, exist_ok=True)
+            fig.savefig(
+                os.path.join(pdf_folder, f"{period}_{run}_{title}.pdf"),
+                bbox_inches="tight",
+            )
+        with shelve.open(
+            os.path.join(
+                output_folder,
+                period,
+                run,
+                f"mtg/l200-{period}-{run}-{data_type}-monitoring",
+            ),
+            "c",
+            protocol=pickle.HIGHEST_PROTOCOL,
+        ) as shelf:
+            shelf[f"{period}_{run}_{title}"] = pickle.dumps(fig)
+        plt.close(fig)
+
+    return labels
+
+
+def pmt_cycle_history(
+    output_folder: str,
+    period: str,
+    run: str,
+    data_type: str = "phy",
+    save_pdf: bool = False,
+):
+    """
+    Expert plot of the PMT rate per cycle over the last week, across runs.
+
+    One panel per PMT 'on' in the current run with the rate of each of the
+    last 'cycle_history_cycles' cycles (from the stored per-run summaries, see
+    :func:`pmt_rate_summary`; run boundaries as dotted lines), the median of
+    the PMT's own cycle rates over these cycles and the thresholds around it
+    (see :func:`pmt_rate_limits`). Cycles outside are red; the PMT name is on
+    red if the last cycle is outside.
+
+    Returns
+    -------
+    int or None
+        Number of cycles shown; None if there is no stored summary with
+        cycles.
+    """
+    info = utils.MTG_PLOT_INFO["PmtRate"]
+    n_cycles = info["cycle_history_cycles"]
+    blocks = []
+    total = 0
+    for f in reversed(pmt_rates_files(output_folder, period, run, data_type)):
+        with open(f) as fh:
+            summary = yaml.safe_load(fh)
+        if "cycles" not in summary:
+            break
+        blocks.insert(0, summary)
+        total += len(summary["cycles"]["keys"])
+        if total >= n_cycles:
+            break
+    if not blocks or not blocks[-1]["cycles"]["keys"]:
+        utils.logger.debug("...no PMT cycle rates, skip PMT cycle history")
+        return None
+
+    current = blocks[-1]["pmts"]
+    alive = sorted(
+        (n for n, p in current.items() if p["usability"] == "on"),
+        key=lambda n: (current[n]["location"], n),
+    )
+
+    def series(name, field):
+        out = []
+        for b in blocks:
+            m = len(b["cycles"]["keys"])
+            p = b["pmts"].get(name, {}) if name else {}
+            if field == "rate":
+                values = p.get("cycle_rates", []) if p.get("usability") == "on" else []
+                out.append(values if len(values) == m else [np.nan] * m)
+            else:
+                out.append(b["cycles"][field])
+        return np.concatenate([np.asarray(o, dtype=float) for o in out])[-n_cycles:]
+
+    keys = sum((b["cycles"]["keys"] for b in blocks), [])[-n_cycles:]
+    run_of = sum(
+        ([f"{b['period']}-{b['run']}"] * len(b["cycles"]["keys"]) for b in blocks), []
+    )[-n_cycles:]
+    x = np.arange(len(keys))
+    starts = [j for j in range(1, len(x)) if run_of[j] != run_of[j - 1]]
+    locations = sorted({current[n]["location"] for n in alive})
+    red_box = dict(boxstyle="round,pad=0.2", fc="red", ec="none", alpha=0.3)
+    ticks = x[::12]
+
+    # reference = median of the PMT's own cycle rates over the shown cycles,
+    # thresholds ± threshold_sigma Poisson sigma of one cycle around it
+    rates = {n: series(n, "rate") for n in alive}
+    durations = series(None, "durations")
+    references = {
+        n: float(np.nanmedian(r)) if np.isfinite(r).any() else np.nan
+        for n, r in rates.items()
+    }
+    limits = pmt_rate_limits(references, durations, info["threshold_sigma"])
+    tops = {}
+    for location in locations:
+        names = [n for n in alive if current[n]["location"] == location]
+        members = np.concatenate([rates[n] for n in names])
+        highs = [limits[n][1] for n in names if np.isfinite(limits[n][1])]
+        tops[location] = 1.15 * np.nanmax(
+            [np.nanpercentile(members, 99) if np.isfinite(members).any() else 0]
+            + (highs or [1])
+        )
+
+    ncol = 5
+    nrow = max(1, int(np.ceil(len(alive) / ncol)))
+    fig, axs = plt.subplots(nrow, ncol, figsize=(18, 3.6 * nrow), squeeze=False)
+    for ax, name in zip(axs.flat, alive):
+        location = current[name]["location"]
+        top = tops[location]
+        rate, median = rates[name], references[name]
+        low, high = limits[name]
+        ax.axhspan(0, low, color="gray", alpha=0.25, lw=0)
+        ax.axhspan(high, top, color="gray", alpha=0.25, lw=0)
+        ax.axhline(
+            low, color="k", ls="--", lw=1, label=limits_label(info["threshold_sigma"])
+        )
+        ax.axhline(high, color="k", ls="--", lw=1)
+        for j in starts:
+            ax.axvline(j - 0.5, color="dimgray", ls=":", lw=1)
+            ax.text(
+                j,
+                0.97 * top,
+                run_of[j].split("-")[1],
+                fontsize=6,
+                rotation=90,
+                ha="left",
+                va="top",
+                color="dimgray",
+            )
+        ax.plot(x, rate, "-", lw=0.8, color="k", label="Rate per cycle")
+        with np.errstate(invalid="ignore"):
+            out = (rate < low) | (rate > high)
+        ax.plot(x[out], rate[out], "o", ms=2.5, color="red", zorder=5)
+        ax.axhline(median, color="dimgray", lw=1, label="PMT median")
+        ax.set_title(name, loc="left", bbox=red_box if out[-1] else None)
+        ax.set_title(location, loc="right", bbox=location_box(location))
+        ax.set_xlim(x[0] - 0.5, x[-1] + 0.5)
+        ax.set_ylim(0, top)
+        ax.set_xticks(ticks)
+        ax.set_xticklabels(
+            [
+                f"{keys[j][4:6]}-{keys[j][6:8]} {keys[j][9:11]}:{keys[j][11:13]}"
+                for j in ticks
+            ],
+            rotation=90,
+        )
+        ax.tick_params(labelbottom=True)
+        ax.set_ylabel(info["ylabel"])
+        ax.legend(ncol=2, loc="lower left", fontsize=6)
+    for ax in list(axs.flat)[len(alive) :]:
+        ax.axis("off")
+    fig.suptitle(f"PMT rate per cycle - last {len(x)} cycles up to {period} - {run}")
+    fig.tight_layout(rect=(0, 0, 1, 1 - 0.4 / fig.get_figheight()))
+
+    title = "pmt_cycle_history_per_pmt"
+    if save_pdf:
+        pdf_folder = os.path.join(output_folder, f"{period}/{run}/mtg/pdf")
+        os.makedirs(pdf_folder, exist_ok=True)
+        fig.savefig(
+            os.path.join(pdf_folder, f"{period}_{run}_{title}.pdf"), bbox_inches="tight"
+        )
+    with shelve.open(
+        os.path.join(
+            output_folder,
+            period,
+            run,
+            f"mtg/l200-{period}-{run}-{data_type}-monitoring",
+        ),
+        "c",
+        protocol=pickle.HIGHEST_PROTOCOL,
+    ) as shelf:
+        shelf[f"{period}_{run}_{title}"] = pickle.dumps(fig)
+    plt.close(fig)
+
+    return len(x)
+
+
+def get_muon_evt_data(files: list) -> dict:
+    """
+    Load the muon-DAQ event table (``evt_muon``) of a list of evt-tier files.
+
+    Parameters
+    ----------
+    files : list
+        List of evt-tier LH5 files.
+
+    Returns
+    -------
+    dict
+        'multiplicity', 'energy_sum' and 'is_muon' arrays, one entry per
+        muon-DAQ event (empty arrays if no file has an evt_muon table), and
+        'duration', the summed time span of the files in seconds.
+    """
+    fields = ["multiplicity", "energy_sum", "is_muon"]
+    data = {field: [] for field in fields}
+    duration = 0.0
+    for file in files:
+        if "evt_muon" not in lh5.ls(file):
+            continue
+        tbl = lh5.read("evt_muon", file, field_mask=fields + ["timestamp"])
+        for field in fields:
+            data[field].append(tbl[field].nda)
+        timestamps = tbl["timestamp"].nda
+        if len(timestamps) > 1:
+            duration += timestamps.max() - timestamps.min()
+
+    data = {
+        field: np.concatenate(values) if values else np.array([])
+        for field, values in data.items()
+    }
+    data["duration"] = duration
+
+    return data
+
+
+def muon_cuts_from_config(config_path: str, timestamp: str) -> dict:
+    """
+    Multiplicity / light cuts of ``is_muon`` of the production config of a run.
+
+    Reads the muon evt config valid at ``timestamp`` (key format
+    YYYYMMDDThhmmssZ) from the dataflow config (eg <prodenv>/inputs/dataprod/
+    config) and parses its 'is_muon' expression of the form
+    ``((evt.multiplicity >= a) | (evt.energy_sum >= b)) &
+    ((evt.multiplicity >= c) | (evt.energy_sum <= d)) & ...``.
+
+    Returns
+    -------
+    dict or None
+        'low_multiplicity' ({'multiplicity': a, 'energy_sum': b}), 'flashing'
+        ({'multiplicity': c, 'energy_sum': d}) and 'expression'; None if no
+        'is_muon' is defined.
+    """
+    config = TextDB(config_path, lazy=True).on(timestamp, system="phy")
+    inputs = config["snakemake_rules"]["tier_evt"]["inputs"]
+    files = []
+    if "muon_config" in inputs:
+        files.append(inputs["muon_config"]["evt_config"])
+    evt = inputs.get("evt_config", [])
+    files += evt if isinstance(evt, list) else [evt]
+    for f in files:
+        with open(str(f).replace("$_", config_path)) as fh:
+            operations = (yaml.safe_load(fh) or {}).get("operations", {})
+        if "is_muon" not in operations:
+            continue
+        expression = " ".join(str(operations["is_muon"]["expression"]).split())
+        number = r"([0-9.]+)"
+        low = re.search(
+            rf"evt\.multiplicity\s*>=\s*{number}\s*\)\s*\|\s*\(\s*"
+            rf"evt\.energy_sum\s*>=\s*{number}",
+            expression,
+        )
+        flash = re.search(
+            rf"evt\.multiplicity\s*>=\s*{number}\s*\)\s*\|\s*\(\s*"
+            rf"evt\.energy_sum\s*<=\s*{number}",
+            expression,
+        )
+        if not (low and flash):
+            utils.logger.warning(f"...cannot parse is_muon cuts: {expression}")
+            return None
+        return {
+            "low_multiplicity": {
+                "multiplicity": float(low.group(1)),
+                "energy_sum": float(low.group(2)),
+            },
+            "flashing": {
+                "multiplicity": float(flash.group(1)),
+                "energy_sum": float(flash.group(2)),
+            },
+            "expression": expression,
+        }
+    return None
+
+
+def pe_per_unit(hit_file: str, max_channels: int = 10) -> float:
+    """
+    Return the number of p.e. per unit of ``pulseHeight_in_pe`` (and energy_sum).
+
+    The production multiplicity counts pulses in units of
+    ``pulseHeight_trigd`` (single p.e. at 1); where both fields exist, the
+    ratio trigd / in_pe of the pulses is the factor (2 for the
+    ``pulseHeight / 30`` scale of p18-p22). Without ``pulseHeight_trigd``
+    pulseHeight_in_pe is in p.e. (factor 1).
+    """
+    ratios = []
+    n_channels = 0
+    for ch in lh5.ls(hit_file):
+        group = lh5.ls(hit_file, f"{ch}/")
+        if not group:
+            continue
+        names = [f.split("/")[-1] for f in lh5.ls(hit_file, f"{group[0]}/")]
+        if "pulseHeight_in_pe" not in names:
+            continue  # not a PMT channel
+        if "pulseHeight_trigd" not in names:
+            return 1.0
+        tbl = lh5.read(
+            group[0], hit_file, field_mask=["pulseHeight_in_pe", "pulseHeight_trigd"]
+        )
+        in_pe = np.asarray(tbl["pulseHeight_in_pe"].nda, dtype=float)
+        trigd = np.asarray(tbl["pulseHeight_trigd"].nda, dtype=float)
+        use = in_pe > 0.1
+        ratios.extend(trigd[use] / in_pe[use])
+        n_channels += 1
+        if n_channels >= max_channels:
+            break
+    return float(np.round(np.median(ratios), 1)) if ratios else 1.0
+
+
+def apply_muon_cuts(multiplicity, energy_sum, cuts: dict):
+    """
+    Select muon-veto events with the multiplicity / light cuts of ``is_muon``.
+
+    Events are rejected if they are in the low-multiplicity bump (multiplicity
+    and light both below the 'low_multiplicity' values) or look like a flashing
+    PMT (multiplicity below and light above the 'flashing' values).
+
+    Parameters
+    ----------
+    multiplicity : array_like
+        PMT multiplicity per event.
+    energy_sum : array_like
+        Integral light per event (p.e.).
+    cuts : dict
+        'low_multiplicity' and 'flashing', each with 'multiplicity' and
+        'energy_sum' thresholds.
+    """
+    multiplicity = np.asarray(multiplicity)
+    energy_sum = np.asarray(energy_sum)
+    low, flash = cuts["low_multiplicity"], cuts["flashing"]
+
+    return (
+        (multiplicity >= low["multiplicity"]) | (energy_sum >= low["energy_sum"])
+    ) & ((multiplicity >= flash["multiplicity"]) | (energy_sum <= flash["energy_sum"]))
+
+
+# muon-veto plot colours (legendstyles AchatBlue / DeepCove, orange for is_muon)
+MV_BLUE, MV_ORANGE, MV_DARK = "#07A9FF", "#EE7733", "#1A2A5B"
+# font sizes of the muon-veto analysis plots (Analysis/MuonVeto/plotstyle.py)
+MV_FONTS = {
+    "font.size": 15,
+    "axes.labelsize": 16,
+    "xtick.labelsize": 14,
+    "ytick.labelsize": 14,
+    "legend.fontsize": 13,
+}
+
+
+def mv_style():
+    """Matplotlib style of the muon-veto analysis plots (legendstyles if available)."""
+    try:
+        import legendstyles
+
+        # 'default' first: drop the rcParams the monitoring sets globally
+        return ["default", legendstyles.LEGEND, MV_FONTS]
+    except ImportError:
+        utils.logger.debug("...legendstyles not available, default style")
+        return ["default", MV_FONTS]
+
+
+def mv_watermark(ax):
+    """LEGEND-200 watermark (no 'preliminary') if legendstyles is available."""
+    try:
+        import legendstyles
+    except ImportError:
+        return
+    legendstyles.legend_watermark(ax, logo_suffix="-200", approved=True)
+
+
+def pmt_light_vs_multiplicity(
+    auto_dir_path: str,
+    output_folder: str,
+    period: str,
+    run: str,
+    last_cycle: str,
+    data_type: str = "phy",
+    partition: bool = False,
+    save_pdf: bool = False,
+):
+    """
+    2D histogram of the muon-veto integral light vs PMT multiplicity for a run.
+
+    Light in p.e. (energy_sum x :func:`pe_per_unit`) with the cut lines of
+    the 'is_muon' expression of the production config valid for the run (see
+    :func:`muon_cuts_from_config`). A box at the lower right gives the number
+    and rate of all MV trigger events and of the events flagged 'is_muon'; the
+    'is_muon' line turns red if the flag differs from the cuts by more than
+    the 'is_muon_tolerance' fraction of events (broken flag).
+
+    Parameters
+    ----------
+    auto_dir_path : str
+        Path to tmp-auto public data files (eg /data2/public/prodenv/prod-blind/tmp-auto).
+    output_folder : str
+        Path to output folder.
+    period : str
+        Period to inspect.
+    run : str
+        Run to inspect.
+    last_cycle : str
+        Last cycle of the inspect list; format: YYYYMMDDThhmmssZ.
+    data_type : str
+        Data type to load; default: 'phy'.
+    partition : bool
+        False if not partition data; default: False.
+    save_pdf : bool
+        True if you want to save pdf files too; default: False.
+
+    Returns
+    -------
+    dict or None
+        Number of events, of events passing the cuts and of events flagged as
+        'is_muon', the cuts and the p.e. factor; None if no data is found.
+    """
+    utils.logger.debug("...inspecting muon-veto light vs multiplicity")
+    files = []
+    for tier in ["evt", "pet"]:
+        files = sorted(
+            glob.glob(
+                os.path.join(
+                    auto_dir_path,
+                    "generated/tier",
+                    tier,
+                    data_type,
+                    period,
+                    run,
+                    "*.lh5",
+                )
+            )
+        )
+        if files:
+            break
+    data = get_muon_evt_data(files)
+    multiplicity, energy_sum = data["multiplicity"], data["energy_sum"]
+    if len(multiplicity) == 0:
+        utils.logger.debug(f"...no evt_muon data for {period}-{run}, skip")
+        return None
+
+    info = utils.MTG_PLOT_INFO["PmtLightVsMultiplicity"]
+    start_key = utils.get_start_key(auto_dir_path, data_type, period, run)
+    cuts = muon_cuts_from_config(
+        os.path.join(auto_dir_path, "inputs", "dataprod", "config"), start_key
+    )
+    tier = "pht" if partition is True else "hit"
+    hit_files = sorted(
+        glob.glob(
+            os.path.join(
+                auto_dir_path, "generated/tier", tier, data_type, period, run, "*.lh5"
+            )
+        )
+    )
+    scale = pe_per_unit(hit_files[0]) if hit_files else 1.0
+    hours = data["duration"] / 3600
+    n_events = len(multiplicity)
+    n_is_muon = int(np.count_nonzero(data["is_muon"]))
+    passed = (
+        apply_muon_cuts(multiplicity, energy_sum, cuts) if cuts else np.zeros(0, bool)
+    )
+    summary = {
+        "events": n_events,
+        "passed_cuts": int(passed.sum()),
+        "is_muon": n_is_muon,
+        "cuts": cuts,
+        "pe_per_unit": scale,
+    }
+
+    with plt.style.context(mv_style()):
+        fig, ax = plt.subplots(figsize=(10, 6))
+        x_bins = np.arange(-0.5, info["max_multiplicity"] + 1.5)
+        y_bins = np.logspace(-0.5, 4.5, 101)
+        *_, image = ax.hist2d(
+            multiplicity,
+            np.clip(energy_sum * scale, y_bins[0], None),
+            bins=[x_bins, y_bins],
+            cmap="viridis",
+            norm=matplotlib.colors.LogNorm(),
+            cmin=1,
+        )
+        fig.colorbar(image, ax=ax, label="Counts")
+
+        # cut lines of the production config; multiplicity cuts lie between
+        # integer bins
+        if cuts:
+            low, flash = cuts["low_multiplicity"], cuts["flashing"]
+            x_low, x_flash = low["multiplicity"] - 0.5, flash["multiplicity"] - 0.5
+            ax.plot(
+                [x_bins[0], x_low, x_low],
+                [low["energy_sum"] * scale] * 2 + [y_bins[0]],
+                color=MV_ORANGE,
+                lw=2,
+                label="cut for low-multiplicity bump",
+            )
+            ax.plot(
+                [x_bins[0], x_flash, x_flash],
+                [flash["energy_sum"] * scale] * 2 + [y_bins[-1]],
+                color=MV_ORANGE,
+                lw=2,
+                ls=":",
+                label="cut for flashing PMTs",
+            )
+
+        # numbers and rates at the lower right, aligned in columns; the
+        # is_muon line turns red if the flag differs from the cuts
+        broken = bool(cuts) and (
+            abs(summary["passed_cuts"] - n_is_muon)
+            > info["is_muon_tolerance"] * n_events
+        )
+        rows = [
+            ("MV trigger events:", n_events, MV_BLUE),
+            (r"$\mathit{is\_muon}$ events:", n_is_muon, "red" if broken else MV_ORANGE),
+        ]
+        size = plt.rcParams["axes.labelsize"]
+        columns = [
+            [(label, c) for label, _, c in rows],
+            [(f"{n}", c) for _, n, c in rows],
+            [(f"({n / hours:.1f} /h)" if hours > 0 else "", c) for _, n, c in rows],
+        ]
+        box = HPacker(
+            children=[
+                VPacker(
+                    children=[
+                        TextArea(t, textprops={"color": c, "fontsize": size})
+                        for t, c in column
+                    ],
+                    align="right",
+                    pad=0,
+                    sep=4,
+                )
+                for column in columns
+            ],
+            align="baseline",
+            pad=0,
+            sep=6,
+        )
+        anchored = AnchoredOffsetbox(
+            loc="lower right", child=box, pad=0.4, borderpad=0.6, frameon=True
+        )
+        anchored.patch.set_boxstyle("round")
+        anchored.patch.set_alpha(0.8)
+        ax.add_artist(anchored)
+
+        ax.set_yscale("log")
+        ax.set_xlim(x_bins[0], x_bins[-1])
+        ax.set_ylim(y_bins[0], y_bins[-1])
+        ax.set_xlabel("PMT multiplicity")
+        ax.set_ylabel("Integral light / p.e.")
+        ax.legend(
+            loc="upper right",
+            title=f"{period} - {run}, last cycle {last_cycle}",
+            alignment="left",
+        )
+        mv_watermark(ax)
+
+        if save_pdf:
+            pdf_folder = os.path.join(output_folder, f"{period}/{run}/mtg/pdf")
+            os.makedirs(pdf_folder, exist_ok=True)
+            fig.savefig(
+                os.path.join(pdf_folder, f"{period}_{run}_{info['title']}.pdf"),
+                bbox_inches="tight",
+            )
+
+    # serialize+plot in a shelve object
+    with shelve.open(
+        os.path.join(
+            output_folder,
+            period,
+            run,
+            f"mtg/l200-{period}-{run}-{data_type}-monitoring",
+        ),
+        "c",
+        protocol=pickle.HIGHEST_PROTOCOL,
+    ) as shelf:
+        shelf[f"{period}_{run}_{info['title']}"] = pickle.dumps(fig)
+
+    plt.close(fig)
+
+    return summary
 
 
 def qc_average(
