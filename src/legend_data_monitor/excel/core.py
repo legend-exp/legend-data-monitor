@@ -58,7 +58,9 @@ def get_periods(key: str, datasets_path: Path) -> dict[str, list[tuple[str, str]
     return periods
 
 
-def get_geds(key: str, datasets_path: Path, cluster: str) -> dict[int, list[tuple[str, float]]]:
+def get_geds(
+    key: str, datasets_path: Path, cluster: str
+) -> dict[int, list[tuple[str, float]]]:
     runlists_path = os.path.join(datasets_path, "runlists.yaml")
     with open(runlists_path) as f:
         runlists = yaml.load(f, Loader=yaml.CLoader)
@@ -130,7 +132,9 @@ def get_runs_for_a_period(
     return {period: pairs}
 
 
-def generate_dashboard(auto_dir_path: str, period: str, output: str, cluster: str) -> None:
+def generate_dashboard(
+    auto_dir_path: str, period: str, output: str, cluster: str
+) -> None:
     """
     Generate the LEGEND usability dashboard for one period.
 
@@ -149,7 +153,10 @@ def generate_dashboard(auto_dir_path: str, period: str, output: str, cluster: st
 
     periods = get_runs_for_a_period(auto_dir_path, output, period)
     usability = get_usability_data(
-        strings_info, periods, Path(os.path.join(auto_dir_path, "inputs/datasets")), cluster,
+        strings_info,
+        periods,
+        Path(os.path.join(auto_dir_path, "inputs/datasets")),
+        cluster,
     )
 
     output_path = str(

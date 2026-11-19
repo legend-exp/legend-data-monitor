@@ -146,7 +146,7 @@ def add_summary_rows(
         cell.border = _border(left="medium", right="thin", top="thin", bottom="thin")
         work_sheet.merge_cells(start_row=row, start_column=1, end_row=row, end_column=4)
 
-    period_list = [period for period in periods]
+    period_list = [*periods]
 
     for period in period_list:
         for run_type, run in periods[period]:
@@ -709,9 +709,9 @@ def make_qcp_sheet(
                         fill_hex, display = WHITE, None
                         failed = []
                     else:
-                        det_qcp = (
-                            qcp_data.get(period, {}).get(run) or {}
-                        ).get(ged_name) or {}
+                        det_qcp = (qcp_data.get(period, {}).get(run) or {}).get(
+                            ged_name
+                        ) or {}
 
                         result, failed = _qcp_result(det_qcp, run_type)
 
@@ -950,9 +950,9 @@ def _make_qcp_detail_sheet(
                         if is_off:
                             fill_hex, display = WHITE, None
                         else:
-                            det_qcp = (
-                                qcp_data.get(period, {}).get(run) or {}
-                            ).get(ged_name) or {}                            
+                            det_qcp = (qcp_data.get(period, {}).get(run) or {}).get(
+                                ged_name
+                            ) or {}
 
                             value = det_qcp.get(run_type_filter, {}).get(yaml_key)
 
