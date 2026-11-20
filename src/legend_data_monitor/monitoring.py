@@ -2199,37 +2199,8 @@ def apply_muon_cuts(multiplicity, energy_sum, cuts: dict):
     ) & ((multiplicity >= flash["multiplicity"]) | (energy_sum <= flash["energy_sum"]))
 
 
-# muon-veto plot colours (legendstyles AchatBlue / DeepCove, orange for is_muon)
+# muon-veto plot colours (blue / dark blue, orange for is_muon)
 MV_BLUE, MV_ORANGE, MV_DARK = "#07A9FF", "#EE7733", "#1A2A5B"
-# font sizes of the muon-veto analysis plots (Analysis/MuonVeto/plotstyle.py)
-MV_FONTS = {
-    "font.size": 15,
-    "axes.labelsize": 16,
-    "xtick.labelsize": 14,
-    "ytick.labelsize": 14,
-    "legend.fontsize": 13,
-}
-
-
-def mv_style():
-    """Matplotlib style of the muon-veto analysis plots (legendstyles if available)."""
-    try:
-        import legendstyles
-
-        # 'default' first: drop the rcParams the monitoring sets globally
-        return ["default", legendstyles.LEGEND, MV_FONTS]
-    except ImportError:
-        utils.logger.debug("...legendstyles not available, default style")
-        return ["default", MV_FONTS]
-
-
-def mv_watermark(ax):
-    """LEGEND-200 watermark (no 'preliminary') if legendstyles is available."""
-    try:
-        import legendstyles
-    except ImportError:
-        return
-    legendstyles.legend_watermark(ax, logo_suffix="-200", approved=True)
 
 
 def pmt_light_vs_multiplicity(
@@ -2329,100 +2300,98 @@ def pmt_light_vs_multiplicity(
         "pe_per_unit": scale,
     }
 
-    with plt.style.context(mv_style()):
-        fig, ax = plt.subplots(figsize=(10, 6))
-        x_bins = np.arange(-0.5, info["max_multiplicity"] + 1.5)
-        y_bins = np.logspace(-0.5, 4.5, 101)
-        *_, image = ax.hist2d(
-            multiplicity,
-            np.clip(energy_sum * scale, y_bins[0], None),
-            bins=[x_bins, y_bins],
-            cmap="viridis",
-            norm=matplotlib.colors.LogNorm(),
-            cmin=1,
-        )
-        fig.colorbar(image, ax=ax, label="Counts")
+    fig, ax = plt.subplots(figsize=(10, 6))
+    x_bins = np.arange(-0.5, info["max_multiplicity"] + 1.5)
+    y_bins = np.logspace(-0.5, 4.5, 101)
+    *_, image = ax.hist2d(
+        multiplicity,
+        np.clip(energy_sum * scale, y_bins[0], None),
+        bins=[x_bins, y_bins],
+        cmap="viridis",
+        norm=matplotlib.colors.LogNorm(),
+        cmin=1,
+    )
+    fig.colorbar(image, ax=ax, label="Counts")
 
-        # cut lines of the production config; multiplicity cuts lie between
-        # integer bins
-        if cuts:
-            low, flash = cuts["low_multiplicity"], cuts["flashing"]
-            x_low, x_flash = low["multiplicity"] - 0.5, flash["multiplicity"] - 0.5
-            ax.plot(
-                [x_bins[0], x_low, x_low],
-                [low["energy_sum"] * scale] * 2 + [y_bins[0]],
-                color=MV_ORANGE,
-                lw=2,
-                label="cut for low-multiplicity bump",
+    # cut lines of the production config; multiplicity cuts lie between
+    # integer bins
+    if cuts:
+        low, flash = cuts["low_multiplicity"], cuts["flashing"]
+        x_low, x_flash = low["multiplicity"] - 0.5, flash["multiplicity"] - 0.5
+        ax.plot(
+            [x_bins[0], x_low, x_low],
+            [low["energy_sum"] * scale] * 2 + [y_bins[0]],
+            color=MV_ORANGE,
+            lw=2,
+            label="cut for low-multiplicity bump",
+        )
+        ax.plot(
+            [x_bins[0], x_flash, x_flash],
+            [flash["energy_sum"] * scale] * 2 + [y_bins[-1]],
+            color=MV_ORANGE,
+            lw=2,
+            ls=":",
+            label="cut for flashing PMTs",
+        )
+
+    # numbers and rates at the lower right, aligned in columns; the
+    # is_muon line turns red if the flag differs from the cuts
+    broken = bool(cuts) and (
+        abs(summary["passed_cuts"] - n_is_muon) > info["is_muon_tolerance"] * n_events
+    )
+    rows = [
+        ("MV trigger events:", n_events, MV_BLUE),
+        (r"$\mathit{is\_muon}$ events:", n_is_muon, "red" if broken else MV_ORANGE),
+    ]
+    size = plt.rcParams["axes.labelsize"]
+    columns = [
+        [(label, c) for label, _, c in rows],
+        [(f"{n}", c) for _, n, c in rows],
+        [(f"({n / hours:.1f} /h)" if hours > 0 else "", c) for _, n, c in rows],
+    ]
+    box = HPacker(
+        children=[
+            VPacker(
+                children=[
+                    TextArea(t, textprops={"color": c, "fontsize": size})
+                    for t, c in column
+                ],
+                align="right",
+                pad=0,
+                sep=4,
             )
-            ax.plot(
-                [x_bins[0], x_flash, x_flash],
-                [flash["energy_sum"] * scale] * 2 + [y_bins[-1]],
-                color=MV_ORANGE,
-                lw=2,
-                ls=":",
-                label="cut for flashing PMTs",
-            )
+            for column in columns
+        ],
+        align="baseline",
+        pad=0,
+        sep=6,
+    )
+    anchored = AnchoredOffsetbox(
+        loc="lower right", child=box, pad=0.4, borderpad=0.6, frameon=True
+    )
+    anchored.patch.set_boxstyle("round")
+    anchored.patch.set_alpha(0.8)
+    ax.add_artist(anchored)
 
-        # numbers and rates at the lower right, aligned in columns; the
-        # is_muon line turns red if the flag differs from the cuts
-        broken = bool(cuts) and (
-            abs(summary["passed_cuts"] - n_is_muon)
-            > info["is_muon_tolerance"] * n_events
-        )
-        rows = [
-            ("MV trigger events:", n_events, MV_BLUE),
-            (r"$\mathit{is\_muon}$ events:", n_is_muon, "red" if broken else MV_ORANGE),
-        ]
-        size = plt.rcParams["axes.labelsize"]
-        columns = [
-            [(label, c) for label, _, c in rows],
-            [(f"{n}", c) for _, n, c in rows],
-            [(f"({n / hours:.1f} /h)" if hours > 0 else "", c) for _, n, c in rows],
-        ]
-        box = HPacker(
-            children=[
-                VPacker(
-                    children=[
-                        TextArea(t, textprops={"color": c, "fontsize": size})
-                        for t, c in column
-                    ],
-                    align="right",
-                    pad=0,
-                    sep=4,
-                )
-                for column in columns
-            ],
-            align="baseline",
-            pad=0,
-            sep=6,
-        )
-        anchored = AnchoredOffsetbox(
-            loc="lower right", child=box, pad=0.4, borderpad=0.6, frameon=True
-        )
-        anchored.patch.set_boxstyle("round")
-        anchored.patch.set_alpha(0.8)
-        ax.add_artist(anchored)
+    ax.set_yscale("log")
+    ax.set_xlim(x_bins[0], x_bins[-1])
+    ax.set_ylim(y_bins[0], y_bins[-1])
+    ax.set_xlabel("PMT multiplicity")
+    ax.set_ylabel("Integral light / p.e.")
+    ax.legend(
+        loc="upper right",
+        title=f"{period} - {run}, last cycle {last_cycle}",
+        alignment="left",
+    )
+    fig.tight_layout()
 
-        ax.set_yscale("log")
-        ax.set_xlim(x_bins[0], x_bins[-1])
-        ax.set_ylim(y_bins[0], y_bins[-1])
-        ax.set_xlabel("PMT multiplicity")
-        ax.set_ylabel("Integral light / p.e.")
-        ax.legend(
-            loc="upper right",
-            title=f"{period} - {run}, last cycle {last_cycle}",
-            alignment="left",
+    if save_pdf:
+        pdf_folder = os.path.join(output_folder, f"{period}/{run}/mtg/pdf")
+        os.makedirs(pdf_folder, exist_ok=True)
+        fig.savefig(
+            os.path.join(pdf_folder, f"{period}_{run}_{info['title']}.pdf"),
+            bbox_inches="tight",
         )
-        mv_watermark(ax)
-
-        if save_pdf:
-            pdf_folder = os.path.join(output_folder, f"{period}/{run}/mtg/pdf")
-            os.makedirs(pdf_folder, exist_ok=True)
-            fig.savefig(
-                os.path.join(pdf_folder, f"{period}_{run}_{info['title']}.pdf"),
-                bbox_inches="tight",
-            )
 
     # serialize+plot in a shelve object
     with shelve.open(
