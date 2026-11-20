@@ -2146,6 +2146,55 @@ def build_detector_info(metadata_path, start_key=None):
     return {"detectors": detectors, "str_chns": dict(str_chns)}
 
 
+def build_pmt_info(metadata_path, start_key=None):
+    """
+    Build muon-veto PMT information from LEGEND metadata.
+
+    The output has the same layout as :func:`build_detector_info`, so that it
+    can be passed to :func:`monitoring.box_summary_plot`; the PMT location
+    (floor, wall, pillbox) takes the place of the germanium string.
+
+    Parameters
+    ----------
+    metadata_path : str
+        Path to the metadata file.
+    start_key : optional
+        Starting key for channelmap selection.
+
+    Returns
+    -------
+    dict
+        Dictionary with one main entry:
+        - "detectors": mapping from PMT name to different infos
+            - daq_rawid : int
+            - channel_str : str (e.g. "ch2001604")
+            - string : str (location, e.g. "Floor")
+            - position : int (PMT number, e.g. 101)
+            - processable : bool
+            - usability : str
+    """
+    lmeta = LegendMetadata(metadata_path)
+    chmap = lmeta.channelmap(start_key) if start_key else lmeta.channelmap()
+
+    pmts = {}
+    for name, info in chmap.items():
+        if info["system"] != "pmts" or info["name"] != name:
+            continue
+
+        rawid = info["daq"]["rawid"]
+        pmts[name] = {
+            "name": name,
+            "daq_rawid": rawid,
+            "channel_str": f"ch{rawid}",
+            "string": str(info.get("location", "unknown")).capitalize(),
+            "position": int(re.sub(r"\D", "", name) or 0),
+            "processable": info.get("analysis", {}).get("processable", False),
+            "usability": info.get("analysis", {}).get("usability", None),
+        }
+
+    return {"detectors": pmts}
+
+
 def build_detector_info_per_period(auto_dir_path: str, run_dict: dict, period: str):
     metadata_path = os.path.join(auto_dir_path, "inputs")
     lmeta = LegendMetadata(metadata_path)
